@@ -1,0 +1,209 @@
+﻿import { B } from './blocks';
+import { SURFACE_Y } from '../constants';
+
+export interface OreRule {
+  block: B;
+  /** veins per 1000 tiles of biome */
+  freq: number;
+  size: [number, number];
+}
+
+export interface BiomeDef {
+  id: number;
+  name: string;
+  top: number;
+  bottom: number;
+  tier: number;
+  base: B;
+  alt: B;
+  /** third rock used in occasional pockets */
+  pocket: B;
+  ores: OreRule[];
+  enemies: string[];
+  /** max enemies alive near the player */
+  enemyCap: number;
+  /** ambient tint for remembered (explored but unlit) tiles */
+  memory: [number, number, number];
+  /** fog colour behind open caverns */
+  sky: [string, string];
+  caveThreshold: number;
+  floorDecor: number[];
+  ceilDecor: number[];
+  bigDecor: number[];
+  bigCeilDecor: number[];
+  music: 'cave' | 'deep';
+  flavor: string;
+}
+
+// decor codes: <100 = 16px icon index, >=100 = 32px icon index + 100
+export const BIOMES: BiomeDef[] = [
+  {
+    id: 0,
+    name: 'Topsoil Tunnels',
+    top: SURFACE_Y,
+    bottom: 89,
+    tier: 1,
+    base: B.DIRT,
+    alt: B.STONE,
+    pocket: B.GRAVEL,
+    ores: [
+      { block: B.COAL, freq: 9, size: [3, 7] },
+      { block: B.COPPER, freq: 8, size: [3, 6] },
+      { block: B.FOSSIL, freq: 0.5, size: [1, 1] },
+    ],
+    enemies: ['bat', 'slime'],
+    enemyCap: 3,
+    memory: [0.09, 0.07, 0.06],
+    sky: ['#1a120c', '#0a0605'],
+    caveThreshold: 0.6,
+    floorDecor: [35, 38, 40, 41, 43, 48, 50, 52, 53],
+    ceilDecor: [36, 42, 42, 47],
+    bigDecor: [137, 142, 143, 144, 145, 152, 153],
+    bigCeilDecor: [138],
+    music: 'cave',
+    flavor: 'Old tunnels, older bones. Coal and copper for the taking.',
+  },
+  {
+    id: 1,
+    name: 'Mossroot Grotto',
+    top: 90,
+    bottom: 169,
+    tier: 2,
+    base: B.MOSS_STONE,
+    alt: B.GROTTO_ROCK,
+    pocket: B.CLAY,
+    ores: [
+      { block: B.IRON, freq: 8, size: [3, 6] },
+      { block: B.JADE, freq: 3.5, size: [2, 4] },
+      { block: B.COAL, freq: 3, size: [2, 5] },
+      { block: B.GLOWMOSS, freq: 3, size: [3, 8] },
+      { block: B.FOSSIL, freq: 0.35, size: [1, 1] },
+    ],
+    enemies: ['beetle', 'toad', 'bat'],
+    enemyCap: 5,
+    memory: [0.04, 0.09, 0.08],
+    sky: ['#0a1a18', '#030a09'],
+    caveThreshold: 0.56,
+    floorDecor: [37, 37, 38, 44, 50, 43],
+    ceilDecor: [42, 49, 49, 36],
+    bigDecor: [139, 139, 160, 152, 137],
+    bigCeilDecor: [159, 159, 138],
+    music: 'cave',
+    flavor: 'Damp, green and humming with spores. Iron sleeps under the moss.',
+  },
+  {
+    id: 2,
+    name: 'Crystal Hollows',
+    top: 170,
+    bottom: 259,
+    tier: 3,
+    base: B.CRYSTAL_ROCK,
+    alt: B.GEODE,
+    pocket: B.STONE,
+    ores: [
+      { block: B.SILVER, freq: 7, size: [3, 6] },
+      { block: B.AMETHYST, freq: 3.5, size: [2, 5] },
+      { block: B.IRON, freq: 2, size: [2, 4] },
+      { block: B.DIAMOND, freq: 0.18, size: [1, 2] },
+      { block: B.RELIC_STONE, freq: 0.2, size: [1, 1] },
+    ],
+    enemies: ['spider', 'wisp'],
+    enemyCap: 5,
+    memory: [0.08, 0.06, 0.12],
+    sky: ['#160c24', '#06030c'],
+    caveThreshold: 0.55,
+    floorDecor: [39, 39, 40, 44, 35],
+    ceilDecor: [36, 47, 39],
+    bigDecor: [140, 141, 140, 137, 156],
+    bigCeilDecor: [138],
+    music: 'cave',
+    flavor: 'Everything here glitters and something is always watching.',
+  },
+  {
+    id: 3,
+    name: 'Ember Depths',
+    top: 260,
+    bottom: 349,
+    tier: 4,
+    base: B.BASALT,
+    alt: B.MAGMA_ROCK,
+    pocket: B.OBSIDIAN,
+    ores: [
+      { block: B.GOLD, freq: 6, size: [3, 6] },
+      { block: B.RUBY, freq: 3, size: [2, 4] },
+      { block: B.SILVER, freq: 1.5, size: [2, 4] },
+      { block: B.DIAMOND, freq: 0.22, size: [1, 2] },
+      { block: B.RELIC_STONE, freq: 0.2, size: [1, 1] },
+    ],
+    enemies: ['imp', 'slug'],
+    enemyCap: 6,
+    memory: [0.12, 0.05, 0.03],
+    sky: ['#2a0c04', '#0c0301'],
+    caveThreshold: 0.57,
+    floorDecor: [45, 45, 46, 40, 41],
+    ceilDecor: [36, 36],
+    bigDecor: [157, 158, 157, 142],
+    bigCeilDecor: [138],
+    music: 'deep',
+    flavor: 'The rock breathes heat. Without a ward, it will cook you slowly.',
+  },
+  {
+    id: 4,
+    name: 'Sunless Vault',
+    top: 350,
+    bottom: 432,
+    tier: 5,
+    base: B.ABYSS_STONE,
+    alt: B.OBSIDIAN,
+    pocket: B.BASALT,
+    ores: [
+      { block: B.VOIDSTEEL, freq: 6, size: [3, 5] },
+      { block: B.LUMENITE, freq: 2.5, size: [1, 3] },
+      { block: B.GOLD, freq: 1.5, size: [2, 4] },
+      { block: B.DIAMOND, freq: 0.3, size: [1, 2] },
+      { block: B.RELIC_STONE, freq: 0.22, size: [1, 1] },
+    ],
+    enemies: ['wraith', 'sentinel'],
+    enemyCap: 6,
+    memory: [0.05, 0.04, 0.1],
+    sky: ['#0c0618', '#020106'],
+    caveThreshold: 0.58,
+    floorDecor: [53, 48, 54, 46, 41],
+    ceilDecor: [47, 36],
+    bigDecor: [154, 155, 156, 154, 163],
+    bigCeilDecor: [],
+    music: 'deep',
+    flavor: 'Halls built by no one living. The dark here eats lantern light.',
+  },
+  {
+    id: 5,
+    name: 'The Heart Chamber',
+    top: 433,
+    bottom: 459,
+    tier: 6,
+    base: B.HEARTSTONE,
+    alt: B.OBSIDIAN,
+    pocket: B.HEARTSTONE,
+    ores: [],
+    enemies: [],
+    enemyCap: 0,
+    memory: [0.12, 0.02, 0.05],
+    sky: ['#2a040c', '#0a0103'],
+    caveThreshold: 1,
+    floorDecor: [],
+    ceilDecor: [],
+    bigDecor: [],
+    bigCeilDecor: [],
+    music: 'deep',
+    flavor: 'Something vast is beating down here.',
+  },
+];
+
+export function biomeAt(row: number): BiomeDef {
+  for (let i = BIOMES.length - 1; i >= 0; i--) if (row >= BIOMES[i].top) return BIOMES[i];
+  return BIOMES[0];
+}
+
+/** Rows of the lift stations: index 0 is the surface camp. */
+export const LIFT_ROWS = [SURFACE_Y - 1, BIOMES[1].top + 7, BIOMES[2].top + 7, BIOMES[3].top + 7, BIOMES[4].top + 7];
+export const LIFT_NAMES = ['Deepwick Camp', 'Grotto Landing', 'Hollows Platform', 'Ember Station', 'Vault Gate'];

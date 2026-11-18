@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deepwick</title>
+    <link rel="icon" href="./assets/camp/headframe.png" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div class="hud-tl">
+        <div class="bar hp"><div class="fill" id="hpFill"></div><span id="hpText"></span><em>HP</em></div>
+        <div class="bar oil"><div class="fill" id="oilFill"></div><span id="oilText"></span><em>OIL</em></div>
+        <div class="chips">
+          <div class="chip coin"><img src="" data-icon="coin" alt="" /><span id="coins"></span></div>
+          <div class="chip pack"><img src="" data-icon="pack" alt="" /><span id="pack"></span></div>
+        </div>
+        <div id="skills"></div>
+      </div>
+      <div class="hud-tr">
+        <canvas id="minimap" width="168" height="120"></canvas>
+        <div class="where"><b id="depth"></b><span id="biome"></span></div>
+      </div>
+      <div id="hotbar"></div>
+      <div id="toasts"></div>
+      <div id="bossBar"><b>THE GLOAMHEART</b><div class="track"><div id="bossFill"></div></div></div>
+      <div class="hud-help">Tab character · M map · Esc menu</div>
+    </div>
+
+    <div id="panel" class="hidden"></div>
+
+    <div id="title">
+      <div class="title-art"></div>
+      <div class="title-box">
+        <h1>DEEPWICK</h1>
+        <p class="tag">Dig deep. Keep your lantern lit. Bring the light home.</p>
+        <div class="menu">
+          <button id="btnContinue" class="big">Continue</button>
+          <button id="btnNew" class="big">New Expedition</button>
+        </div>
+        <p class="foot">Mouse + keyboard · progress saves automatically</p>
+      </div>
+    </div>
+
+    <div id="intro">
+      <div class="intro-card">
+        <h2>The lanterns are going out.</h2>
+        <p>For a hundred years the mining town of Deepwick has lived on what the mountain gives: coal, copper, silver, the odd ruby. But something far below has started <em>drinking the light</em>. Lanterns gutter. Tunnels go cold. The old lift stations fell silent one by one.</p>
+        <p>Pell will buy what you dig up. Brannoc will turn it into better picks, brighter lanterns and boots that bounce. Wren wants every relic you can find and has a board full of bounties.</p>
+        <p>Somewhere under five layers of rock, the <b>Gloamheart</b> is beating. Grind your gear, restore the lifts, and go stop it.</p>
+        <button id="btnBegin" class="big">Grab your pick</button>
+      </div>
+    </div>
+
+    <div id="loading">
+      <h1>DEEPWICK</h1>
+      <div class="lbar"><div id="loadFill"></div></div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
