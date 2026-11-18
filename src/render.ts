@@ -1,46 +1,61 @@
 ﻿import { A, makeCanvas, iconSrc, decorIcon } from './assets';
-import { TILE, SURFACE_Y, TARGET_VIEW_H, SHAFT_X, CAMP_X0, CAMP_X1 } from './constants';
+import { TILE, TARGET_VIEW_H, SURFACE_Y } from './constants';
 import { BLOCKS, B } from './data/blocks';
 import { BIOMES } from './data/biomes';
-import { ITEMS, CONSUMABLES } from './data/items';
+import { ITEMS, IconRef } from './data/items';
 import { Obj } from './world/world';
-import { MINE_ENTRANCE_X, BOSS_CENTER } from './world/gen';
-import type { Game } from './game';
+import { BOSS_CENTER } from './world/gen';
+import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
+import { heldDef } from './state';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
+const TREE_SPRITES = ['oak', 'pine1', 'birch', 'pine2'];
 
-interface CampSprite {
-  key: string;
-  cx: number; // tile units
-  flip?: boolean;
+interface Ambient {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  color: string;
+  size: number;
+  grav: number;
+  drip: boolean;
 }
-const CAMP_BUILDINGS: CampSprite[] = [
-  { key: 'cabin', cx: 41.6 },
-  { key: 'shop', cx: 46.5 },
-  { key: 'headframe', cx: 56 },
-  { key: 'forge', cx: 61.2 },
-  { key: 'archive', cx: 66.6 },
-  { key: 'cabin', cx: 71, flip: true },
-];
-const NPCS: CampSprite[] = [
-  { key: 'npc_merchant', cx: 47.6 },
-  { key: 'npc_smith', cx: 59.6 },
-  { key: 'npc_archivist', cx: 65.2 },
-];
+
+const OBJ_ICON: Partial<Record<Obj, IconRef>> = {
+  [Obj.WORKBENCH]: { sheet: 'n32', idx: 15 },
+  [Obj.FURNACE]: { sheet: 'n32', idx: 16 },
+  [Obj.ANVIL]: { sheet: 'i32', idx: 51 },
+  [Obj.ALCHEMY]: { sheet: 'n32', idx: 18 },
+  [Obj.CAMPFIRE]: { sheet: 'i32', idx: 50 },
+  [Obj.STORAGE]: { sheet: 'i32', idx: 46 },
+  [Obj.CHEST]: { sheet: 'i32', idx: 46 },
+  [Obj.CHEST_OPEN]: { sheet: 'i32', idx: 47 },
+  [Obj.SAPLING]: { sheet: 'n32', idx: 20 },
+  [Obj.BUSH]: { sheet: 'n32', idx: 23 },
+  [Obj.BUSH_BERRY]: { sheet: 'n32', idx: 22 },
+};
 
 export class Renderer {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   scene: HTMLCanvasElement;
   sctx: CanvasRenderingContext2D;
-  glow: HTMLCanvasElement;
   scale = 2;
   dpr = 1;
   private backdrops: HTMLCanvasElement[] = [];
   private cracks: HTMLCanvasElement[] = [];
   private glowSprite: HTMLCanvasElement;
-  private skyTop = '#1b1426';
+  private vignette: HTMLCanvasElement | null = null;
+  private stars: { x: number; y: number; b: number }[] = [];
+  private amb: Ambient[] = [];
+  private lastT = 0;
+  /** sky art mirrored side by side so it tiles without a seam */
+  private skyDay: HTMLCanvasElement;
+  private skyDusk: HTMLCanvasElement;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -48,10 +63,12 @@ export class Renderer {
     if (!ctx) throw new Error('no ctx');
     this.ctx = ctx;
     [this.scene, this.sctx] = makeCanvas(640, 360);
-    [this.glow] = makeCanvas(64, 64);
     this.glowSprite = this.makeGlow();
     this.buildBackdrops();
     this.buildCracks();
+    this.skyDay = mirrored(A.bg.day);
+    this.skyDusk = mirrored(A.bg.surface);
+    for (let i = 0; i < 140; i++) this.stars.push({ x: Math.random() * 2000, y: Math.random() * 260, b: Math.random() });
   }
 
   private makeGlow(): HTMLCanvasElement {
@@ -70,15 +87,10 @@ export class Renderer {
       const img = A.bg['cave' + i];
       const [c, g] = makeCanvas(img.width * 2, img.height * 2);
       for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) g.drawImage(img, x * img.width, y * img.height);
-      g.fillStyle = 'rgba(6,4,10,0.45)';
+      g.fillStyle = 'rgba(6,4,10,0.4)';
       g.fillRect(0, 0, c.width, c.height);
       this.backdrops.push(c);
     }
-    // sample the top colour of the sky image
-    const [, sg] = makeCanvas(1, 1);
-    sg.drawImage(A.bg.surface, 0, 0, 1, 1, 0, 0, 1, 1);
-    const d = sg.getImageData(0, 0, 1, 1).data;
-    this.skyTop = `rgb(${d[0]},${d[1]},${d[2]})`;
   }
 
   private buildCracks(): void {
@@ -136,12 +148,12 @@ export class Renderer {
     this.vignette = vc;
   }
 
-  private vignette: HTMLCanvasElement | null = null;
-
   draw(g: Game): void {
     const ctx = this.sctx;
     const vw = this.scene.width;
     const vh = this.scene.height;
+    const dt = Math.min(0.05, Math.max(0, g.time - this.lastT));
+    this.lastT = g.time;
     let camX = Math.round(g.camX);
     let camY = Math.round(g.camY);
     if (g.shake > 0) {
@@ -151,11 +163,15 @@ export class Renderer {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
     this.drawSky(g, ctx, camX, camY, vw, vh);
-    this.drawTiles(g, ctx, camX, camY, vw, vh);
-    this.drawCamp(g, ctx, camX, camY);
-    this.drawObjects(g, ctx, camX, camY, vw, vh, false);
+    this.drawBack(g, ctx, camX, camY, vw, vh);
+    this.drawTrees(g, ctx, camX, camY, vw);
+    this.drawBuildings(g, ctx, camX, camY);
+    this.drawBlocks(g, ctx, camX, camY, vw, vh);
+    this.drawObjects(g, ctx, camX, camY, vw, vh);
+    this.drawNpcs(g, ctx, camX, camY);
     this.drawEntities(g, ctx, camX, camY);
-    this.drawObjects(g, ctx, camX, camY, vw, vh, true);
+    this.updateAmbient(g, dt, camX, camY, vw, vh);
+    this.drawGhost(g, ctx, camX, camY);
 
     // ---- lighting
     const L = g.light;
@@ -163,16 +179,14 @@ export class Renderer {
     ctx.globalCompositeOperation = 'multiply';
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(L.canvas, L.x0 * TILE - camX - TILE / 2 + TILE / 2, L.y0 * TILE - camY, L.w * TILE, L.h * TILE);
+    ctx.drawImage(L.canvas, L.x0 * TILE - camX, L.y0 * TILE - camY, L.w * TILE, L.h * TILE);
     ctx.restore();
     ctx.imageSmoothingEnabled = false;
 
-    // ---- additive glows
     this.drawGlows(g, ctx, camX, camY, vw, vh);
     if (this.vignette) ctx.drawImage(this.vignette, 0, 0);
     this.drawHover(g, ctx, camX, camY);
 
-    // vignette + gloom + fade
     if (g.gloom > 0) {
       ctx.fillStyle = `rgba(20,0,30,${Math.min(0.5, g.gloom * 0.25)})`;
       ctx.fillRect(0, 0, vw, vh);
@@ -182,12 +196,15 @@ export class Renderer {
       ctx.fillStyle = `rgba(160,0,0,${pl.hurtT * 0.8})`;
       ctx.fillRect(0, 0, vw, vh);
     }
+    if (g.p.food <= 0) {
+      ctx.fillStyle = `rgba(60,20,0,${0.12 + Math.sin(g.time * 3) * 0.05})`;
+      ctx.fillRect(0, 0, vw, vh);
+    }
     if (pl.dead) {
       ctx.fillStyle = `rgba(0,0,0,${Math.min(0.85, pl.deadT * 0.4)})`;
       ctx.fillRect(0, 0, vw, vh);
     }
 
-    // ---- present
     const out = this.ctx;
     out.imageSmoothingEnabled = false;
     out.drawImage(this.scene, 0, 0, vw * this.scale, vh * this.scale);
@@ -199,42 +216,78 @@ export class Renderer {
   }
 
   // ------------------------------------------------------------------ sky
-  private drawSky(_g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
-    ctx.fillStyle = this.skyTop;
-    ctx.fillRect(0, 0, vw, vh);
-    const img = A.bg.surface;
+  private drawSky(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
     const groundY = SURFACE_Y * TILE - camY;
-    if (groundY < -40) {
+    if (groundY < -160) {
       ctx.fillStyle = '#05040a';
       ctx.fillRect(0, 0, vw, vh);
       return;
     }
+    const c = g.p.clock;
+    const dl = daylight(c);
+    const dusk = c > 0.5 && c < 0.68 ? 1 - Math.abs(c - 0.59) / 0.09 : c < 0.07 ? 1 - c / 0.07 : c > 0.93 ? (c - 0.93) / 0.07 : 0;
+    // sky gradient behind the art
+    const top = mix([20, 22, 44], [92, 140, 205], (dl - 0.12) / 0.88);
+    ctx.fillStyle = `rgb(${top.join(',')})`;
+    ctx.fillRect(0, 0, vw, vh);
+    if (dl < 0.6) {
+      const a = (0.6 - dl) / 0.48;
+      for (const s of this.stars) {
+        const x = mod(s.x - camX * 0.05, vw + 40) - 20;
+        const y = s.y + (groundY - SURFACE_Y * TILE) * 0.02;
+        ctx.fillStyle = `rgba(255,255,240,${a * (0.4 + 0.6 * Math.abs(Math.sin(g.time * (0.5 + s.b) + s.x)))})`;
+        ctx.fillRect(Math.round(x), Math.round(y), s.b > 0.85 ? 2 : 1, s.b > 0.85 ? 2 : 1);
+      }
+    }
     const baseCam = SURFACE_Y * TILE - vh * 0.62;
-    const bottom = vh * 0.62 + 70 - (camY - baseCam) * 0.45;
-    const top = Math.round(bottom - img.height);
-    const ox = -(((camX * 0.15) % img.width) + img.width) % img.width;
-    for (let x = ox; x < vw; x += img.width) ctx.drawImage(img, Math.round(x), top);
-    // dark ground beneath the image
-    const imgBottom = top + img.height;
-    if (imgBottom < vh) {
-      ctx.fillStyle = '#05040a';
-      ctx.fillRect(0, imgBottom, vw, vh - imgBottom);
+    const draw = (img: HTMLCanvasElement, alpha: number): void => {
+      if (alpha <= 0.01) return;
+      const bottom = vh * 0.62 + 90 - (camY - baseCam) * 0.45;
+      const y0 = Math.round(bottom - img.height);
+      const ox = -(((camX * 0.15) % img.width) + img.width) % img.width;
+      ctx.globalAlpha = alpha;
+      for (let x = ox; x < vw; x += img.width) ctx.drawImage(img, Math.round(x), y0);
+      ctx.globalAlpha = 1;
+      const imgBottom = y0 + img.height;
+      if (imgBottom < vh) {
+        ctx.fillStyle = '#0c1a10';
+        ctx.fillRect(0, imgBottom, vw, vh - imgBottom);
+      }
+    };
+    // day art fades into the dusk art, then both darken into night
+    const dayA = Math.max(0, Math.min(1, (dl - 0.3) / 0.6)) * (1 - dusk * 0.8);
+    draw(this.skyDusk, Math.min(1, 1 - dayA + 0.001));
+    draw(this.skyDay, dayA);
+    if (dl < 1) {
+      ctx.fillStyle = `rgba(8,10,30,${(1 - dl) * 0.72})`;
+      ctx.fillRect(0, 0, vw, vh);
+    }
+    // the moon
+    if (isNight(c)) {
+      const t = (c - 0.6) / 0.36;
+      const mx = vw * (0.15 + t * 0.7);
+      const my = 70 - Math.sin(t * Math.PI) * 40;
+      this.glowAt(ctx, mx, my, 34, 'rgba(200,210,255,0.18)');
+      ctx.fillStyle = '#e8ecff';
+      ctx.beginPath();
+      ctx.arc(Math.round(mx), Math.round(my), 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(160,170,210,0.7)';
+      ctx.fillRect(Math.round(mx) - 3, Math.round(my) - 2, 3, 3);
+      ctx.fillRect(Math.round(mx) + 2, Math.round(my) + 3, 2, 2);
     }
   }
 
-  // ------------------------------------------------------------------ tiles
-  private drawTiles(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+  // ------------------------------------------------------------------ walls and cave backdrops
+  private drawBack(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
     const w = g.world;
     const tx0 = Math.max(0, Math.floor(camX / TILE));
     const ty0 = Math.max(0, Math.floor(camY / TILE));
     const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
     const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE));
     const L = g.light;
-    const t = g.time;
-    // backdrops + walls
     for (let ty = ty0; ty <= ty1; ty++) {
-      const bi = biomeIndexRow(ty);
-      const bd = this.backdrops[Math.min(4, bi)];
+      const bd = this.backdrops[Math.min(4, biomeIndexRow(ty))];
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = ty * w.w + tx;
         const fg = w.fg[i];
@@ -244,167 +297,85 @@ export class Renderer {
         const sy = ty * TILE - camY;
         const wall = w.wall[i];
         if (wall) ctx.drawImage(A.wallTex[wall], sx, sy);
-        else if (ty >= w.surface[tx]) {
+        else if (ty > w.surface[tx]) {
           const bw = bd.width / 2;
           const bh = bd.height / 2;
-          const srcX = mod(sx + camX * 0.5, bw);
-          const srcY = mod(sy + camY * 0.5, bh);
-          ctx.drawImage(bd, srcX, srcY, TILE, TILE, sx, sy, TILE, TILE);
+          ctx.drawImage(bd, mod(sx + camX * 0.5, bw), mod(sy + camY * 0.5, bh), TILE, TILE, sx, sy, TILE, TILE);
         } else continue;
-        // ambient occlusion where open space meets rock
-        const su = w.solid(tx, ty - 1);
-        const sl = w.solid(tx - 1, ty);
-        const sr = w.solid(tx + 1, ty);
-        const sd = w.solid(tx, ty + 1);
+        // soft shadow where open space meets rock
+        const su = w.rock(tx, ty - 1);
+        const sl = w.rock(tx - 1, ty);
+        const sr = w.rock(tx + 1, ty);
+        const sd = w.rock(tx, ty + 1);
         if (su || sl || sr || sd) {
-          ctx.fillStyle = 'rgba(0,0,0,0.28)';
-          if (su) ctx.fillRect(sx, sy, TILE, 6);
-          if (sl) ctx.fillRect(sx, sy, 5, TILE);
-          if (sr) ctx.fillRect(sx + TILE - 5, sy, 5, TILE);
+          ctx.fillStyle = 'rgba(0,0,0,0.26)';
+          if (su) ctx.fillRect(sx, sy, TILE, 7);
+          if (sl) ctx.fillRect(sx, sy, 6, TILE);
+          if (sr) ctx.fillRect(sx + TILE - 6, sy, 6, TILE);
+          ctx.fillStyle = 'rgba(0,0,0,0.16)';
+          if (su) ctx.fillRect(sx, sy + 7, TILE, 5);
+          if (sl) ctx.fillRect(sx + 6, sy, 4, TILE);
+          if (sr) ctx.fillRect(sx + TILE - 10, sy, 4, TILE);
           if (sd) ctx.fillRect(sx, sy + TILE - 3, TILE, 3);
-          ctx.fillStyle = 'rgba(0,0,0,0.22)';
-          if (su) ctx.fillRect(sx, sy + 6, TILE, 4);
-          if (sl) ctx.fillRect(sx + 5, sy, 3, TILE);
-          if (sr) ctx.fillRect(sx + TILE - 8, sy, 3, TILE);
         }
-      }
-    }
-    // solid blocks
-    for (let ty = ty0; ty <= ty1; ty++) {
-      for (let tx = tx0; tx <= tx1; tx++) {
-        const i = ty * w.w + tx;
-        const fg = w.fg[i];
-        if (fg === B.AIR) continue;
-        if (!w.explored[i] && L.at(tx, ty) < 0.004) continue;
-        const sx = tx * TILE - camX;
-        const sy = ty * TILE - camY;
-        const def = BLOCKS[fg];
-        if (def.liquid) {
-          // lava: scroll the texture and ripple the surface
-          const off = Math.floor(t * 6) % 16;
-          ctx.save();
-          ctx.beginPath();
-          const surfaceTop = w.get(tx, ty - 1) !== B.LAVA;
-          const rip = surfaceTop ? 6 + Math.round(Math.sin(t * 3 + tx) * 2) : 0;
-          ctx.rect(sx, sy + rip, TILE, TILE - rip);
-          ctx.clip();
-          ctx.drawImage(A.blockTex[fg], 0, 0, 32, 32, sx - off, sy, 32, 32);
-          ctx.drawImage(A.blockTex[fg], 0, 0, 32, 32, sx - off + 32, sy, 32, 32);
-          ctx.restore();
-          if (surfaceTop) {
-            ctx.fillStyle = '#ffe08a';
-            ctx.fillRect(sx, sy + rip, TILE, 2);
-          }
-          continue;
+        // a wall that ends against open cave gets a dark lip
+        if (wall) {
+          ctx.fillStyle = 'rgba(0,0,0,0.45)';
+          if (!w.wall[i - 1] && !w.rock(tx - 1, ty)) ctx.fillRect(sx, sy, 2, TILE);
+          if (!w.wall[i + 1] && !w.rock(tx + 1, ty)) ctx.fillRect(sx + TILE - 2, sy, 2, TILE);
+          if (ty > 0 && !w.wall[i - w.w] && !w.rock(tx, ty - 1)) ctx.fillRect(sx, sy, TILE, 2);
         }
-        ctx.drawImage(A.blockTex[fg], sx, sy);
-        // edges where the block meets open space
-        const up = !BLOCKS[w.get(tx, ty - 1)].solid;
-        const dn = !BLOCKS[w.get(tx, ty + 1)].solid;
-        const lf = !BLOCKS[w.get(tx - 1, ty)].solid;
-        const rt = !BLOCKS[w.get(tx + 1, ty)].solid;
-        if (up || dn || lf || rt) {
-          ctx.fillStyle = 'rgba(6,3,8,0.78)';
-          if (up) ctx.fillRect(sx, sy, TILE, 2);
-          if (dn) ctx.fillRect(sx, sy + TILE - 3, TILE, 3);
-          if (lf) ctx.fillRect(sx, sy, 2, TILE);
-          if (rt) ctx.fillRect(sx + TILE - 2, sy, 2, TILE);
-          ctx.fillStyle = 'rgba(255,240,215,0.22)';
-          if (up) ctx.fillRect(sx + (lf ? 2 : 0), sy + 2, TILE - (lf ? 2 : 0) - (rt ? 2 : 0), 2);
-          if (lf) ctx.fillRect(sx + 2, sy + 2, 1, TILE - 5);
-          ctx.fillStyle = 'rgba(0,0,0,0.22)';
-          if (dn) ctx.fillRect(sx, sy + TILE - 6, TILE, 3);
-          if (rt) ctx.fillRect(sx + TILE - 4, sy, 2, TILE);
-          // rounded outer corners
-          ctx.fillStyle = 'rgba(8,4,10,0.85)';
-          if (up && lf) ctx.fillRect(sx, sy, 3, 3);
-          if (up && rt) ctx.fillRect(sx + TILE - 3, sy, 3, 3);
-          if (dn && lf) ctx.fillRect(sx, sy + TILE - 3, 3, 3);
-          if (dn && rt) ctx.fillRect(sx + TILE - 3, sy + TILE - 3, 3, 3);
-        }
-        const dmg = w.damage.get(i);
-        if (dmg) {
-          const frac = 1 - dmg.hp / def.hp;
-          const stage = Math.min(3, Math.floor(frac * 4));
-          ctx.drawImage(this.cracks[stage], sx, sy);
-        }
-      }
-    }
-    // decor
-    for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) {
-      for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
-        if (!w.inside(tx, ty)) continue;
-        const i = ty * w.w + tx;
-        const dc = w.decor[i];
-        if (!dc) continue;
-        const ref = decorIcon(dc);
-        const src = iconSrc(ref);
-        const sx = tx * TILE - camX;
-        const sy = ty * TILE - camY;
-        const ceil = w.solid(tx, ty - 1) && !w.solid(tx, ty + 1);
-        const dx = sx + (TILE - src.size) / 2;
-        const dy = ceil ? sy : sy + TILE - src.size;
-        ctx.drawImage(src.img, src.sx, src.sy, src.size, src.size, Math.round(dx), Math.round(dy), src.size, src.size);
       }
     }
   }
 
-  // ------------------------------------------------------------------ camp
-  private drawCamp(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
-    const ground = SURFACE_Y * TILE - camY;
-    if (ground < -200 || ground > this.scene.height + 400) return;
-    // forest on the hills around camp
+  // ------------------------------------------------------------------ trees + settlers
+  private drawTrees(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number): void {
     const w = g.world;
-    const tx0 = Math.max(3, Math.floor(camX / TILE) - 2);
-    const tx1 = Math.min(w.w - 4, Math.floor((camX + this.scene.width) / TILE) + 2);
-    for (let x = tx0; x <= tx1; x++) {
-      if (x >= CAMP_X0 - 1 && x <= CAMP_X1 + 1) continue;
-      const s = w.surface[x];
-      if (s !== w.surface[x + 1] || !w.solid(x, s)) continue;
-      const h = hash(x, w.seed);
-      const key = h < 0.2 ? 'pine1' : h < 0.32 ? 'pine2' : h < 0.42 ? 'rocks' : null;
-      if (!key) continue;
-      const img = A.camp[key];
-      const px = Math.round(x * TILE + 16 - img.width / 2 + (hash(x + 999, w.seed) - 0.5) * 12 - camX);
-      ctx.drawImage(img, px, Math.round(s * TILE - camY - img.height + 3));
+    const tx0 = Math.max(0, Math.floor(camX / TILE) - 3);
+    const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE) + 3);
+    const ty0 = Math.max(0, Math.floor(camY / TILE) - 1);
+    const ty1 = Math.min(w.h - 1, Math.floor((camY + this.scene.height) / TILE) + 5);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        if (w.obj[ty * w.w + tx] !== Obj.TREE) continue;
+        const key = TREE_SPRITES[treeKind(tx, w.seed)];
+        const img = A.camp[key];
+        const pad = A.padBottom[key] ?? 0;
+        const off = Math.round((hash(tx, w.seed + 3) - 0.5) * 8);
+        const x = Math.round(tx * TILE + 16 - img.width / 2 + off - camX);
+        const y = Math.round((ty + 1) * TILE - (img.height - pad) + 3 - camY);
+        const dmg = w.damage.get(ty * w.w + tx);
+        const wob = dmg ? Math.sin(g.time * 40) * 1.5 : 0;
+        ctx.drawImage(img, Math.round(x + wob), y);
+      }
     }
-    for (const b of CAMP_BUILDINGS) {
-      const img = A.camp[b.key];
-      const x = Math.round(b.cx * TILE - img.width / 2 - camX);
-      const y = Math.round(ground - img.height + 4);
-      if (b.flip) {
-        ctx.save();
-        ctx.translate(x + img.width, y);
-        ctx.scale(-1, 1);
-        ctx.drawImage(img, 0, 0);
-        ctx.restore();
-      } else ctx.drawImage(img, x, y);
+  }
+
+  private drawBuildings(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    for (const b of g.p.buildings) {
+      const info = BUILDING_INFO[b.kind];
+      const img = A.camp[info.sprite];
+      const pad = A.padBottom[info.sprite] ?? 0;
+      const x = Math.round(b.x * TILE - img.width / 2 - camX);
+      const y = Math.round(b.y * TILE - (img.height - pad) + 2 - camY);
+      // contact shadow so it reads as standing on the grass
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(x + 6, Math.round(b.y * TILE - camY) - 1, img.width - 12, 3);
+      ctx.drawImage(img, x, y);
     }
-    // mine entrance frame + sign + campfire
-    const ex = MINE_ENTRANCE_X * TILE - camX;
-    ctx.fillStyle = '#5a3a1a';
-    ctx.fillRect(ex - 6, ground - 40, 6, 44);
-    ctx.fillRect(ex + 32, ground - 40, 6, 44);
-    ctx.fillRect(ex - 10, ground - 46, 52, 7);
-    ctx.fillStyle = '#8a5a32';
-    ctx.fillRect(ex - 10, ground - 46, 52, 3);
-    const sign = iconSrc({ sheet: 'i32', idx: 48 });
-    ctx.drawImage(sign.img, sign.sx, sign.sy, 32, 32, ex + 50, ground - 32, 32, 32);
-    const fire = iconSrc({ sheet: 'i32', idx: 50 });
-    const fx = 52.6 * TILE - camX - 16;
-    ctx.drawImage(fire.img, fire.sx, fire.sy, 32, 32, Math.round(fx), ground - 30, 32, 32);
-    for (const lx of [43.6, 58.3, 63.8, 69]) {
-      const post = iconSrc({ sheet: 'i32', idx: 49 });
-      ctx.drawImage(post.img, post.sx, post.sy, 32, 32, Math.round(lx * TILE - camX - 16), ground - 31, 32, 32);
-    }
-    // NPCs bob gently and face the player
-    for (const n of NPCS) {
-      const img = A.camp[n.key];
-      const bob = Math.round(Math.sin(g.time * 2 + n.cx) * 0.8);
-      const x = Math.round(n.cx * TILE - img.width / 2 - camX);
-      const bbBottom = img.height - 1;
-      const y = Math.round(ground - bbBottom + bob - 1);
-      const faceRight = g.player.cx > n.cx * TILE;
+  }
+
+  private drawNpcs(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    for (const b of g.p.buildings) {
+      const info = BUILDING_INFO[b.kind];
+      const img = A.camp[info.npc];
+      const pad = A.padBottom[info.npc] ?? 0;
+      const nx = (b.x + BUILDING_W / 2 - 0.9) * TILE;
+      const bob = Math.round(Math.sin(g.time * 2 + b.x) * 0.6);
+      const x = Math.round(nx - img.width / 2 - camX);
+      const y = Math.round(b.y * TILE - (img.height - pad) + bob - camY);
+      const faceRight = g.player.cx > nx;
       ctx.save();
       if (faceRight) {
         ctx.translate(x + img.width, y);
@@ -415,73 +386,220 @@ export class Renderer {
     }
   }
 
-  // ------------------------------------------------------------------ objects
-  private drawObjects(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number, front: boolean): void {
+  // ------------------------------------------------------------------ blocks
+  private drawBlocks(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
     const w = g.world;
-    const tx0 = Math.max(0, Math.floor(camX / TILE) - 1);
+    const tx0 = Math.max(0, Math.floor(camX / TILE));
+    const ty0 = Math.max(0, Math.floor(camY / TILE));
+    const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
+    const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE));
+    const L = g.light;
+    const t = g.time;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const i = ty * w.w + tx;
+        const fg = w.fg[i];
+        if (fg === B.AIR) continue;
+        if (!w.explored[i] && L.at(tx, ty) < 0.004) continue;
+        const sx = tx * TILE - camX;
+        const sy = ty * TILE - camY;
+        const def = BLOCKS[fg];
+        if (def.liquid) {
+          const off = Math.floor(t * 6) % 32;
+          ctx.save();
+          ctx.beginPath();
+          const surfaceTop = w.get(tx, ty - 1) !== B.LAVA;
+          const rip = surfaceTop ? 6 + Math.round(Math.sin(t * 3 + tx) * 2) : 0;
+          ctx.rect(sx, sy + rip, TILE, TILE - rip);
+          ctx.clip();
+          ctx.drawImage(A.blockTex[fg], sx - off, sy);
+          ctx.drawImage(A.blockTex[fg], sx - off + 32, sy);
+          ctx.restore();
+          if (surfaceTop) {
+            ctx.fillStyle = '#ffe08a';
+            ctx.fillRect(sx, sy + rip, TILE, 2);
+          }
+          continue;
+        }
+        const up = !BLOCKS[w.get(tx, ty - 1)].solid;
+        const rt = !BLOCKS[w.get(tx + 1, ty)].solid;
+        const dn = !BLOCKS[w.get(tx, ty + 1)].solid;
+        const lf = !BLOCKS[w.get(tx - 1, ty)].solid;
+        const mask = (up ? 1 : 0) | (rt ? 2 : 0) | (dn ? 4 : 0) | (lf ? 8 : 0);
+        const v = hash(tx * 3 + ty * 7, 11) < 0.5 ? 0 : 1;
+        const fr = A.framed[fg];
+        ctx.drawImage(fr.length ? fr[v * 16 + mask] : A.blockTex[fg], sx, sy);
+        if (up && def.topper) {
+          const set = def.topper === 'grass' ? A.grassTop : A.mossTop;
+          ctx.drawImage(set[(tx * 7 + ty) & 3], sx, sy - 7);
+        }
+        const dmg = w.damage.get(i);
+        if (dmg) {
+          const frac = 1 - dmg.hp / def.hp;
+          ctx.drawImage(this.cracks[Math.max(0, Math.min(3, Math.floor(frac * 4)))], sx, sy);
+        }
+      }
+    }
+    // decor
+    for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) {
+      for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
+        if (!w.inside(tx, ty)) continue;
+        const dc = w.decor[ty * w.w + tx];
+        if (!dc) continue;
+        const src = iconSrc(decorIcon(dc));
+        const sx = tx * TILE - camX;
+        const sy = ty * TILE - camY;
+        const ceil = w.rock(tx, ty - 1) && !w.rock(tx, ty + 1);
+        const dx = sx + (TILE - src.size) / 2;
+        const dy = ceil ? sy : sy + TILE - src.size + 1;
+        // plants sway a little
+        const sway = !ceil && ty < w.surface[tx] + 2 ? Math.round(Math.sin(g.time * 1.6 + tx) * 0.8) : 0;
+        ctx.drawImage(src.img, src.sx, src.sy, src.size, src.size, Math.round(dx + sway), Math.round(dy), src.size, src.size);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ objects
+  private drawObjects(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const w = g.world;
+    const tx0 = Math.max(0, Math.floor(camX / TILE) - 2);
     const ty0 = Math.max(0, Math.floor(camY / TILE) - 1);
     const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE) + 1);
-    const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE) + 3);
+    const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE) + 2);
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const o = w.obj[ty * w.w + tx];
-        if (!o) continue;
+        if (!o || o === Obj.TREE) continue;
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;
-        if (!front) {
-          if (o === Obj.LADDER) drawLadder(ctx, sx, sy);
-          else if (o === Obj.BEAM) drawBeam(ctx, sx, sy);
-          else if (o === Obj.LIFT) {
-            const s = iconSrc({ sheet: 'i32', idx: 62 });
-            ctx.drawImage(s.img, s.sx, s.sy, 32, 32, sx, sy, 32, 32);
-            ctx.fillStyle = '#3a2a1a';
-            ctx.fillRect(sx + 15, sy - 4 * TILE, 2, 4 * TILE);
-          }
-        } else {
-          if (o === Obj.TORCH) {
-            const s = iconSrc({ sheet: 'i16', idx: 21 });
-            ctx.drawImage(s.img, s.sx, s.sy, 16, 16, sx + 8, sy + 10, 16, 16);
-            const f = Math.floor(g.time * 12 + tx * 3) % 3;
-            ctx.fillStyle = ['#ffd75a', '#ffb02a', '#fff0a0'][f];
-            ctx.fillRect(sx + 15 + (f === 1 ? -1 : 0), sy + 7, 3, 3);
-          } else if (o === Obj.CHEST || o === Obj.CHEST_OPEN) {
-            const s = iconSrc({ sheet: 'i32', idx: o === Obj.CHEST ? 46 : 47 });
-            ctx.drawImage(s.img, s.sx, s.sy, 32, 32, sx, sy + 2, 32, 32);
-          }
-        }
+        this.drawObj(g, ctx, o, sx, sy, tx, 1);
       }
+    }
+  }
+
+  private drawObj(g: Game, ctx: CanvasRenderingContext2D, o: number, sx: number, sy: number, tx: number, alpha: number): void {
+    ctx.globalAlpha = alpha;
+    const icon = OBJ_ICON[o as Obj];
+    if (icon) {
+      const s = iconSrc(icon);
+      ctx.drawImage(s.img, s.sx, s.sy, 32, 32, sx, sy + 1, 32, 32);
+    } else
+      switch (o) {
+        case Obj.LADDER:
+          drawLadder(ctx, sx, sy);
+          break;
+        case Obj.BEAM:
+          drawBeam(ctx, sx, sy);
+          break;
+        case Obj.TORCH: {
+          const s = iconSrc({ sheet: 'i16', idx: 21 });
+          ctx.drawImage(s.img, s.sx, s.sy, 16, 16, sx + 8, sy + 10, 16, 16);
+          const f = Math.floor(g.time * 12 + tx * 3) % 3;
+          ctx.fillStyle = ['#ffd75a', '#ffb02a', '#fff0a0'][f];
+          ctx.fillRect(sx + 15 + (f === 1 ? -1 : 0), sy + 7, 3, 3);
+          break;
+        }
+        case Obj.BED:
+          ctx.drawImage(A.camp.bed, sx, sy + TILE - A.camp.bed.height + 1);
+          break;
+        case Obj.DOOR_TOP:
+          drawDoor(ctx, sx, sy, false);
+          break;
+        case Obj.DOOR_OPEN_TOP:
+          drawDoor(ctx, sx, sy, true);
+          break;
+        case Obj.HEART_CRYSTAL: {
+          const s = iconSrc({ sheet: 'n32', idx: 43 });
+          const bob = Math.round(Math.sin(g.time * 2.5 + tx) * 2) - 3;
+          ctx.drawImage(s.img, s.sx, s.sy, 32, 32, sx, sy + bob, 32, 32);
+          break;
+        }
+        case Obj.CROP0:
+        case Obj.CROP1:
+        case Obj.CROP2:
+        case Obj.CROP3:
+          drawCrop(ctx, sx, sy, o - Obj.CROP0, g.time, tx);
+          break;
+      }
+    ctx.globalAlpha = 1;
+  }
+
+  /** translucent preview of what the held item would place */
+  private drawGhost(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    if (g.ui.isOpen() || g.player.dead) return;
+    const hd = heldDef(g.p);
+    const h = g.hoverTile;
+    if (!hd || !h.inReach) return;
+    const w = g.world;
+    if (w.rock(h.x, h.y) || w.getObj(h.x, h.y)) return;
+    const sx = h.x * TILE - camX;
+    const sy = h.y * TILE - camY;
+    if (hd.kind === 'block' && hd.block !== undefined) {
+      const touching = w.getWall(h.x, h.y) || w.rock(h.x - 1, h.y) || w.rock(h.x + 1, h.y) || w.rock(h.x, h.y - 1) || w.rock(h.x, h.y + 1);
+      if (!touching) return;
+      ctx.globalAlpha = 0.45;
+      ctx.drawImage(A.framed[hd.block]?.[15] ?? A.blockTex[hd.block], sx, sy);
+      ctx.globalAlpha = 1;
+    } else if (hd.kind === 'wall' && hd.wall !== undefined && !w.getWall(h.x, h.y)) {
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(A.wallTex[hd.wall], sx, sy);
+      ctx.globalAlpha = 1;
+    } else if (hd.kind === 'place' && hd.obj !== undefined) {
+      if (hd.obj === Obj.DOOR) this.drawObj(g, ctx, Obj.DOOR_TOP, sx, sy - TILE, h.x, 0.45);
+      else this.drawObj(g, ctx, hd.obj, sx, sy, h.x, 0.45);
+    } else if (hd.kind === 'deed' && hd.deed) {
+      const info = BUILDING_INFO[hd.deed];
+      const img = A.camp[info.sprite];
+      const gy = groundRow(g, h.x);
+      ctx.globalAlpha = 0.35;
+      ctx.drawImage(img, Math.round(h.x * TILE - img.width / 2 - camX), Math.round(gy * TILE - (img.height - (A.padBottom[info.sprite] ?? 0)) - camY));
+      ctx.globalAlpha = 1;
     }
   }
 
   // ------------------------------------------------------------------ entities
   private drawEntities(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
-    // satchel
     const sat = g.p.satchel;
     if (sat) {
       const s = iconSrc({ sheet: 'i32', idx: 61 });
       ctx.drawImage(s.img, s.sx, s.sy, 32, 32, Math.round(sat.x - 16 - camX), Math.round(sat.y - 16 - camY + Math.sin(g.time * 3) * 2), 32, 32);
     }
-    // drops
     for (const d of g.drops) {
       const def = ITEMS[d.item];
-      const ref = d.item === 'coin' ? { sheet: 'i16' as const, idx: 27 } : def?.kind === 'relic' ? { sheet: 'i16' as const, idx: 34 } : def?.icon ?? { sheet: 'i16' as const, idx: 34 };
-      const s = iconSrc(ref.sheet === 'i32' ? { sheet: 'i16', idx: 34 } : ref);
+      const ref: IconRef = d.item === 'coin' ? { sheet: 'i16', idx: 27 } : def?.icon ?? { sheet: 'i16', idx: 34 };
+      const s = iconSrc(ref);
       const bob = d.onGround ? Math.round(Math.sin(g.time * 4 + d.bob) * 1.5) - 2 : 0;
-      ctx.drawImage(s.img, s.sx, s.sy, 16, 16, Math.round(d.x - 2 - camX), Math.round(d.y - 4 - camY + bob), 16, 16);
+      ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, Math.round(d.x - 2 - camX), Math.round(d.y - 4 - camY + bob), 16, 16);
     }
-    // bombs
     for (const b of g.bombs) {
       const s = iconSrc({ sheet: 'i16', idx: 23 });
       ctx.drawImage(s.img, s.sx, s.sy, 16, 16, Math.round(b.x - 2 - camX), Math.round(b.y - 4 - camY), 16, 16);
     }
-    // enemies
+    // arrows
+    for (const s of g.shots) {
+      if (!s.arrow) continue;
+      const a = Math.atan2(s.vy, s.vx);
+      ctx.save();
+      ctx.translate(Math.round(s.x - camX), Math.round(s.y - camY));
+      ctx.rotate(a);
+      ctx.fillStyle = '#6a4a2a';
+      ctx.fillRect(-10, -1, 14, 2);
+      ctx.fillStyle = s.color;
+      ctx.fillRect(4, -1, 4, 2);
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(-12, -2, 3, 1);
+      ctx.fillRect(-12, 1, 3, 1);
+      ctx.restore();
+    }
     for (const e of g.enemies) {
       const img = A.enemies[e.def.id];
       const fs = e.def.size;
       const frames = Math.floor(img.width / fs);
-      const f = 1 + (Math.floor(e.animT * e.def.fps) % (frames - 1));
+      const moving = Math.abs(e.vx) > 8 || !e.onGround || e.def.behavior === 'flyer';
+      const f = moving || e.def.behavior !== 'critter' ? 1 + (Math.floor(e.animT * e.def.fps) % (frames - 1)) : 0;
+      const grounded = e.def.behavior !== 'flyer' && e.def.behavior !== 'shooter' && e.def.behavior !== 'phaser';
       const x = Math.round(e.cx - fs / 2 - camX);
-      const y = Math.round(e.y + e.h - fs + (fs - e.h) * 0.25 - camY);
+      const y = grounded ? Math.round(e.y + e.h - fs + 2 - camY) : Math.round(e.y + e.h - fs + (fs - e.h) * 0.25 - camY);
       const flip = e.def.facesRight ? e.facing < 0 : e.facing > 0;
       ctx.save();
       if (e.def.behavior === 'phaser') ctx.globalAlpha = 0.85;
@@ -493,7 +611,6 @@ export class Renderer {
       } else ctx.drawImage(img, f * fs, 0, fs, fs, x, y, fs, fs);
       ctx.restore();
     }
-    // boss
     if (g.boss) {
       const b = g.boss;
       const img = A.enemies.boss;
@@ -505,56 +622,12 @@ export class Renderer {
       ctx.drawImage(img, f * 128, 0, 128, 128, Math.round(b.x - 64 - camX), Math.round(b.y - 64 - camY), 128, 128);
       ctx.restore();
       if (b.winding) {
-        // telegraph where it will land
         const fy = (BOSS_CENTER.y + 6) * TILE - camY;
         ctx.fillStyle = Math.floor(g.time * 12) % 2 ? 'rgba(255,60,90,0.8)' : 'rgba(255,200,90,0.8)';
         ctx.fillRect(Math.round(b.targetX - 60 - camX), fy - 3, 120, 3);
       }
     }
-    // player
-    const pl = g.player;
-    if (!(pl.invuln > 0 && Math.floor(pl.invuln * 14) % 2 === 0 && !pl.dead)) {
-      let row: number = ROW[pl.anim];
-      let frame = 0;
-      switch (pl.anim) {
-        case 'idle':
-          frame = 1 + (Math.floor(pl.animT * 6) % 6);
-          break;
-        case 'walk':
-          frame = 1 + (Math.floor(pl.animT * 12) % 8);
-          break;
-        case 'jump':
-          frame = pl.vy < -250 ? 3 : pl.vy < 0 ? 4 : pl.vy < 250 ? 5 : 6;
-          break;
-        case 'mine':
-          frame = Math.min(8, Math.floor(pl.swingT * 9));
-          break;
-        case 'climb':
-          frame = 1 + (Math.floor(pl.animT * 10) % 8);
-          break;
-        default:
-          break;
-      }
-      if (pl.dead) {
-        row = ROW.hurt;
-        frame = Math.min(5, 2 + Math.floor(pl.deadT * 4));
-      } else if (pl.hurtT > 0.12 && !pl.swinging) {
-        row = ROW.hurt;
-        frame = 2;
-      }
-      const footY = Math.round(pl.y + pl.h - camY);
-      const cx = Math.round(pl.cx - camX);
-      const flip = pl.facing < 0 && pl.anim !== 'climb';
-      ctx.save();
-      if (pl.dead) ctx.globalAlpha = Math.max(0, 1 - pl.deadT * 0.3);
-      if (flip) {
-        ctx.translate(cx + 33, footY - 57);
-        ctx.scale(-1, 1);
-        ctx.drawImage(A.miner, frame * CELL, row * CELL, CELL, CELL, 0, 0, CELL, CELL);
-      } else ctx.drawImage(A.miner, frame * CELL, row * CELL, CELL, CELL, cx - 33, footY - 57, CELL, CELL);
-      ctx.restore();
-    }
-    // non-glow particles
+    this.drawPlayer(g, ctx, camX, camY);
     for (const q of g.parts) {
       if (q.glow) continue;
       ctx.globalAlpha = Math.min(1, (q.life / q.max) * 1.5);
@@ -562,6 +635,144 @@ export class Renderer {
       ctx.fillRect(Math.round(q.x - camX), Math.round(q.y - camY), q.size, q.size);
     }
     ctx.globalAlpha = 1;
+  }
+
+  private drawPlayer(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const pl = g.player;
+    if (pl.invuln > 0 && Math.floor(pl.invuln * 14) % 2 === 0 && !pl.dead) return;
+    let row: number = ROW[pl.anim];
+    let frame = 0;
+    switch (pl.anim) {
+      case 'idle':
+        frame = 1 + (Math.floor(pl.animT * 6) % 6);
+        break;
+      case 'walk':
+        frame = 1 + (Math.floor(pl.animT * 12) % 8);
+        break;
+      case 'jump':
+        frame = pl.vy < -250 ? 3 : pl.vy < 0 ? 4 : pl.vy < 250 ? 5 : 6;
+        break;
+      case 'mine':
+        frame = Math.min(8, Math.floor(pl.swingT * 9));
+        break;
+      case 'climb':
+        frame = 1 + (Math.floor(pl.animT * 10) % 8);
+        break;
+      default:
+        break;
+    }
+    if (pl.dead) {
+      row = ROW.hurt;
+      frame = Math.min(5, 2 + Math.floor(pl.deadT * 4));
+    } else if (pl.hurtT > 0.12 && !pl.swinging) {
+      row = ROW.hurt;
+      frame = 2;
+    }
+    const footY = Math.round(pl.y + pl.h - camY);
+    const cx = Math.round(pl.cx - camX);
+    const flip = pl.facing < 0 && pl.anim !== 'climb';
+    ctx.save();
+    if (pl.dead) ctx.globalAlpha = Math.max(0, 1 - pl.deadT * 0.3);
+    if (flip) {
+      ctx.translate(cx + 33, footY - 57);
+      ctx.scale(-1, 1);
+      ctx.drawImage(A.miner, frame * CELL, row * CELL, CELL, CELL, 0, 0, CELL, CELL);
+    } else ctx.drawImage(A.miner, frame * CELL, row * CELL, CELL, CELL, cx - 33, footY - 57, CELL, CELL);
+    ctx.restore();
+    if (pl.dead || pl.climbing) return;
+    // held item: torches are carried, weapons swing in an arc
+    const hd = heldDef(g.p);
+    if (!hd) return;
+    if (hd.id === 'torch' && !pl.swinging) {
+      const s = iconSrc(hd.icon);
+      const hx = cx + pl.facing * 9 - 8;
+      const hy = footY - 30;
+      ctx.drawImage(s.img, s.sx, s.sy, 16, 16, hx, hy, 16, 16);
+      const f = Math.floor(g.time * 12) % 3;
+      ctx.fillStyle = ['#ffd75a', '#ffb02a', '#fff0a0'][f];
+      ctx.fillRect(hx + 7 + (f === 1 ? -1 : 0), hy - 2, 3, 3);
+    } else if (pl.swinging && (hd.kind === 'sword' || hd.kind === 'hammer')) {
+      const s = iconSrc(hd.icon);
+      const t = Math.min(1, pl.swingT);
+      const a = (-2.2 + t * 2.9) * pl.facing;
+      ctx.save();
+      ctx.translate(cx + pl.facing * 4, footY - 24);
+      ctx.rotate(a + (pl.facing < 0 ? Math.PI / 2 : 0));
+      if (pl.facing < 0) ctx.scale(-1, 1);
+      ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -2, -26, 28, 28);
+      ctx.restore();
+    } else if (hd.kind === 'bow' && pl.swinging) {
+      const s = iconSrc(hd.icon);
+      ctx.save();
+      ctx.translate(cx + pl.facing * 12, footY - 26);
+      if (pl.facing < 0) ctx.scale(-1, 1);
+      ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -10, -12, 24, 24);
+      ctx.restore();
+    }
+  }
+
+  // ------------------------------------------------------------------ ambient motes, drips, fireflies
+  private updateAmbient(g: Game, dt: number, camX: number, camY: number, vw: number, vh: number): void {
+    const w = g.world;
+    const pt = g.playerTile();
+    const surf = w.surface[Math.max(0, Math.min(w.w - 1, pt.x))];
+    const under = pt.y > surf + 2;
+    const bi = under ? biomeIndexRow(pt.y) : -1;
+    const want = under ? 46 : isNight(g.p.clock) ? 26 : 10;
+    let tries = 0;
+    while (this.amb.length < want && tries++ < 6) {
+      const x = camX + Math.random() * vw;
+      const y = camY + Math.random() * vh;
+      const tx = Math.floor(x / TILE);
+      const ty = Math.floor(y / TILE);
+      if (!w.inside(tx, ty) || w.rock(tx, ty)) continue;
+      if (under && !w.explored[ty * w.w + tx]) continue;
+      let color = 'rgba(255,240,210,';
+      let vx = (Math.random() - 0.5) * 6;
+      let vy = (Math.random() - 0.5) * 6;
+      let size = 1;
+      if (!under) {
+        if (isNight(g.p.clock)) {
+          color = 'rgba(200,255,120,';
+          size = 2;
+        } else {
+          color = 'rgba(255,255,230,';
+        }
+      } else if (bi === 1) {
+        color = 'rgba(120,255,210,';
+        vy = -4 - Math.random() * 6;
+        size = Math.random() < 0.3 ? 2 : 1;
+      } else if (bi === 2) color = Math.random() < 0.5 ? 'rgba(220,180,255,' : 'rgba(200,240,255,';
+      else if (bi === 3) {
+        color = 'rgba(255,150,60,';
+        vy = -14 - Math.random() * 20;
+        vx = (Math.random() - 0.5) * 14;
+      } else if (bi >= 4) color = 'rgba(170,130,255,';
+      const life = 2 + Math.random() * 3;
+      this.amb.push({ x, y, vx, vy, life, max: life, color, size, grav: 0, drip: false });
+    }
+    // drips from damp ceilings
+    if (under && bi <= 1 && Math.random() < dt * 3) {
+      const tx = Math.floor((camX + Math.random() * vw) / TILE);
+      for (let ty = Math.floor(camY / TILE); ty < Math.floor((camY + vh) / TILE); ty++) {
+        if (w.rock(tx, ty) && !w.rock(tx, ty + 1) && w.explored[(ty + 1) * w.w + tx] && Math.random() < 0.15) {
+          this.amb.push({ x: tx * TILE + 6 + Math.random() * 20, y: (ty + 1) * TILE, vx: 0, vy: 0, life: 3, max: 3, color: 'rgba(170,210,255,', size: 1, grav: 500, drip: true });
+          break;
+        }
+      }
+    }
+    for (const a of this.amb) {
+      a.life -= dt;
+      a.vy += a.grav * dt;
+      a.x += a.vx * dt + (a.drip ? 0 : Math.sin(g.time + a.max * 10) * dt * 3);
+      a.y += a.vy * dt;
+      if (a.drip && w.solidAtPx(a.x, a.y)) {
+        a.life = 0;
+        g.parts.push({ x: a.x, y: a.y - 2, vx: -30, vy: -40, life: 0.3, max: 0.3, color: '#9ac8ff', size: 1, grav: 400, glow: false });
+        g.parts.push({ x: a.x, y: a.y - 2, vx: 30, vy: -40, life: 0.3, max: 0.3, color: '#9ac8ff', size: 1, grav: 400, glow: false });
+      }
+    }
+    this.amb = this.amb.filter((a) => a.life > 0 && a.x > camX - 40 && a.x < camX + vw + 40 && a.y > camY - 40 && a.y < camY + vh + 40);
   }
 
   // ------------------------------------------------------------------ glows (after lighting)
@@ -579,13 +790,14 @@ export class Renderer {
         const o = w.obj[i];
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;
-        if (o === Obj.TORCH) {
-          const fl = 0.85 + Math.sin(g.time * 10 + tx) * 0.1;
-          this.glowAt(ctx, sx + 16, sy + 9, 26 * fl, 'rgba(255,170,60,0.55)');
-        }
+        if (o === Obj.TORCH) this.glowAt(ctx, sx + 16, sy + 9, 26 * (0.85 + Math.sin(g.time * 10 + tx) * 0.1), 'rgba(255,170,60,0.55)');
+        else if (o === Obj.CAMPFIRE) {
+          this.glowAt(ctx, sx + 16, sy + 20, 40 + Math.sin(g.time * 9 + tx) * 4, 'rgba(255,140,40,0.55)');
+          if (Math.random() < 0.3) g.parts.push({ x: sx + camX + 10 + Math.random() * 12, y: sy + camY + 14, vx: (Math.random() - 0.5) * 10, vy: -30 - Math.random() * 30, life: 0.8, max: 0.8, color: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', size: 1, grav: 0, glow: true });
+        } else if (o === Obj.FURNACE) this.glowAt(ctx, sx + 16, sy + 24, 22 + Math.sin(g.time * 7 + tx) * 2, 'rgba(255,120,30,0.45)');
+        else if (o === Obj.HEART_CRYSTAL) this.glowAt(ctx, sx + 16, sy + 14, 22 + Math.sin(g.time * 3) * 3, 'rgba(255,90,160,0.5)');
         const fg = w.fg[i];
-        if (fg === B.LUMENITE || fg === B.DIAMOND || fg === B.AMETHYST || fg === B.RUBY || fg === B.JADE || fg === B.RELIC_STONE) {
-          // twinkle on precious blocks
+        if (fg === B.LUMENITE || fg === B.DIAMOND || fg === B.AMETHYST || fg === B.RUBY || fg === B.JADE || fg === B.RELIC_STONE || fg === B.GOLD || fg === B.SILVER) {
           const tw = Math.sin(g.time * 3 + tx * 1.7 + ty * 2.3);
           if (tw > 0.85 && g.light.at(tx, ty) > 0.05) {
             ctx.fillStyle = 'rgba(255,255,255,0.9)';
@@ -598,27 +810,31 @@ export class Renderer {
         if (fg === B.LAVA && w.get(tx, ty - 1) !== B.LAVA) this.glowAt(ctx, sx + 16, sy + 8, 30, 'rgba(255,110,20,0.35)');
       }
     }
-    // camp lights
-    const ground = SURFACE_Y * TILE - camY;
-    for (const lx of [43.6, 58.3, 63.8, 69]) this.glowAt(ctx, lx * TILE - camX + 6, ground - 22, 30, 'rgba(255,190,90,0.45)');
-    this.glowAt(ctx, 52.6 * TILE - camX, ground - 12, 46 + Math.sin(g.time * 9) * 3, 'rgba(255,140,40,0.5)');
-    this.glowAt(ctx, (SHAFT_X + 0.1) * TILE - camX, ground - 20, 20, 'rgba(255,190,90,0.3)');
-    // player lantern + headlamp
-    const pl = g.player;
-    if (!pl.dead && pl.oil > 0) {
-      const hx = pl.cx + pl.facing * 6 - camX;
-      this.glowAt(ctx, hx, pl.y + 8 - camY, 14, 'rgba(140,220,255,0.55)');
+    // building windows glow at night
+    if (daylight(g.p.clock) < 0.6) {
+      for (const b of g.p.buildings) this.glowAt(ctx, b.x * TILE - camX, b.y * TILE - camY - 40, 46, 'rgba(255,190,90,0.3)');
     }
+    const pl = g.player;
+    const hd = heldDef(g.p);
+    if (!pl.dead && hd?.id === 'torch' && !pl.climbing) this.glowAt(ctx, pl.cx + pl.facing * 9 - camX, pl.y + pl.h - 32 - camY, 22, 'rgba(255,170,60,0.5)');
+    if (!pl.dead && g.st.oilMax > 0 && pl.oil > 0) this.glowAt(ctx, pl.cx + pl.facing * 6 - camX, pl.y + 8 - camY, 14, 'rgba(140,220,255,0.5)');
     for (const d of g.drops) {
       const gl = ITEMS[d.item]?.glow ?? (d.item.startsWith('r_') ? '#ffd75a' : null);
       if (gl) this.glowAt(ctx, d.x + 6 - camX, d.y + 4 - camY, 14 + Math.sin(g.time * 5 + d.bob) * 3, hexA(gl, 0.6));
     }
     for (const s of g.shots) {
+      if (s.arrow) continue;
       this.glowAt(ctx, s.x - camX, s.y - camY, s.r * 3.5, hexA(s.color, 0.8));
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(Math.round(s.x - camX - 1), Math.round(s.y - camY - 1), 3, 3);
     }
-    for (const e of g.enemies) if (e.def.glow) this.glowAt(ctx, e.cx - camX, e.cy - camY, 18, `rgba(${e.def.glow.map((v) => Math.round(v * 400)).join(',')},0.35)`);
+    for (const e of g.enemies) {
+      if (e.def.glow) this.glowAt(ctx, e.cx - camX, e.cy - camY, 18, `rgba(${e.def.glow.map((v) => Math.round(v * 400)).join(',')},0.35)`);
+      if (e.def.id === 'hollow') {
+        const ex = e.cx + (e.facing > 0 ? 6 : -6) - camX;
+        this.glowAt(ctx, ex, e.y + 10 - camY, 6, 'rgba(255,60,220,0.8)');
+      }
+    }
     if (g.boss) this.glowAt(ctx, g.boss.x - camX, g.boss.y - camY, 90 + Math.sin(g.time * 4) * 8, 'rgba(255,40,90,0.25)');
     const sat = g.p.satchel;
     if (sat) this.glowAt(ctx, sat.x - camX, sat.y - camY, 24, 'rgba(120,255,140,0.45)');
@@ -628,11 +844,16 @@ export class Renderer {
       ctx.fillStyle = q.color;
       ctx.fillRect(Math.round(q.x - camX), Math.round(q.y - camY), q.size, q.size);
     }
+    for (const a of this.amb) {
+      const k = Math.min(1, a.life / 0.6, (a.max - a.life) / 0.6);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = a.color + (a.drip ? 0.7 : 0.55 * k) + ')';
+      ctx.fillRect(Math.round(a.x - camX), Math.round(a.y - camY), a.size, a.drip ? 3 : a.size);
+    }
     ctx.restore();
   }
 
   private glowAt(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string): void {
-    // tint the white radial sprite by drawing it through a coloured composite
     const c = this.tinted(color);
     ctx.drawImage(c, Math.round(x - r), Math.round(y - r), Math.round(r * 2), Math.round(r * 2));
   }
@@ -647,6 +868,7 @@ export class Renderer {
     g.fillStyle = color;
     g.fillRect(0, 0, 64, 64);
     c = cc;
+    if (this.tintCache.size > 200) this.tintCache.clear();
     this.tintCache.set(color, c);
     return c;
   }
@@ -654,14 +876,20 @@ export class Renderer {
   private drawHover(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
     if (g.ui.isOpen() || g.player.dead) return;
     const h = g.hoverTile;
-    const sx = h.x * TILE - camX;
-    const sy = h.y * TILE - camY;
-    const def = BLOCKS[g.world.get(h.x, h.y)];
-    const sel = CONSUMABLES[g.p.hotbar];
+    if (!h.inReach) return;
+    const hd = heldDef(g.p);
+    const placing = hd && (hd.kind === 'block' || hd.kind === 'wall' || hd.kind === 'place' || hd.kind === 'deed');
     let color: string | null = null;
-    if (h.ok) color = def.tier > g.st.pickTier ? 'rgba(255,110,80,0.9)' : 'rgba(255,255,255,0.85)';
-    else if (h.inReach && !def.solid && (sel === 'torch' || sel === 'ladder')) color = 'rgba(255,215,90,0.5)';
+    let ty = h.y;
+    if (placing) color = 'rgba(255,215,90,0.55)';
+    else if (h.ok) {
+      ty = h.ty;
+      const def = BLOCKS[g.world.get(h.x, h.y)];
+      color = h.kind === 'block' && def.tier > g.st.pickTier ? 'rgba(255,110,80,0.9)' : 'rgba(255,255,255,0.85)';
+    }
     if (!color) return;
+    const sx = h.x * TILE - camX;
+    const sy = ty * TILE - camY;
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     const corner = 7;
@@ -722,6 +950,20 @@ export class Renderer {
   }
 }
 
+function mirrored(img: HTMLImageElement): HTMLCanvasElement {
+  const [c, g] = makeCanvas(img.width * 2, img.height);
+  g.drawImage(img, 0, 0);
+  g.translate(img.width * 2, 0);
+  g.scale(-1, 1);
+  g.drawImage(img, 0, 0);
+  return c;
+}
+
+function groundRow(g: Game, x: number): number {
+  for (let y = 0; y < g.world.h; y++) if (g.world.rock(x, y)) return y;
+  return g.world.h - 1;
+}
+
 function drawLadder(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
   ctx.fillStyle = '#4a2e14';
   ctx.fillRect(sx + 6, sy, 4, TILE);
@@ -749,6 +991,47 @@ function drawBeam(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
   ctx.fillRect(sx - 4, top, 40, 3);
 }
 
+/** a two-tile wooden door, drawn from its top tile */
+function drawDoor(ctx: CanvasRenderingContext2D, sx: number, sy: number, open: boolean): void {
+  const h = TILE * 2;
+  // frame
+  ctx.fillStyle = '#2a1a0c';
+  ctx.fillRect(sx + 2, sy, 3, h);
+  ctx.fillRect(sx + 2, sy, 28, 3);
+  if (open) {
+    ctx.fillStyle = '#5a3a1a';
+    ctx.fillRect(sx + 4, sy + 3, 6, h - 3);
+    ctx.fillStyle = '#8a5a32';
+    ctx.fillRect(sx + 5, sy + 4, 3, h - 5);
+    return;
+  }
+  ctx.fillStyle = '#2a1a0c';
+  ctx.fillRect(sx + 7, sy + 3, 18, h - 3);
+  ctx.fillStyle = '#7a4e26';
+  ctx.fillRect(sx + 8, sy + 4, 16, h - 5);
+  ctx.fillStyle = '#9a6a3a';
+  for (const x of [9, 14, 19]) ctx.fillRect(sx + x, sy + 5, 3, h - 7);
+  ctx.fillStyle = '#4a2e14';
+  ctx.fillRect(sx + 8, sy + 14, 16, 3);
+  ctx.fillRect(sx + 8, sy + h - 18, 16, 3);
+  ctx.fillStyle = '#e0c060';
+  ctx.fillRect(sx + 20, sy + 34, 3, 3);
+}
+
+function drawCrop(ctx: CanvasRenderingContext2D, sx: number, sy: number, stage: number, t: number, tx: number): void {
+  const heights = [6, 12, 20, 26];
+  const h = heights[stage];
+  const ripe = stage === 3;
+  for (let k = 0; k < 5; k++) {
+    const x = sx + 5 + k * 5;
+    const sway = Math.round(Math.sin(t * 2 + tx + k) * (stage > 1 ? 1 : 0));
+    ctx.fillStyle = ripe ? '#8a7a20' : '#3a6a1a';
+    ctx.fillRect(x + sway, sy + TILE - h, 1, h);
+    ctx.fillStyle = ripe ? '#e8c050' : stage > 1 ? '#7aa83a' : '#5a9a32';
+    ctx.fillRect(x - 1 + sway, sy + TILE - h, 3, Math.max(2, Math.round(h / 3)));
+  }
+}
+
 function biomeIndexRow(ty: number): number {
   for (let i = BIOMES.length - 1; i >= 0; i--) if (ty >= BIOMES[i].top) return i;
   return 0;
@@ -764,6 +1047,11 @@ function hash(x: number, seed: number): number {
 
 function mod(a: number, n: number): number {
   return ((a % n) + n) % n;
+}
+
+function mix(a: number[], b: number[], t: number): number[] {
+  const k = Math.max(0, Math.min(1, t));
+  return a.map((v, i) => Math.round(v + (b[i] - v) * k));
 }
 
 function hexA(hex: string, a: number): string {

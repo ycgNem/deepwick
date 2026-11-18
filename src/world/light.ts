@@ -55,7 +55,7 @@ export class LightMap {
     this.img = this.ctx.createImageData(w, h);
   }
 
-  compute(world: World, tx0: number, ty0: number, tw: number, th: number, lights: PointLight[], time: number, skyLevel: number): void {
+  compute(world: World, tx0: number, ty0: number, tw: number, th: number, lights: PointLight[], time: number, sky: [number, number, number]): void {
     const x0 = tx0 - MARGIN;
     const y0 = ty0 - MARGIN;
     const w = tw + MARGIN * 2;
@@ -79,9 +79,9 @@ export class LightMap {
         if (!world.inside(x, y)) {
           D[k] = SOLID_DECAY;
           if (y < 0) {
-            R[k] = skyLevel;
-            G[k] = skyLevel * 0.92;
-            Bc[k] = skyLevel * 0.9;
+            R[k] = sky[0];
+            G[k] = sky[1];
+            Bc[k] = sky[2];
           }
           continue;
         }
@@ -89,11 +89,11 @@ export class LightMap {
         const fg = world.fg[wi];
         const def = BLOCKS[fg];
         D[k] = def.solid ? SOLID_DECAY : AIR_DECAY;
-        // open sky above the surface
-        if (y < world.surface[x] && !def.solid) {
-          R[k] = skyLevel;
-          G[k] = skyLevel * 0.9;
-          Bc[k] = skyLevel * 0.95;
+        // open sky: nothing solid above this tile
+        if (y < world.skyline[x] && !def.solid) {
+          R[k] = sky[0];
+          G[k] = sky[1];
+          Bc[k] = sky[2];
         }
         if (def.light) {
           const f = fg === B.LAVA ? 0.9 + 0.1 * Math.sin(time * 3 + x * 0.7 + y) : 1;
@@ -105,13 +105,14 @@ export class LightMap {
           if (dl) add(R, G, Bc, k, dl[0], dl[1], dl[2]);
         }
         const o = world.obj[wi];
-        if (o === Obj.TORCH || o === Obj.CAMP_TORCH) {
+        if (o) {
           const fl = 0.92 + 0.08 * Math.sin(time * 11 + x * 3.1) * Math.sin(time * 7.3 + y);
-          add(R, G, Bc, k, 1.05 * fl, 0.72 * fl, 0.38 * fl);
-        } else if (o === Obj.LIFT) {
-          add(R, G, Bc, k, 0.5, 0.42, 0.25);
-        } else if (o === Obj.CHEST) {
-          add(R, G, Bc, k, 0.18, 0.14, 0.04);
+          if (o === Obj.TORCH) add(R, G, Bc, k, 1.05 * fl, 0.72 * fl, 0.38 * fl);
+          else if (o === Obj.CAMPFIRE) add(R, G, Bc, k, 1.25 * fl, 0.75 * fl, 0.32 * fl);
+          else if (o === Obj.FURNACE) add(R, G, Bc, k, 0.8 * fl, 0.42 * fl, 0.15 * fl);
+          else if (o === Obj.HEART_CRYSTAL) add(R, G, Bc, k, 0.55, 0.15, 0.32);
+          else if (o === Obj.CHEST) add(R, G, Bc, k, 0.18, 0.14, 0.04);
+          else if (o === Obj.ALCHEMY) add(R, G, Bc, k, 0.12, 0.3, 0.2);
         }
       }
     }

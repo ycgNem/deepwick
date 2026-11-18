@@ -27,6 +27,62 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
   const sp = e.def.speed;
 
   switch (e.def.behavior) {
+    case 'critter': {
+      // hops about; bolts away from anything that gets close
+      applyGravity(e, dt);
+      const r = moveBody(g.world, e, dt);
+      const scared = dist < 5 * TILE || e.mode === 1;
+      if (e.onGround) {
+        e.vx *= Math.max(0, 1 - dt * 8);
+        e.stateT -= dt;
+        if (e.stateT <= 0) {
+          const dir = scared ? -Math.sign(dx) || 1 : Math.random() < 0.5 ? -1 : 1;
+          e.facing = dir;
+          e.vx = dir * sp * (scared ? 1.6 : 0.6);
+          e.vy = scared ? -380 : -260;
+          e.stateT = scared ? 0.25 + Math.random() * 0.2 : 0.8 + Math.random() * 1.8;
+        }
+      } else if (r.hitX) {
+        e.vy = Math.min(e.vy, -300);
+      }
+      break;
+    }
+    case 'charger': {
+      // wanders until provoked or crowded, then lowers its tusks and charges
+      applyGravity(e, dt);
+      const sameBand = Math.abs(dy) < 3 * TILE;
+      if (e.mode === 0 && aware && sameBand && Math.abs(dx) < 4 * TILE) e.mode = 1;
+      let dir = e.facing;
+      let speed = sp * 0.35;
+      e.stateT -= dt;
+      if (e.mode === 1) {
+        if (e.stateT <= 0) {
+          e.mode = 2;
+          e.stateT = 1.1;
+          e.facing = Math.sign(dx) || e.facing;
+        }
+        speed = 0;
+      } else if (e.mode === 2) {
+        dir = e.facing;
+        speed = sp * 2.6;
+        if (e.stateT <= 0) {
+          e.mode = aware && dist < 8 * TILE ? 1 : 0;
+          e.stateT = 0.9 + Math.random() * 0.6;
+        }
+      } else if (e.stateT <= 0) {
+        e.facing = Math.random() < 0.5 ? -1 : 1;
+        e.stateT = 1.5 + Math.random() * 2.5;
+      }
+      if (e.knock <= 0) e.vx += (dir * speed - e.vx) * Math.min(1, dt * 6);
+      const r = moveBody(g.world, e, dt);
+      if (r.hitX && e.onGround) {
+        const ahead = Math.floor((e.cx + dir * (e.w / 2 + 4)) / TILE);
+        const head = Math.floor((e.y - 4) / TILE);
+        if (!g.world.solid(ahead, head) && e.mode !== 1) e.vy = -440;
+        else e.facing = -dir;
+      }
+      break;
+    }
     case 'flyer': {
       let tx = 0;
       let ty = 0;

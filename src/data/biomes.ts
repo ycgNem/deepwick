@@ -204,6 +204,17 @@ export function biomeAt(row: number): BiomeDef {
   return BIOMES[0];
 }
 
-/** Rows of the lift stations: index 0 is the surface camp. */
-export const LIFT_ROWS = [SURFACE_Y - 1, BIOMES[1].top + 7, BIOMES[2].top + 7, BIOMES[3].top + 7, BIOMES[4].top + 7];
-export const LIFT_NAMES = ['Deepwick Camp', 'Grotto Landing', 'Hollows Platform', 'Ember Station', 'Vault Gate'];
+/** decor codes that can be harvested, and what they drop */
+export const DECOR_DROPS: Record<number, { id: string; chance: number }> = {
+  43: { id: 'mushroom', chance: 1 },
+  37: { id: 'sporecap', chance: 1 },
+  139: { id: 'sporecap', chance: 1 },
+  159: { id: 'sporecap', chance: 1 },
+  49: { id: 'seeds', chance: 0.35 },
+  50: { id: 'seeds', chance: 0.35 },
+  44: { id: 'seeds', chance: 0.15 },
+  51: { id: 'seeds', chance: 0.15 },
+};
+
+/** small surface plants scattered on grass */
+export const SURFACE_DECOR = [49, 49, 50, 50, 44, 51, 43];

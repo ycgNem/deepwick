@@ -9,7 +9,7 @@ import { UI } from './ui';
 import { Game } from './game';
 import { Renderer } from './render';
 import { newProgress } from './state';
-import { campSpawn } from './world/gen';
+import { generateWorld, worldSpawn } from './world/gen';
 import { saveGame, loadGame, hasSave, deleteSave, loadSettings, storeSettings } from './save';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -80,8 +80,9 @@ function startGame(fresh: boolean): void {
   let loaded = fresh ? null : loadGame();
   if (!loaded) {
     const seed = (Math.random() * 1e9) | 0;
-    const s = campSpawn();
-    loaded = { p: newProgress(seed, s.x, s.y), world: undefined as never };
+    const world = generateWorld(seed);
+    const s = worldSpawn(world);
+    loaded = { p: newProgress(seed, s.x, s.y), world };
   }
   const g = new Game(input, ui, loaded.p, loaded.world);
   game = g;
@@ -98,8 +99,8 @@ function startGame(fresh: boolean): void {
   input.blocked = false;
   if (fresh) {
     setTimeout(() => {
-      g.toast('Welcome to Deepwick! A / D to walk, Space to jump. The mine shaft is just left of the lift tower.', '#ffe9a8');
-      g.toast('Hold the left mouse button on a block to dig. Esc shows all controls.', '#ffe9a8');
+      g.toast('You wake in a meadow with nothing but the clothes on your back.', '#ffe9a8');
+      g.toast('Hold the left mouse button on a tree trunk to punch out some wood. Esc shows all controls.', '#ffe9a8');
     }, 600);
   } else g.toast('Welcome back, delver.', '#ffe9a8');
 }

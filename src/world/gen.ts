@@ -1,10 +1,11 @@
 ﻿import { World, Obj } from './world';
 import { B, BLOCKS } from '../data/blocks';
-import { BIOMES, BiomeDef, LIFT_ROWS } from '../data/biomes';
-import { WORLD_W, WORLD_H, SURFACE_Y, CAMP_X0, CAMP_X1, SHAFT_X } from '../constants';
+import { BIOMES, BiomeDef, SURFACE_DECOR } from '../data/biomes';
+import { WORLD_W, WORLD_H, SURFACE_Y } from '../constants';
 import { Rng, fbm, valueNoise, clamp } from '../rng';
 
-export const MINE_ENTRANCE_X = SHAFT_X - 7;
+/** the centre of the world, where a new delver wakes up */
+export const SPAWN_X = Math.floor(WORLD_W / 2);
 export const BOSS_CENTER = { x: Math.floor(WORLD_W / 2), y: 443 };
 
 /** Is this row within the solid barrier band at the top of a biome (no caves)? */
@@ -22,16 +23,18 @@ export function generateWorld(seed: number): World {
   const rng = new Rng(seed);
   const W = WORLD_W;
 
-  // ---- surface line ------------------------------------------------------
+  // ---- surface line: rolling hills, a calm meadow where you wake up ---------------
   for (let x = 0; x < W; x++) {
-    let h = SURFACE_Y + Math.round((fbm(x * 0.045, 3.3, seed) - 0.5) * 14);
-    const dCamp = x < CAMP_X0 ? CAMP_X0 - x : x > CAMP_X1 ? x - CAMP_X1 : 0;
-    const t = clamp(dCamp / 10, 0, 1);
-    h = Math.round(SURFACE_Y + (h - SURFACE_Y) * t);
-    // hills rise toward the world edges
+    const big = (fbm(x * 0.022, 3.3, seed) - 0.5) * 22;
+    const small = (fbm(x * 0.09, 9.1, seed + 3) - 0.5) * 6;
+    let h = SURFACE_Y + big + small;
+    const dSpawn = Math.abs(x - SPAWN_X);
+    const t = clamp((dSpawn - 6) / 18, 0, 1);
+    h = SURFACE_Y + (h - SURFACE_Y) * t;
+    // mountains rise toward the world edges
     const edge = Math.min(x, W - 1 - x);
-    if (edge < 14) h -= Math.round((14 - edge) * 0.5);
-    w.surface[x] = h;
+    if (edge < 18) h -= (18 - edge) * 0.7;
+    w.surface[x] = Math.round(clamp(h, 8, SURFACE_Y + 14));
   }
 
   // biome boundary wobble per biome per column
@@ -57,17 +60,17 @@ export function generateWorld(seed: number): World {
       const n2 = fbm(x * 0.11, y * 0.11, seed + 77 + bi);
       if (bi === 0) {
         const depth = y - s;
-        const stoneChance = clamp((depth - 6) / 50, 0, 0.75);
+        const stoneChance = clamp((depth - 5) / 40, 0, 0.8);
         if (n1 < stoneChance) b = B.STONE;
         if (depth > 3 && n2 > 0.7) b = bm.pocket;
-        if (depth < 14 && n2 < 0.28) b = B.CLAY;
+        if (depth < 14 && depth > 1 && n2 < 0.28) b = B.CLAY;
         if (depth === 0) b = B.GRASS;
       } else {
         if (n1 > 0.55) b = bm.alt;
         if (n2 > 0.73) b = bm.pocket;
       }
       w.fg[i] = b;
-      w.wall[i] = b === B.GRASS ? B.DIRT : b;
+      w.wall[i] = y === s ? 0 : b === B.CLAY || b === B.GRAVEL ? B.DIRT : b;
     }
   }
 
@@ -94,7 +97,7 @@ export function generateWorld(seed: number): World {
   // worm tunnels
   for (let bi = 0; bi < 5; bi++) {
     const bm = BIOMES[bi];
-    const count = bi === 0 ? 7 : 6;
+    const count = Math.round((bi === 0 ? 10 : 9) * (W / 112));
     for (let k = 0; k < count; k++) {
       let x = rng.range(6, W - 6);
       let y = rng.range(bm.top + 8, bm.bottom - 4);
@@ -103,13 +106,35 @@ export function generateWorld(seed: number): World {
       const rad = rng.range(0.9, 1.6);
       for (let s = 0; s < len; s++) {
         ang += rng.range(-0.35, 0.35);
-        // keep tunnels mostly horizontal
         ang = ang * 0.92 + (Math.cos(ang) > 0 ? 0 : Math.PI) * 0.08;
         x += Math.cos(ang);
         y += Math.sin(ang) * 0.6;
         y = clamp(y, bm.top + 6, bm.bottom - 2);
         x = clamp(x, 4, W - 5);
         carveCircle(w, x, y, rad, offs, false);
+      }
+    }
+  }
+  // cave mouths: a few natural openings from the hills down into the tunnels
+  for (let k = 0; k < 6; k++) {
+    let x = rng.chance(0.5) ? rng.range(14, SPAWN_X - 18) : rng.range(SPAWN_X + 18, W - 14);
+    let y = w.surface[Math.floor(x)] - 1;
+    let ang = Math.PI / 2 + rng.range(-0.7, 0.7);
+    const len = rng.int(28, 55);
+    for (let s = 0; s < len; s++) {
+      ang += rng.range(-0.25, 0.25);
+      ang = clamp(ang, 0.5, Math.PI - 0.5);
+      x += Math.cos(ang) * 0.8;
+      y += Math.sin(ang) * 0.9;
+      const r = s < 4 ? 1.3 : rng.range(1.1, 1.8);
+      for (let yy = Math.floor(y - r); yy <= Math.ceil(y + r); yy++) {
+        for (let xx = Math.floor(x - r); xx <= Math.ceil(x + r); xx++) {
+          if (!w.inside(xx, yy) || xx < 3 || xx >= W - 3) continue;
+          if ((xx - x) ** 2 + (yy - y) ** 2 > r * r) continue;
+          if (yy >= BIOMES[1].top - 2) continue;
+          w.fg[w.idx(xx, yy)] = B.AIR;
+          if (yy <= w.surface[xx]) w.wall[w.idx(xx, yy)] = 0;
+        }
       }
     }
   }
@@ -124,6 +149,7 @@ export function generateWorld(seed: number): World {
       for (let k = 0; k < n; k++) {
         let x = rng.int(3, W - 4);
         let y = rng.int(bm.top + 2, bm.bottom);
+        if (bi === 0) y = Math.max(y, w.surface[x] + 3);
         const size = rng.int(rule.size[0], rule.size[1]);
         for (let s = 0; s < size; s++) {
           if (isHostRock(w.get(x, y), bm)) w.set(x, y, rule.block);
@@ -154,17 +180,70 @@ export function generateWorld(seed: number): World {
     }
   }
 
-  // ---- camp: entrance shaft + lifts ---------------------------------------------------
-  buildCampEntrance(w);
-  for (let s = 1; s < LIFT_ROWS.length; s++) buildLiftStation(w, LIFT_ROWS[s]);
+  // ---- surface life ----------------------------------------------------------------------
+  placeSurface(w, rng);
 
-  // ---- decor + chests ------------------------------------------------------------------
+  // ---- decor, chests, heart crystals --------------------------------------------------------
   placeDecor(w, rng);
   placeChests(w, rng);
+  placeHeartCrystals(w, rng);
 
+  w.updateAllSky();
   w.dirty.clear();
   return w;
 }
+
+/** the first solid row of a column, as the world is now */
+export function groundAt(w: World, x: number): number {
+  for (let y = 0; y < w.h; y++) if (w.rock(x, y)) return y;
+  return w.h - 1;
+}
+
+/** spawn point in tiles: standing on the ground at the centre of the world */
+export function worldSpawn(w: World): { x: number; y: number } {
+  return { x: SPAWN_X, y: groundAt(w, SPAWN_X) - 1 };
+}
+
+function placeSurface(w: World, rng: Rng): void {
+  let lastTree = -10;
+  for (let x = 4; x < w.w - 4; x++) {
+    const s = w.surface[x];
+    if (w.get(x, s) !== B.GRASS) continue;
+    const above = w.idx(x, s - 1);
+    if (w.fg[above] !== B.AIR || w.obj[above]) continue;
+    const nearSpawn = Math.abs(x - SPAWN_X) <= 3;
+    const flat = Math.abs(w.surface[x - 1] - s) <= 1 && Math.abs(w.surface[x + 1] - s) <= 1;
+    if (!nearSpawn && flat && x - lastTree >= 3 && rng.chance(0.3)) {
+      w.obj[above] = Obj.TREE;
+      lastTree = x;
+      continue;
+    }
+    if (!nearSpawn && rng.chance(0.07)) {
+      w.obj[above] = rng.chance(0.75) ? Obj.BUSH_BERRY : Obj.BUSH;
+      continue;
+    }
+    if (rng.chance(0.3)) w.decor[above] = rng.pick(SURFACE_DECOR);
+  }
+}
+
+function placeHeartCrystals(w: World, rng: Rng): void {
+  for (let bi = 0; bi < 5; bi++) {
+    const bm = BIOMES[bi];
+    let placed = 0;
+    let tries = 0;
+    while (placed < 4 && tries++ < 5000) {
+      const x = rng.int(4, w.w - 5);
+      const y = rng.int(bm.top + 10, bm.bottom - 2);
+      const i = w.idx(x, y);
+      if (w.fg[i] !== B.AIR || w.obj[i] || w.fg[i - w.w] !== B.AIR) continue;
+      if (!BLOCKS[w.fg[i + w.w]].solid) continue;
+      w.obj[i] = Obj.HEART_CRYSTAL;
+      w.decor[i] = 0;
+      placed++;
+    }
+  }
+}
+
 
 function isHostRock(b: number, bm: BiomeDef): boolean {
   return b === bm.base || b === bm.alt || b === bm.pocket || (bm.id === 0 && (b === B.STONE || b === B.CLAY));
@@ -343,50 +422,6 @@ function buildHeartChamber(w: World): void {
   }
 }
 
-function buildCampEntrance(w: World): void {
-  // a wooden-framed shaft leading down from camp into the first tunnels
-  const x0 = MINE_ENTRANCE_X;
-  const top = SURFACE_Y;
-  const bottom = SURFACE_Y + 16;
-  for (let y = top; y <= bottom + 1; y++) {
-    const i = w.idx(x0, y);
-    w.fg[i] = B.AIR;
-    w.wall[i] = B.PLANKS;
-    w.obj[i] = Obj.LADDER;
-  }
-  // landing tunnel heading east
-  for (let x = x0 - 3; x <= x0 + 14; x++) {
-    for (let y = bottom - 1; y <= bottom + 1; y++) {
-      const i = w.idx(x, y);
-      w.fg[i] = B.AIR;
-      if (w.wall[i] === 0) w.wall[i] = B.DIRT;
-    }
-    w.fg[w.idx(x, bottom + 2)] = B.PLANKS;
-    if ((x - x0) % 5 === 3) w.obj[w.idx(x, bottom + 1)] = Obj.BEAM;
-  }
-  w.obj[w.idx(x0 + 2, bottom)] = Obj.TORCH;
-  w.obj[w.idx(x0 + 10, bottom)] = Obj.TORCH;
-  // frame beams at the mouth
-  w.fg[w.idx(x0 - 1, top)] = B.PLANKS;
-  w.fg[w.idx(x0 + 1, top)] = B.PLANKS;
-}
-
-function buildLiftStation(w: World, row: number): void {
-  const cx = SHAFT_X;
-  for (let y = row - 3; y <= row; y++) {
-    for (let x = cx - 4; x <= cx + 4; x++) {
-      const i = w.idx(x, y);
-      w.fg[i] = B.AIR;
-      w.decor[i] = 0;
-      if (w.wall[i] === 0) w.wall[i] = B.STONE;
-    }
-  }
-  for (let x = cx - 5; x <= cx + 5; x++) w.fg[w.idx(x, row + 1)] = B.PLANKS;
-  w.obj[w.idx(cx, row)] = Obj.LIFT;
-  w.obj[w.idx(cx - 3, row - 2)] = Obj.TORCH;
-  w.obj[w.idx(cx + 3, row - 2)] = Obj.TORCH;
-}
-
 const LIGHT_DECOR = new Set([37, 39, 44, 45, 54, 139, 140, 141, 156, 157]);
 export function decorLight(code: number): [number, number, number] | null {
   if (!LIGHT_DECOR.has(code)) return null;
@@ -448,8 +483,9 @@ function placeChests(w: World, rng: Rng): void {
       const y = rng.int(bm.top + 6, bm.bottom - 2);
       const i = w.idx(x, y);
       if (w.fg[i] !== B.AIR || w.obj[i]) continue;
+      if (y < w.surface[x] + 8) continue;
       if (!BLOCKS[w.fg[i + w.w]].solid || w.fg[i + w.w] === B.LAVA) continue;
-      if (Math.abs(x - SHAFT_X) < 6) continue;
+      if (Math.abs(x - SPAWN_X) < 8 && y < BIOMES[1].top) continue;
       w.obj[i] = Obj.CHEST;
       w.decor[i] = 0;
       placed++;
@@ -457,7 +493,3 @@ function placeChests(w: World, rng: Rng): void {
   }
 }
 
-/** The surface camp is solid ground with no decor; return the spawn point in tiles. */
-export function campSpawn(): { x: number; y: number } {
-  return { x: SHAFT_X - 3, y: SURFACE_Y - 1 };
-}

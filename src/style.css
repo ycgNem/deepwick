@@ -118,6 +118,10 @@ button.ghost {
 .bar.oil .fill {
   background: linear-gradient(#ffd890, var(--oil) 55%, #8a5a18);
 }
+.bar.food .fill {
+  background: linear-gradient(#ffd0a0, #d07a3a 55%, #7a3a18);
+}
+.bar.food .fill.low,
 .bar.oil .fill.low {
   animation: pulse 0.6s infinite alternate;
 }
@@ -225,19 +229,32 @@ button.ghost {
   font-size: 13px;
   color: var(--dim);
 }
-#hotbar {
+.hotwrap {
   position: absolute;
   left: 50%;
-  bottom: 14px;
+  bottom: 12px;
   transform: translateX(-50%);
+  text-align: center;
+}
+#hotbar {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   pointer-events: auto;
+}
+#heldName {
+  font-size: 15px;
+  margin-bottom: 6px;
+  color: var(--gold);
+  text-shadow: 1px 1px 0 #000, 0 0 6px #000;
+  opacity: 0.85;
+}
+#heldName.flash {
+  animation: tin 0.25s ease-out;
 }
 .slot {
   position: relative;
-  width: 54px;
-  height: 54px;
+  width: 48px;
+  height: 48px;
   background: rgba(14, 10, 20, 0.85);
   border: 2px solid #000;
   box-shadow: 0 0 0 2px #3d2f45;
@@ -885,4 +902,204 @@ kbd {
   height: 100%;
   width: 0;
   background: var(--gold);
+}
+
+/* ---------------- survival additions ---------------- */
+.chip.clock {
+  padding: 2px 10px 2px 6px;
+  font-size: 14px;
+  gap: 6px;
+}
+.chip.clock i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.chip.clock i.sun {
+  background: radial-gradient(#fff6c0, #ffc040);
+  box-shadow: 0 0 8px #ffc040;
+}
+.chip.clock i.moon {
+  background: radial-gradient(#ffffff, #b8c0ff);
+  box-shadow: 0 0 8px #8a9aff;
+}
+.chip.clock.night {
+  border-color: #3a3a7a;
+}
+#cursorItem {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  display: none;
+}
+#cursorItem.show {
+  display: block;
+}
+#cursorItem img {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+  filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.6));
+}
+#cursorItem span {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  font-size: 14px;
+  text-shadow: 1px 1px 0 #000;
+}
+#tip {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  display: none;
+  max-width: 280px;
+  background: rgba(12, 9, 16, 0.96);
+  border: 2px solid var(--edge);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+#tip.show {
+  display: block;
+}
+#tip b {
+  display: block;
+  color: var(--gold);
+  font-size: 15px;
+}
+#tip em {
+  display: block;
+  font-style: normal;
+  color: #9ad8ff;
+  margin: 2px 0;
+}
+#tip small {
+  display: block;
+  color: var(--text);
+  opacity: 0.85;
+}
+#tip small.dim {
+  color: var(--dim);
+}
+.win.inv,
+.win.chest {
+  width: min(1040px, 96vw);
+}
+.invwrap {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(10, 48px);
+  gap: 5px;
+}
+.grid .slot.hb {
+  background: rgba(40, 30, 16, 0.85);
+}
+.chest-grid {
+  margin-bottom: 8px;
+}
+.equip {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.eq {
+  text-align: center;
+}
+.eq small {
+  display: block;
+  font-size: 11px;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+.eqslot {
+  background: rgba(30, 24, 50, 0.9) !important;
+}
+.mini-stats {
+  display: flex;
+  gap: 14px;
+  margin: 2px 0 10px;
+  font-size: 14px;
+  color: var(--dim);
+  align-items: center;
+}
+.mini-stats img {
+  width: 16px;
+  height: 16px;
+}
+.craft {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.craft-hd {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.craft-hd h3 {
+  margin: 0;
+  color: var(--gold);
+  font-size: 18px;
+}
+.craft-hd small {
+  color: var(--dim);
+  flex: 1;
+}
+.toggle {
+  font-size: 12px;
+  color: var(--dim);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.recipes {
+  display: grid;
+  gap: 4px;
+  max-height: 56vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+.rc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 2px solid #000;
+  padding: 3px 6px;
+  opacity: 0.6;
+}
+.rc.ok {
+  opacity: 1;
+  border-color: #4a6a3a;
+}
+.rc img.ic.big {
+  width: 40px;
+  height: 40px;
+}
+.rc .rn {
+  flex: 1;
+  min-width: 0;
+}
+.rc .rn b {
+  font-weight: 400;
+  font-size: 15px;
+}
+.rc .needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rc .where {
+  color: var(--no);
+  font-size: 11px;
+}
+.rc button {
+  padding: 3px 8px;
+  font-size: 13px;
 }

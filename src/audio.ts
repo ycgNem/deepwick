@@ -25,6 +25,14 @@ const SFX = [
   'sizzle',
   'death',
   'cave_ambience',
+  'chop',
+  'eat',
+  'craft',
+  'place',
+  'groan',
+  'door',
+  'bow',
+  'rustle',
 ] as const;
 export type SfxId = (typeof SFX)[number];
 

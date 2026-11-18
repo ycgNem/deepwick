@@ -3,6 +3,7 @@ import type { Game } from './game';
 import { BIOMES } from './data/biomes';
 import { TILE } from './constants';
 import { B } from './data/blocks';
+import { give } from './state';
 
 export function installDev(getGame: () => Game | null): void {
   const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -40,6 +41,11 @@ export function installDev(getGame: () => Game | null): void {
         }
       }
       return null;
+    },
+    /** put items straight into the pack */
+    give(id: string, n = 1) {
+      const g = getGame();
+      if (g) give(g.p.inv, id, n);
     },
     async mine(tx: number, ty: number, maxMs = 6000) {
       const g = getGame();

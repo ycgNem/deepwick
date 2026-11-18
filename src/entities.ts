@@ -138,6 +138,12 @@ export class Player implements Body {
   heatT = 0;
   darkT = 0;
   lavaT = 0;
+  /** cooldown before the held item can be used again */
+  useT = 0;
+  starveT = 0;
+  regenT = 0;
+  swingKind: 'mine' | 'attack' | 'wall' = 'mine';
+  eatT = 0;
 
   get cx(): number {
     return this.x + this.w / 2;
@@ -221,6 +227,7 @@ export interface Projectile {
   r: number;
   gravity: number;
   hostile: boolean;
+  arrow?: boolean;
 }
 
 export class Bomb implements Body {

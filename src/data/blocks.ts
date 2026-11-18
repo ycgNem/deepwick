@@ -32,17 +32,19 @@ export enum B {
   GLOWMOSS,
   HEARTSTONE,
   GRASS,
+  STONE_BRICK,
   COUNT,
 }
 
 export interface BlockDef {
   name: string;
-  /** texture sheet + index: 'r' = rock sheet, 'o' = ore sheet */
-  tex: ['r' | 'o', number] | null;
+  /** texture sheet + index: 'r' = rock sheet, 'o' = ore sheet, 'x' = built at load time */
+  tex: ['r' | 'o' | 'x', number] | null;
   solid: boolean;
+  /** pick tier needed: 0 = bare hands */
   tier: number;
   hp: number;
-  /** item dropped when mined, if any */
+  /** item dropped when mined ('@relic' rolls a relic), if any */
   drop?: string;
   xp: number;
   light?: [number, number, number];
@@ -51,25 +53,27 @@ export interface BlockDef {
   ore?: boolean;
   unbreakable?: boolean;
   liquid?: boolean;
+  /** grass / moss tufts drawn on exposed tops */
+  topper?: 'grass' | 'moss';
 }
 
 const D: Partial<Record<B, BlockDef>> = {
   [B.AIR]: { name: 'Air', tex: null, solid: false, tier: 0, hp: 0, xp: 0, color: '#000' },
-  [B.DIRT]: { name: 'Dirt', tex: ['r', 0], solid: true, tier: 1, hp: 2, xp: 1, color: '#7a4a2a' },
-  [B.CLAY]: { name: 'Clay', tex: ['r', 1], solid: true, tier: 1, hp: 2.6, xp: 1, color: '#6a2c22' },
-  [B.STONE]: { name: 'Stone', tex: ['r', 2], solid: true, tier: 1, hp: 3.2, xp: 1, color: '#77777a' },
-  [B.GRAVEL]: { name: 'Gravel', tex: ['r', 3], solid: true, tier: 1, hp: 2.4, xp: 1, color: '#3d4a5a' },
-  [B.MOSS_STONE]: { name: 'Mossy Stone', tex: ['r', 4], solid: true, tier: 2, hp: 5, xp: 2, color: '#56692a' },
-  [B.GROTTO_ROCK]: { name: 'Grotto Rock', tex: ['r', 5], solid: true, tier: 2, hp: 5.6, xp: 2, color: '#1d4a52' },
-  [B.CRYSTAL_ROCK]: { name: 'Crystal Rock', tex: ['r', 6], solid: true, tier: 3, hp: 8, xp: 3, color: '#a99ac9' },
-  [B.GEODE]: { name: 'Geode Stone', tex: ['r', 7], solid: true, tier: 3, hp: 9, xp: 3, color: '#5a2a8a' },
-  [B.BASALT]: { name: 'Basalt', tex: ['r', 8], solid: true, tier: 4, hp: 12, xp: 4, color: '#2c2c30' },
-  [B.MAGMA_ROCK]: { name: 'Magma Rock', tex: ['r', 9], solid: true, tier: 4, hp: 13, xp: 4, color: '#5a2010', light: [0.35, 0.12, 0.02] },
-  [B.OBSIDIAN]: { name: 'Obsidian', tex: ['r', 10], solid: true, tier: 5, hp: 20, xp: 6, color: '#141428' },
+  [B.DIRT]: { name: 'Dirt', tex: ['r', 0], solid: true, tier: 0, hp: 1.6, xp: 1, drop: 'dirt', color: '#7a4a2a' },
+  [B.CLAY]: { name: 'Clay', tex: ['r', 1], solid: true, tier: 0, hp: 2.2, xp: 1, drop: 'clay', color: '#9a4a32' },
+  [B.STONE]: { name: 'Stone', tex: ['r', 2], solid: true, tier: 1, hp: 3.2, xp: 1, drop: 'stone', color: '#77777a' },
+  [B.GRAVEL]: { name: 'Gravel', tex: ['r', 3], solid: true, tier: 0, hp: 2, xp: 1, drop: 'gravel', color: '#3d4a5a' },
+  [B.MOSS_STONE]: { name: 'Mossy Stone', tex: ['r', 4], solid: true, tier: 2, hp: 5, xp: 2, drop: 'mossstone', color: '#56692a', topper: 'moss' },
+  [B.GROTTO_ROCK]: { name: 'Grotto Rock', tex: ['r', 5], solid: true, tier: 2, hp: 5.6, xp: 2, drop: 'grottorock', color: '#1d4a52' },
+  [B.CRYSTAL_ROCK]: { name: 'Crystal Rock', tex: ['r', 6], solid: true, tier: 3, hp: 8, xp: 3, drop: 'crystalrock', color: '#a99ac9' },
+  [B.GEODE]: { name: 'Geode Stone', tex: ['r', 7], solid: true, tier: 3, hp: 9, xp: 3, drop: 'geodestone', color: '#5a2a8a' },
+  [B.BASALT]: { name: 'Basalt', tex: ['r', 8], solid: true, tier: 4, hp: 12, xp: 4, drop: 'basalt', color: '#2c2c30' },
+  [B.MAGMA_ROCK]: { name: 'Magma Rock', tex: ['r', 9], solid: true, tier: 4, hp: 13, xp: 4, drop: 'magmarock', color: '#5a2010', light: [0.35, 0.12, 0.02] },
+  [B.OBSIDIAN]: { name: 'Obsidian', tex: ['r', 10], solid: true, tier: 5, hp: 20, xp: 6, drop: 'obsidian', color: '#141428' },
   [B.LAVA]: { name: 'Lava', tex: ['r', 11], solid: false, tier: 99, hp: 0, xp: 0, color: '#ff7a10', light: [1.0, 0.5, 0.12], liquid: true, unbreakable: true },
-  [B.ABYSS_STONE]: { name: 'Abyss Stone', tex: ['r', 12], solid: true, tier: 5, hp: 18, xp: 5, color: '#2a1838' },
-  [B.RUIN_BRICK]: { name: 'Ruin Brick', tex: ['r', 13], solid: true, tier: 5, hp: 22, xp: 5, color: '#b0905a' },
-  [B.PLANKS]: { name: 'Planks', tex: ['r', 14], solid: true, tier: 1, hp: 1.6, xp: 0, color: '#8a5a32' },
+  [B.ABYSS_STONE]: { name: 'Abyss Stone', tex: ['r', 12], solid: true, tier: 5, hp: 18, xp: 5, drop: 'abyssstone', color: '#2a1838' },
+  [B.RUIN_BRICK]: { name: 'Ruin Brick', tex: ['r', 13], solid: true, tier: 5, hp: 22, xp: 5, drop: 'ruinbrick', color: '#b0905a' },
+  [B.PLANKS]: { name: 'Planks', tex: ['r', 14], solid: true, tier: 0, hp: 1.8, xp: 0, drop: 'wood', color: '#8a5a32' },
   [B.BEDROCK]: { name: 'Bedrock', tex: ['r', 15], solid: true, tier: 99, hp: 9999, xp: 0, color: '#0e1424', unbreakable: true },
   [B.COAL]: { name: 'Coal Ore', tex: ['o', 0], solid: true, tier: 1, hp: 3.6, xp: 3, drop: 'coal', color: '#222', ore: true },
   [B.COPPER]: { name: 'Copper Ore', tex: ['o', 1], solid: true, tier: 1, hp: 4.4, xp: 4, drop: 'copper', color: '#d2742a', ore: true },
@@ -86,7 +90,8 @@ const D: Partial<Record<B, BlockDef>> = {
   [B.RELIC_STONE]: { name: 'Relic Stone', tex: ['o', 12], solid: true, tier: 3, hp: 12, xp: 30, drop: '@relic', color: '#e8c050', ore: true, light: [0.4, 0.32, 0.08] },
   [B.GLOWMOSS]: { name: 'Glowmoss', tex: ['o', 13], solid: true, tier: 2, hp: 3, xp: 2, drop: 'sporecap', color: '#2ad0b0', light: [0.08, 0.42, 0.36] },
   [B.HEARTSTONE]: { name: 'Heartstone', tex: ['o', 14], solid: true, tier: 6, hp: 30, xp: 20, color: '#7a1020', light: [0.28, 0.02, 0.06] },
-  [B.GRASS]: { name: 'Grassy Dirt', tex: ['o', 15], solid: true, tier: 1, hp: 2, xp: 1, color: '#4a8a2a' },
+  [B.GRASS]: { name: 'Grassy Dirt', tex: ['r', 0], solid: true, tier: 0, hp: 1.6, xp: 1, drop: 'dirt', color: '#4a8a2a', topper: 'grass' },
+  [B.STONE_BRICK]: { name: 'Stone Brick', tex: ['x', 0], solid: true, tier: 1, hp: 4, xp: 0, drop: 'stonebrick', color: '#8a8a90' },
 };
 
 export const BLOCKS: BlockDef[] = [];
@@ -99,3 +104,9 @@ for (let i = 0; i < B.COUNT; i++) {
 export function isSolid(b: number): boolean {
   return BLOCKS[b].solid;
 }
+
+/** Background walls the player can place and take back down. */
+export const PLACED_WALLS: Partial<Record<number, string>> = {
+  [B.PLANKS]: 'woodwall',
+  [B.STONE_BRICK]: 'stonewall',
+};

@@ -6,6 +6,7 @@ import { generateWorld } from './world/gen';
 interface SaveFile {
   p: Progress;
   fg: string;
+  wall: string;
   obj: string;
   decor: string;
   explored: string;
@@ -40,7 +41,7 @@ function unrle(b64: string, target: Uint8Array): void {
 }
 
 export function saveGame(p: Progress, w: World): boolean {
-  const data: SaveFile = { p, fg: rle(w.fg), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored) };
+  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored) };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
@@ -62,12 +63,14 @@ export function loadGame(): { p: Progress; world: World } | null {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw) as SaveFile;
-    if (!data.p || data.p.version !== 1) return null;
+    if (!data.p || data.p.version !== 2) return null;
     const world = generateWorld(data.p.seed);
     unrle(data.fg, world.fg);
+    if (data.wall) unrle(data.wall, world.wall);
     unrle(data.obj, world.obj);
     unrle(data.decor, world.decor);
     unrle(data.explored, world.explored);
+    world.updateAllSky();
     world.dirty.clear();
     return { p: data.p, world };
   } catch (e) {
