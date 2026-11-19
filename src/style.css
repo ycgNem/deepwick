@@ -800,34 +800,72 @@ kbd {
 #intro.show {
   display: block;
 }
-.title-art {
+/* the title sits over a live scene from the game itself (see title.ts) */
+.title-shade {
   position: absolute;
   inset: 0;
-  background: center / cover no-repeat;
-  image-rendering: pixelated;
-  filter: brightness(0.85);
-}
-#title::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(rgba(5, 3, 10, 0.55), rgba(5, 3, 10, 0) 45%, rgba(5, 3, 10, 0.7));
+  background:
+    linear-gradient(90deg, rgba(6, 4, 10, 0.86) 0%, rgba(6, 4, 10, 0.62) 30%, rgba(6, 4, 10, 0) 58%),
+    linear-gradient(rgba(6, 4, 10, 0) 70%, rgba(6, 4, 10, 0.55));
   pointer-events: none;
 }
 .title-box {
   position: absolute;
-  left: 50%;
-  top: 8vh;
-  transform: translateX(-50%);
-  text-align: center;
+  left: clamp(24px, 7vw, 120px);
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: left;
   z-index: 1;
+}
+.title-box .menu {
+  align-items: flex-start;
+}
+.title-caption {
+  position: absolute;
+  right: clamp(16px, 4vw, 48px);
+  bottom: clamp(16px, 4vh, 40px);
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-shadow: 2px 2px 0 #000;
+  transition: opacity 0.6s;
+  pointer-events: none;
+}
+.title-caption.fade {
+  opacity: 0;
+}
+.title-caption b {
+  font-family: 'Silkscreen', monospace;
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: var(--gold);
+}
+.title-caption span {
+  color: #cfc3b0;
+  font-size: 15px;
+}
+@media (max-width: 760px) {
+  .title-shade {
+    background: rgba(6, 4, 10, 0.6);
+  }
+  .title-box {
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    width: calc(100vw - 32px);
+  }
+  .title-box .menu {
+    align-items: center;
+  }
 }
 .title-box h1,
 #loading h1 {
   margin: 0;
   font-family: 'Silkscreen', monospace;
   font-weight: 400;
-  font-size: clamp(56px, 10vw, 120px);
+  font-size: clamp(48px, 8vw, 108px);
   letter-spacing: 6px;
   color: var(--gold);
   text-shadow:
@@ -856,7 +894,7 @@ kbd {
   text-shadow: 1px 1px 0 #000;
 }
 #intro {
-  background: radial-gradient(circle at 50% 30%, #2a1c34, #07050b 70%);
+  background: radial-gradient(circle at 50% 40%, rgba(30, 20, 38, 0.82), rgba(7, 5, 11, 0.94) 70%);
 }
 .intro-card {
   position: absolute;

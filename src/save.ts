@@ -2,6 +2,7 @@ import { SAVE_KEY, SETTINGS_KEY } from './constants';
 import type { Progress } from './state';
 import { World } from './world/world';
 import { generateWorld } from './world/gen';
+import { B } from './data/blocks';
 
 interface SaveFile {
   p: Progress;
@@ -12,6 +13,8 @@ interface SaveFile {
   explored: string;
   rail?: string;
   placed?: string;
+  /** set once worlds had water in them */
+  water?: number;
 }
 
 /** run-length encode a byte array as (value, run) pairs, then base64 */
@@ -43,7 +46,7 @@ function unrle(b64: string, target: Uint8Array): void {
 }
 
 export function saveGame(p: Progress, w: World): boolean {
-  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed) };
+  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed), water: 1 };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
@@ -66,7 +69,13 @@ export function loadGame(): { p: Progress; world: World } | null {
     if (!raw) return null;
     const data = JSON.parse(raw) as SaveFile;
     if (!data.p || data.p.version !== 2) return null;
+    // saves from before fishing
+    const sk = data.p.skills as Partial<Progress['skills']>;
+    if (!sk.fishing) sk.fishing = { lvl: 1, xp: 0 };
     const world = generateWorld(data.p.seed);
+    // worlds saved before there was water get the cave pools wherever that space is still open
+    const pools: number[] = [];
+    if (!data.water) for (let i = 0; i < world.fg.length; i++) if (world.fg[i] === B.WATER) pools.push(i);
     unrle(data.fg, world.fg);
     if (data.wall) unrle(data.wall, world.wall);
     unrle(data.obj, world.obj);
@@ -75,6 +84,7 @@ export function loadGame(): { p: Progress; world: World } | null {
     if (data.rail) unrle(data.rail, world.rail);
     else world.rail.fill(0);
     if (data.placed) unrle(data.placed, world.placed);
+    for (const i of pools) if (world.fg[i] === B.AIR && !world.obj[i] && !world.rail[i]) world.fg[i] = B.WATER;
     world.updateAllSky();
     world.dirty.clear();
     return { p: data.p, world };

@@ -32,6 +32,7 @@ const SKILL_INFO: Record<SkillId, { name: string; color: string; perk: (l: numbe
   mining: { name: 'Mining', color: '#e0a050', perk: (l) => `+${(l - 1) * 2}% mining speed, +${((l - 1) * 0.6).toFixed(1)}% double ore` },
   combat: { name: 'Combat', color: '#e05a5a', perk: (l) => `+${(l - 1) * 3}% damage, +${(l - 1) * 2} max health` },
   delving: { name: 'Delving', color: '#5ab0e0', perk: (l) => `+${l - 1}% sell prices, +${l - 1}% oil efficiency` },
+  fishing: { name: 'Fishing', color: '#5ad0b0', perk: (l) => `${Math.min(45, (l - 1) * 1.5).toFixed(0)}% quicker bites, wider catch zone, rarer fish` },
 };
 
 const EQUIP_SLOTS: { key: EquipKey; label: string; slot: string }[] = [
@@ -229,7 +230,7 @@ export class UI implements UIHooks {
     h.biome.textContent = pt.y <= surf + 2 ? (g.p.buildings.length ? 'Your settlement' : 'The Wild Meadow') : biomeAt(pt.y).name;
     this.updateHotbar();
     let sk = '';
-    for (const id of ['mining', 'combat', 'delving'] as SkillId[]) {
+    for (const id of ['mining', 'combat', 'delving', 'fishing'] as SkillId[]) {
       const s = g.p.skills[id];
       const frac = s.lvl >= MAX_LEVEL ? 1 : s.xp / xpToNext(s.lvl);
       sk += `<div class="sk"><b style="color:${SKILL_INFO[id].color}">${SKILL_INFO[id].name} ${s.lvl}</b><i><u style="width:${frac * 100}%;background:${SKILL_INFO[id].color}"></u></i></div>`;
@@ -618,6 +619,7 @@ export class UI implements UIHooks {
       <div><kbd>A</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>W</kbd><kbd>S</kbd> climb ladders, <kbd>S</kbd> drops through ladder tops</div>
       <div><kbd>Left mouse</kbd> use the held item: dig, chop, attack, place, eat. Clicking rock with anything in hand digs with your best pickaxe</div>
       <div><kbd>Right mouse</kbd> open chests and doors, use beds and stations, pick berries, climb into carts; otherwise place or eat what you hold</div>
+      <div><kbd>Left mouse</kbd> with a fishing rod: cast at water, click when the bobber dips, then click while the needle is in the green · <kbd>Space</kbd> swims up</div>
       <div><kbd>1</kbd>–<kbd>0</kbd> or wheel: hotbar · <kbd>Q</kbd> drop held stack</div>
       <div><kbd>E</kbd> talk / interact / ride a cart · <kbd>F</kbd> lamp oil · <kbd>H</kbd> tonic · <kbd>R</kbd> recall to bed · <kbd>G</kbd> grappling hook</div>
       <div><kbd>Tab</kbd> pack &amp; crafting · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</div></div>
@@ -813,6 +815,7 @@ export class UI implements UIHooks {
     if (def.kind === 'bow') stats.push(`${def.dmg} damage + arrows`);
     if (def.kind === 'food') stats.push(`+${def.food} food${def.heal ? `, +${def.heal} health` : ''}`);
     if (def.kind === 'lantern') stats.push(`Light ${def.radius} · ${def.oil}s of oil`);
+    if (def.kind === 'rod') stats.push(def.rod && def.rod > 1 ? `Bites ${Math.round((def.rod - 1) * 100)}% sooner, wider catch zone` : 'Catches pond and pool fish');
     if (def.value > 0 && sellable(def) && itemValue(def.id, this.game.st) > 0) stats.push(`Sells for ${itemValue(def.id, this.game.st)}c`);
     const slotName = equipSlotOf(def);
     this.tipEl.innerHTML = `<b>${esc(def.name)}${n > 1 ? ` ×${n}` : ''}</b>${stats.length ? `<em>${stats.join(' · ')}</em>` : ''}<small>${esc(def.desc)}</small>${slotName ? '<small class="dim">Shift-click to equip</small>' : ''}`;

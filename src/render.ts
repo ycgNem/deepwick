@@ -62,6 +62,8 @@ export class Renderer {
   /** sky art mirrored side by side so it tiles without a seam */
   private skyDay: HTMLCanvasElement;
   private skyDusk: HTMLCanvasElement;
+  private skyDayTop: SkyTop;
+  private skyDuskTop: SkyTop;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -74,7 +76,9 @@ export class Renderer {
     this.buildCracks();
     this.skyDay = mirrored(A.bg.day);
     this.skyDusk = mirrored(A.bg.surface);
-    for (let i = 0; i < 140; i++) this.stars.push({ x: Math.random() * 2000, y: Math.random() * 260, b: Math.random() });
+    this.skyDayTop = skyTop(this.skyDay, [0.62, 0.74, 0.9]);
+    this.skyDuskTop = skyTop(this.skyDusk, [0.45, 0.5, 0.62]);
+    for (let i = 0; i < 320; i++) this.stars.push({ x: Math.random() * 2000, y: Math.random() * 900, b: Math.random() });
   }
 
   private makeGlow(): HTMLCanvasElement {
@@ -177,6 +181,8 @@ export class Renderer {
       const bob = Math.abs(g.ride.vx) > 40 ? Math.round(Math.sin(g.time * 30) * 0.6) : 0;
       ctx.drawImage(c, Math.round(g.ride.x - c.width / 2 - camX), Math.round((g.ride.row + 1) * TILE - c.height - 3 + bob - camY));
     }
+    this.drawWater(g, ctx, camX, camY, vw, vh);
+    this.drawFishing(g, ctx, camX, camY);
     this.updateAmbient(g, dt, camX, camY, vw, vh);
     this.drawGhost(g, ctx, camX, camY);
 
@@ -191,6 +197,7 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
 
     this.drawGlows(g, ctx, camX, camY, vw, vh);
+    this.drawReelMeter(g, ctx, camX, camY);
     if (this.vignette) ctx.drawImage(this.vignette, 0, 0);
     this.drawHover(g, ctx, camX, camY);
 
@@ -233,26 +240,20 @@ export class Renderer {
     const c = g.p.clock;
     const dl = daylight(c);
     const dusk = c > 0.5 && c < 0.68 ? 1 - Math.abs(c - 0.59) / 0.09 : c < 0.07 ? 1 - c / 0.07 : c > 0.93 ? (c - 0.93) / 0.07 : 0;
-    // sky gradient behind the art
-    const top = mix([20, 22, 44], [92, 140, 205], (dl - 0.12) / 0.88);
-    ctx.fillStyle = `rgb(${top.join(',')})`;
-    ctx.fillRect(0, 0, vw, vh);
-    if (dl < 0.6) {
-      const a = (0.6 - dl) / 0.48;
-      for (const s of this.stars) {
-        const x = mod(s.x - camX * 0.05, vw + 40) - 20;
-        const y = s.y + (groundY - SURFACE_Y * TILE) * 0.02;
-        ctx.fillStyle = `rgba(255,255,240,${a * (0.4 + 0.6 * Math.abs(Math.sin(g.time * (0.5 + s.b) + s.x)))})`;
-        ctx.fillRect(Math.round(x), Math.round(y), s.b > 0.85 ? 2 : 1, s.b > 0.85 ? 2 : 1);
-      }
-    }
     const baseCam = SURFACE_Y * TILE - vh * 0.62;
-    const draw = (img: HTMLCanvasElement, alpha: number): void => {
+    const y0 = Math.round(vh * 0.62 + 90 - (camY - baseCam) * 0.45 - this.skyDay.height);
+    // the art continues upward: a gradient from its own top colour into a deeper zenith, so it never ends mid-sky
+    const draw = (img: HTMLCanvasElement, top: SkyTop, alpha: number): void => {
       if (alpha <= 0.01) return;
-      const bottom = vh * 0.62 + 90 - (camY - baseCam) * 0.45;
-      const y0 = Math.round(bottom - img.height);
-      const ox = -(((camX * 0.15) % img.width) + img.width) % img.width;
       ctx.globalAlpha = alpha;
+      if (y0 > 0) {
+        const grad = ctx.createLinearGradient(0, y0 - 300, 0, y0);
+        grad.addColorStop(0, top.deep);
+        grad.addColorStop(1, top.join);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, vw, y0);
+      }
+      const ox = -(((camX * 0.15) % img.width) + img.width) % img.width;
       for (let x = ox; x < vw; x += img.width) ctx.drawImage(img, Math.round(x), y0);
       ctx.globalAlpha = 1;
       const imgBottom = y0 + img.height;
@@ -263,11 +264,24 @@ export class Renderer {
     };
     // day art fades into the dusk art, then both darken into night
     const dayA = Math.max(0, Math.min(1, (dl - 0.3) / 0.6)) * (1 - dusk * 0.8);
-    draw(this.skyDusk, Math.min(1, 1 - dayA + 0.001));
-    draw(this.skyDay, dayA);
+    ctx.fillStyle = this.skyDuskTop.deep;
+    ctx.fillRect(0, 0, vw, vh);
+    draw(this.skyDusk, this.skyDuskTop, 1);
+    draw(this.skyDay, this.skyDayTop, dayA);
     if (dl < 1) {
       ctx.fillStyle = `rgba(8,10,30,${(1 - dl) * 0.72})`;
       ctx.fillRect(0, 0, vw, vh);
+    }
+    // stars only in the open sky above the painted mountains (the dusk art has its own)
+    if (dl < 0.6 && y0 > 0) {
+      const a = (0.6 - dl) / 0.48;
+      for (const s of this.stars) {
+        const x = mod(s.x - camX * 0.05, vw + 40) - 20;
+        const y = mod(s.y - (camY - baseCam) * 0.3, 900) - 600 + y0;
+        if (y < 0 || y > y0 - 4) continue;
+        ctx.fillStyle = `rgba(255,255,240,${a * (0.4 + 0.6 * Math.abs(Math.sin(g.time * (0.5 + s.b) + s.x)))})`;
+        ctx.fillRect(Math.round(x), Math.round(y), s.b > 0.85 ? 2 : 1, s.b > 0.85 ? 2 : 1);
+      }
     }
     // the moon
     if (isNight(c)) {
@@ -282,6 +296,152 @@ export class Renderer {
       ctx.fillStyle = 'rgba(160,170,210,0.7)';
       ctx.fillRect(Math.round(mx) - 3, Math.round(my) - 2, 3, 3);
       ctx.fillRect(Math.round(mx) + 2, Math.round(my) + 3, 2, 2);
+    }
+  }
+
+  // ------------------------------------------------------------------ water and fishing
+  private drawWater(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const w = g.world;
+    const tx0 = Math.max(0, Math.floor(camX / TILE));
+    const ty0 = Math.max(0, Math.floor(camY / TILE));
+    const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
+    const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE));
+    const t = g.time;
+    const tex = terrainTexture(MAT.water);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        if (w.fg[ty * w.w + tx] !== B.WATER) continue;
+        const sx = tx * TILE - camX;
+        const sy = ty * TILE - camY;
+        const above = w.get(tx, ty - 1);
+        const top = above !== B.WATER;
+        const open = top && !BLOCKS[above].solid;
+        const rip = open ? 3 + Math.round(Math.sin(t * 2.1 + tx * 0.9) * 1.2 + Math.sin(t * 1.3 + tx * 2.3) * 0.6) : 0;
+        let depth = 0;
+        while (depth < 4 && w.get(tx, ty - depth - 1) === B.WATER) depth++;
+        ctx.globalAlpha = 0.66;
+        const ox = mod(Math.floor(tx * TILE + t * 6), 128);
+        const oy = mod(Math.floor(ty * TILE + Math.sin(t * 0.6 + tx * 0.4) * 4), 128);
+        blitWrapped(ctx, tex, ox, oy, sx, sy + rip, TILE, TILE - rip);
+        if (depth > 0) {
+          ctx.globalAlpha = Math.min(0.45, depth * 0.11);
+          ctx.fillStyle = '#04102a';
+          ctx.fillRect(sx, sy, TILE, TILE);
+        }
+        if (open) {
+          ctx.globalAlpha = 0.9;
+          ctx.fillStyle = '#b4e2ff';
+          ctx.fillRect(sx, sy + rip, TILE, 1);
+          ctx.globalAlpha = 0.45;
+          ctx.fillStyle = '#6ab4e8';
+          ctx.fillRect(sx, sy + rip + 1, TILE, 2);
+          // a glint drifting along the surface
+          const gl = mod(Math.floor(t * 9 + tx * 13), 64);
+          if (gl < TILE - 4) {
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(sx + gl, sy + rip, 3, 1);
+          }
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  private drawFishing(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const f = g.fishing;
+    if (f && !g.player.dead) {
+      const tip = g.rodTip();
+      const tx = tip.x - camX;
+      const ty = tip.y - camY;
+      let bx = f.x - camX;
+      let by = f.y - camY;
+      if (f.state === 'float') by += Math.sin(g.time * 3) * 1.2;
+      else if (f.state === 'bite') by += 4;
+      else if (f.state === 'reel') {
+        bx += Math.round((Math.random() - 0.5) * 3);
+        by += 2 + Math.round((Math.random() - 0.5) * 2);
+      }
+      // the line: slack and sagging while you wait, tight while something pulls
+      const d = Math.hypot(bx - tx, by - ty);
+      const sag = f.state === 'float' ? Math.min(40, d * 0.22) : f.state === 'reel' || f.state === 'bite' ? 0 : Math.min(16, d * 0.08);
+      ctx.strokeStyle = 'rgba(230,236,245,0.75)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(tx) + 0.5, Math.round(ty) + 0.5);
+      ctx.quadraticCurveTo((tx + bx) / 2, (ty + by) / 2 + sag, Math.round(bx) + 0.5, Math.round(by) + 0.5);
+      ctx.stroke();
+      // ripples around a floating bobber
+      if (f.state === 'float' || f.state === 'bite') {
+        const r = (g.time * 14) % 16;
+        ctx.strokeStyle = `rgba(200,235,255,${0.5 * (1 - r / 16)})`;
+        ctx.beginPath();
+        ctx.ellipse(Math.round(bx), Math.round(f.y - camY), 3 + r, 1 + r * 0.25, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // the bobber: red over white
+      const x = Math.round(bx) - 2;
+      const y = Math.round(by) - 3;
+      ctx.fillStyle = '#1a1018';
+      ctx.fillRect(x - 1, y - 1, 6, f.state === 'bite' ? 4 : 7);
+      ctx.fillStyle = '#e04040';
+      ctx.fillRect(x, y, 4, 2);
+      if (f.state !== 'bite') {
+        ctx.fillStyle = '#f4f4f0';
+        ctx.fillRect(x, y + 2, 4, 3);
+      }
+      ctx.fillStyle = '#ffb0a0';
+      ctx.fillRect(x, y, 1, 1);
+    }
+    // the catch flies out of the water to you
+    const ff = g.fishFly;
+    if (ff) {
+      const k = Math.min(1, ff.t / 0.6);
+      const pl = g.player;
+      const x = ff.x0 + (pl.cx - ff.x0) * k;
+      const y = ff.y0 + (pl.cy - ff.y0) * k - Math.sin(k * Math.PI) * 46;
+      const def = ITEMS[ff.id] ?? ITEMS.coin;
+      if (def) {
+        const s = iconSrc(def.icon);
+        ctx.save();
+        ctx.translate(Math.round(x - camX), Math.round(y - camY));
+        ctx.rotate(k * Math.PI * 2 * (ff.x0 < pl.cx ? 1 : -1));
+        ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -11, -11, 22, 22);
+        ctx.restore();
+      }
+    }
+  }
+
+  /** the reeling game: click while the needle is in the green */
+  private drawReelMeter(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const f = g.fishing;
+    const pl = g.player;
+    if (!f || f.state !== 'reel' || pl.dead) return;
+    const W = 70;
+    const x = Math.round(pl.cx - camX - W / 2);
+    const y = Math.round(pl.y - camY - 24);
+    ctx.fillStyle = '#0c0a12';
+    ctx.fillRect(x - 2, y - 2, W + 4, 11);
+    ctx.fillStyle = '#2a2236';
+    ctx.fillRect(x, y, W, 7);
+    const z0 = Math.round(x + (f.zone - f.zoneW / 2) * W);
+    const zw = Math.max(3, Math.round(f.zoneW * W));
+    ctx.fillStyle = '#3aa85a';
+    ctx.fillRect(z0, y, zw, 7);
+    ctx.fillStyle = '#7ae89a';
+    ctx.fillRect(z0, y, zw, 2);
+    const nx = Math.round(x + f.needle * W);
+    ctx.fillStyle = '#0c0a12';
+    ctx.fillRect(nx - 2, y - 3, 4, 13);
+    ctx.fillStyle = '#fff6d8';
+    ctx.fillRect(nx - 1, y - 2, 2, 11);
+    // one pip per pull still needed
+    for (let i = 0; i < f.need; i++) {
+      const px = Math.round(pl.cx - camX - (f.need * 7) / 2 + i * 7);
+      ctx.fillStyle = '#0c0a12';
+      ctx.fillRect(px, y + 11, 5, 5);
+      ctx.fillStyle = i < f.hits ? '#ffd75a' : '#4a4058';
+      ctx.fillRect(px + 1, y + 12, 3, 3);
     }
   }
 
@@ -778,7 +938,16 @@ export class Renderer {
     // held item: torches are carried, weapons swing in an arc
     const hd = heldDef(g.p);
     if (!hd) return;
-    if (hd.id === 'torch' && !pl.swinging) {
+    if (hd.kind === 'rod' && !pl.swinging) {
+      const s = iconSrc(hd.icon);
+      const tip = g.rodTip();
+      // the icon runs from the handle (bottom left) to the tip (top right)
+      ctx.save();
+      ctx.translate(Math.round(tip.x - camX), Math.round(tip.y - camY));
+      if (pl.facing < 0) ctx.scale(-1, 1);
+      ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -25, -2, 28, 28);
+      ctx.restore();
+    } else if (hd.id === 'torch' && !pl.swinging) {
       const s = iconSrc(hd.icon);
       const hx = cx + pl.facing * 9 - 8;
       const hy = footY - 30;
@@ -1025,7 +1194,7 @@ export class Renderer {
     }
     out.globalAlpha = 1;
     const pl = g.player;
-    if (g.near && !g.ui.isOpen() && !pl.dead) {
+    if (g.near && !g.ui.isOpen() && !pl.dead && !g.fishing) {
       const size = Math.round(8 * s);
       out.font = `${size}px "Pixelify Sans", monospace`;
       const label = `[E] ${g.near.label}`;
@@ -1047,6 +1216,38 @@ export class Renderer {
       out.fillRect(x, y, w * (1 - pl.recallT / 1.6), 3 * s);
     }
   }
+}
+
+interface SkyTop {
+  join: string;
+  deep: string;
+}
+
+/** the colour along the top edge of a sky painting, and a deeper zenith to fade into above it */
+function skyTop(img: HTMLCanvasElement, deepen: [number, number, number]): SkyTop {
+  const g = img.getContext('2d');
+  // the most common colour along the top edge (an average would pick up clouds that touch it)
+  let r = 0;
+  let gg = 0;
+  let b = 0;
+  if (g) {
+    const d = g.getImageData(0, 0, img.width, 1).data;
+    const counts = new Map<number, number>();
+    let best = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const key = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+      const n = (counts.get(key) ?? 0) + 1;
+      counts.set(key, n);
+      if (n > best) {
+        best = n;
+        r = d[i];
+        gg = d[i + 1];
+        b = d[i + 2];
+      }
+    }
+  }
+  const c = (v: number[]): string => `rgb(${v.map((x) => Math.round(x)).join(',')})`;
+  return { join: c([r, gg, b]), deep: c([r * deepen[0], gg * deepen[1], b * deepen[2]]) };
 }
 
 function mirrored(img: HTMLImageElement): HTMLCanvasElement {
@@ -1146,11 +1347,6 @@ function hash(x: number, seed: number): number {
 
 function mod(a: number, n: number): number {
   return ((a % n) + n) % n;
-}
-
-function mix(a: number[], b: number[], t: number): number[] {
-  const k = Math.max(0, Math.min(1, t));
-  return a.map((v, i) => Math.round(v + (b[i] - v) * k));
 }
 
 function hexA(hex: string, a: number): string {

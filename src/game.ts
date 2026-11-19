@@ -30,7 +30,7 @@ import {
   MAX_LEVEL,
   SkillId,
 } from './state';
-import { Player, Enemy, Drop, Projectile, Bomb, Particle, FloatText, moveBody, applyGravity, overlaps, inLiquid } from './entities';
+import { Player, Enemy, Drop, Projectile, Bomb, Particle, FloatText, moveBody, applyGravity, overlaps, inLiquid, touches } from './entities';
 import { Input } from './input';
 import { audio, MusicId } from './audio';
 import { updateEnemy } from './ai';
@@ -145,6 +145,34 @@ const HOOK_RANGE = 11 * TILE;
 const HOOK_SPEED = 1150;
 const HOOK_PULL = 640;
 
+/** the fishing line: the bobber flying out, floating, a fish on, or reeling back in */
+export interface Fishing {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  state: 'fly' | 'float' | 'bite' | 'reel' | 'back';
+  t: number;
+  /** seconds until something bites */
+  wait: number;
+  /** what is on the line once hooked, and how hard it fights (-1 junk .. 3) */
+  catchId: string;
+  tier: number;
+  /** the reeling game: a needle sweeps a bar; click while it is in the green zone */
+  needle: number;
+  dir: number;
+  speed: number;
+  zone: number;
+  zoneW: number;
+  hits: number;
+  need: number;
+  misses: number;
+  /** the water row the bobber floats on; a meadow pond or a cave biome's pool */
+  row: number;
+  biome: number;
+  pond: boolean;
+}
+
 export function sharpenCost(level: number): number {
   return Math.round(80 * Math.pow(1.7, level));
 }
@@ -193,6 +221,12 @@ export class Game {
   ride: Ride | null = null;
   /** the grappling hook, while it is out */
   hook: Hook | null = null;
+  /** your fishing line, while it is out */
+  fishing: Fishing | null = null;
+  /** a caught fish arcing out of the water toward you */
+  fishFly: { id: string; x0: number; y0: number; t: number } | null = null;
+  private waterQ = new Set<number>();
+  private waterT = 0;
   hoverTile = { x: 0, y: 0, inReach: false, kind: 'none' as HoverKind, tx: 0, ty: 0, ok: false };
   hintCooldown = 0;
   lowOilWarned = false;
@@ -201,6 +235,8 @@ export class Game {
   /** tile index of the storage chest the UI has open */
   openChest = -1;
   wasNight = false;
+  /** what the current left-button hold is doing: decided when it starts, so digging never turns into placing */
+  private lmbMode: 'none' | 'break' | 'use' = 'none';
 
   constructor(
     public input: Input,
@@ -222,6 +258,8 @@ export class Game {
     this.reconcileRelics();
     if (this.p.bossRewardPending) setTimeout(() => this.grantBossReward(this.player.cx, this.player.cy), 800);
     this.snapCamera();
+    // settle any water a migrated save left hanging
+    for (let i = 0; i < this.world.fg.length; i++) if (this.world.fg[i] === B.WATER) this.waterQ.add(i);
   }
 
   /**
@@ -337,6 +375,8 @@ export class Game {
     if (!menu) {
       this.updateClock(dt);
       this.updatePlayer(dt);
+      this.updateFishing(dt);
+      this.flowWater(dt);
       this.updateEnemies(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
@@ -345,6 +385,7 @@ export class Game {
     this.updateShots(dt);
     this.updateBombs(dt);
     this.updateParticles(dt);
+    if (this.fishFly && (this.fishFly.t += dt) > 0.6) this.fishFly = null;
     this.updateEnvironment(dt, menu);
     this.updateCamera(dt);
     this.computeLight();
@@ -356,6 +397,13 @@ export class Game {
     }
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 18);
     if (this.gloom > 0) this.gloom -= dt;
+  }
+
+  /** the title screen's live scene: the world animates and is lit, with nobody at the controls */
+  demoTick(dt: number): void {
+    this.time += dt;
+    this.updateParticles(dt);
+    this.computeLight();
   }
 
   private updateFade(dt: number): void {
@@ -481,6 +529,17 @@ export class Game {
       } else pl.coyote -= dt;
       if (jumpPressed) pl.jumpBuffer = 0.13;
       else pl.jumpBuffer -= dt;
+      // swimming: Space strokes upward, holding it (or W) floats you up to the surface
+      const swim = liquid && !pl.onGround && touches(this.world, pl, B.WATER);
+      if (swim) {
+        pl.jumpsUsed = 0;
+        pl.fallStartY = pl.y;
+        if (pl.jumpBuffer > 0) {
+          pl.vy = Math.min(pl.vy, -300);
+          pl.jumpBuffer = 0;
+          audio.play('splash', { vol: 0.35, pitch: 1.4 });
+        } else if (jumpHeld || up) pl.vy = Math.max(pl.vy - 900 * dt, -170);
+      }
       if (pl.jumpBuffer > 0) {
         if (pl.onGround || pl.coyote > 0) {
           pl.vy = -JUMP_V * (liquid ? 0.7 : 1);
@@ -667,6 +726,367 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ grappling hook
+  // ------------------------------------------------------------------ fishing
+  /** where the line leaves the rod (the renderer draws the rod to match) */
+  rodTip(): { x: number; y: number } {
+    const pl = this.player;
+    return { x: pl.cx + pl.facing * 23, y: pl.y + 1 };
+  }
+
+  private rodPower(): number {
+    return heldDef(this.p)?.rod ?? 1;
+  }
+
+  private rodClick(): void {
+    const f = this.fishing;
+    if (!f) {
+      this.castRod();
+      return;
+    }
+    if (f.state === 'float') {
+      // nothing biting yet: reel in to cast somewhere else
+      f.state = 'back';
+      audio.play('reel', { vol: 0.5 });
+    } else if (f.state === 'bite') this.hookFish(f);
+    else if (f.state === 'reel') this.reelClick(f);
+  }
+
+  private castRod(): void {
+    const pl = this.player;
+    const m = this.mouseWorld();
+    pl.facing = m.x >= pl.cx ? 1 : -1;
+    const tip = this.rodTip();
+    const dx = m.x - tip.x;
+    const dy = m.y - tip.y;
+    const d = Math.hypot(dx, dy) || 1;
+    // a lob toward the cursor: harder for farther, with a little loft
+    const power = Math.min(640, 170 + d * 1.5);
+    const a = Math.atan2(dy, dx);
+    this.fishing = {
+      x: tip.x,
+      y: tip.y,
+      vx: Math.cos(a) * power,
+      vy: Math.sin(a) * power - 140,
+      state: 'fly',
+      t: 0,
+      wait: 0,
+      catchId: '',
+      tier: 0,
+      needle: 0,
+      dir: 1,
+      speed: 1,
+      zone: 0.5,
+      zoneW: 0.3,
+      hits: 0,
+      need: 1,
+      misses: 0,
+      row: 0,
+      biome: 0,
+      pond: false,
+    };
+    audio.play('swing', { vol: 0.45, pitch: 0.75 });
+    this.hint('fishing', 'Fishing: wait for the bobber to dip, then click to hook the fish. Click again each time the needle is inside the green.');
+  }
+
+  private biteWait(): number {
+    const lvl = this.p.skills.fishing.lvl;
+    return (this.rng.range(3, 9) * Math.max(0.55, 1 - (lvl - 1) * 0.015)) / this.rodPower();
+  }
+
+  private updateFishing(dt: number): void {
+    const f = this.fishing;
+    if (!f) return;
+    const pl = this.player;
+    const w = this.world;
+    const hd = heldDef(this.p);
+    if (!hd || hd.kind !== 'rod' || pl.dead || this.ride || this.hook) {
+      this.fishing = null;
+      return;
+    }
+    f.t += dt;
+    const tip = this.rodTip();
+    if (f.state !== 'back' && f.state !== 'fly' && Math.hypot(f.x - tip.x, f.y - tip.y) > 16 * TILE) {
+      this.text(f.x, f.y - 16, 'The line went slack', '#9ab0c0');
+      f.state = 'back';
+    }
+    switch (f.state) {
+      case 'fly': {
+        const steps = Math.max(1, Math.ceil((Math.hypot(f.vx, f.vy) * dt) / 6));
+        const sdt = dt / steps;
+        for (let s = 0; s < steps; s++) {
+          f.vy += 900 * sdt;
+          f.x += f.vx * sdt;
+          f.y += f.vy * sdt;
+          const tx = Math.floor(f.x / TILE);
+          const ty = Math.floor(f.y / TILE);
+          const b = w.get(tx, ty);
+          if (b === B.WATER) {
+            let top = ty;
+            while (w.get(tx, top - 1) === B.WATER) top--;
+            if (w.get(tx, top - 1) !== B.AIR) {
+              f.state = 'back';
+              return;
+            }
+            f.row = top;
+            f.x = Math.max(tx * TILE + 3, Math.min((tx + 1) * TILE - 3, f.x));
+            f.y = top * TILE + 5;
+            f.vx = 0;
+            f.vy = 0;
+            f.state = 'float';
+            f.t = 0;
+            f.wait = this.biteWait();
+            f.pond = top <= w.surface[Math.max(0, Math.min(w.w - 1, tx))] + 3;
+            f.biome = f.pond ? -1 : biomeAt(top).id;
+            audio.play('splash', { vol: 0.6 });
+            this.splash(f.x, f.y, 8);
+            return;
+          }
+          if (w.solid(tx, ty) || b === B.LAVA || f.y > (w.h - 2) * TILE) {
+            f.state = 'back';
+            return;
+          }
+        }
+        if (f.t > 3) f.state = 'back';
+        break;
+      }
+      case 'float':
+      case 'bite':
+      case 'reel': {
+        // the water can drain away under the bobber
+        const tx = Math.floor(f.x / TILE);
+        if (w.get(tx, f.row) !== B.WATER) {
+          let r = f.row + 1;
+          while (r < f.row + 4 && w.get(tx, r) !== B.WATER) r++;
+          if (w.get(tx, r) === B.WATER) {
+            f.row = r;
+            f.y = r * TILE + 5;
+          } else {
+            f.state = 'back';
+            break;
+          }
+        }
+        if (f.state === 'float') {
+          f.wait -= dt;
+          if (f.wait <= 0) {
+            f.state = 'bite';
+            f.t = 0;
+            audio.play('splash', { vol: 0.9, pitch: 0.75 });
+            this.splash(f.x, f.y, 10);
+            this.text(pl.cx, pl.y - 14, '!', '#ffe9a8', true);
+          }
+        } else if (f.state === 'bite') {
+          const lvl = this.p.skills.fishing.lvl;
+          if (f.t > 0.75 + (this.rodPower() - 1) * 0.3 + lvl * 0.004) {
+            this.text(f.x, f.y - 16, 'Too slow', '#9ab0c0');
+            f.state = 'float';
+            f.t = 0;
+            f.wait = this.biteWait() * 0.7;
+          }
+        } else {
+          f.needle += f.dir * f.speed * dt;
+          if (f.needle > 1) {
+            f.needle = 1;
+            f.dir = -1;
+          } else if (f.needle < 0) {
+            f.needle = 0;
+            f.dir = 1;
+          }
+          if (Math.random() < dt * 6) this.splash(f.x, f.y, 1);
+          if (f.t > 10) this.fishEscapes(f);
+        }
+        break;
+      }
+      case 'back': {
+        const dx = tip.x - f.x;
+        const dy = tip.y - f.y;
+        const d = Math.hypot(dx, dy);
+        if (d < 14) {
+          this.fishing = null;
+          return;
+        }
+        const v = Math.min(d, 900 * dt);
+        f.x += (dx / d) * v;
+        f.y += (dy / d) * v;
+        break;
+      }
+    }
+  }
+
+  /** what bites depends on where you fish */
+  private rollCatch(f: Fishing): { id: string; tier: number } {
+    const lvl = this.p.skills.fishing.lvl;
+    const luck = this.rodPower() * (1 + (lvl - 1) * 0.02);
+    const r = Math.random();
+    if (r < 0.07) return { id: 'oldboot', tier: -1 };
+    if (r < 0.07 + 0.03 * luck) return { id: 'coin', tier: 1 };
+    let table: [string, number, number][];
+    if (f.pond) table = [['perch', 60, 0], ['trout', 26, 1], ['goldcarp', 6, 2]];
+    else if (f.biome <= 0) table = [['minnow', 60, 0], ['perch', 22, 0], ['trout', 12, 1]];
+    else if (f.biome === 1) table = [['minnow', 40, 0], ['glowfin', 34, 1], ['trout', 10, 1]];
+    else if (f.biome === 2) table = [['minnow', 30, 0], ['glowfin', 26, 1], ['crystalcarp', 14, 2]];
+    else table = [['minnow', 22, 0], ['crystalcarp', 18, 2], ['voidangler', 9, 3]];
+    const weights = table.map(([, wgt, tier]) => wgt * (tier > 0 ? luck : 1));
+    let pick = Math.random() * weights.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < table.length; i++) {
+      pick -= weights[i];
+      if (pick <= 0) return { id: table[i][0], tier: table[i][2] };
+    }
+    return { id: table[0][0], tier: table[0][2] };
+  }
+
+  private hookFish(f: Fishing): void {
+    const c = this.rollCatch(f);
+    const lvl = this.p.skills.fishing.lvl;
+    const tier = Math.max(0, c.tier);
+    f.catchId = c.id;
+    f.tier = c.tier;
+    f.state = 'reel';
+    f.t = 0;
+    f.hits = 0;
+    f.misses = 0;
+    f.need = tier >= 2 ? 3 : tier === 1 ? 2 : 1;
+    f.speed = (0.85 + tier * 0.35) * (1 - Math.min(0.25, (lvl - 1) * 0.004));
+    f.zoneW = Math.max(0.12, Math.min(0.5, (0.32 - tier * 0.05) * (0.8 + this.rodPower() * 0.2) * (1 + (lvl - 1) * 0.008)));
+    f.zone = f.zoneW / 2 + Math.random() * (1 - f.zoneW);
+    f.needle = 0;
+    f.dir = 1;
+    audio.play('reel', { vol: 0.7 });
+    this.shake = Math.max(this.shake, 2);
+  }
+
+  private reelClick(f: Fishing): void {
+    if (Math.abs(f.needle - f.zone) <= f.zoneW / 2) {
+      f.hits++;
+      audio.play('reel', { vol: 0.6, pitch: 1 + f.hits * 0.1 });
+      if (f.hits >= f.need) {
+        this.landFish(f);
+        return;
+      }
+      // it fights back: the zone jumps and the needle speeds up
+      f.zone = f.zoneW / 2 + Math.random() * (1 - f.zoneW);
+      f.speed *= 1.12;
+      f.t = 0;
+      this.splash(f.x, f.y, 5);
+    } else {
+      f.misses++;
+      audio.play('swing', { vol: 0.4, pitch: 0.6 });
+      this.text(this.player.cx, this.player.y - 30, 'Slipped!', '#ff9a6a');
+      if (f.misses >= 2) this.fishEscapes(f);
+    }
+  }
+
+  private fishEscapes(f: Fishing): void {
+    this.text(f.x, f.y - 16, 'It got away!', '#ff9a6a');
+    audio.play('splash', { vol: 0.6, pitch: 1.2 });
+    this.splash(f.x, f.y, 8);
+    f.state = 'back';
+  }
+
+  private landFish(f: Fishing): void {
+    const pl = this.player;
+    const xp = [3, 10, 24, 60, 140][f.tier + 1] ?? 10;
+    if (f.catchId === 'coin') {
+      const n = (15 + Math.floor(Math.random() * 25)) * (1 + Math.max(0, f.biome));
+      this.drops.push(new Drop('coin', n, pl.cx, pl.cy));
+      this.text(pl.cx, pl.y - 26, `A sunken purse! +${n}`, '#ffd75a', true);
+    } else {
+      this.giveOrDrop(f.catchId, 1);
+      const def = ITEMS[f.catchId];
+      const col = f.tier >= 2 ? '#ffd75a' : f.tier === 1 ? '#8af0d0' : f.tier < 0 ? '#b0a090' : '#e8f0ff';
+      this.text(pl.cx, pl.y - 26, `${def?.name ?? f.catchId}!`, col, f.tier >= 1);
+      if (f.tier >= 2) this.burst(pl.cx, pl.y, 24, ['#ffd75a', '#ffffff'], 140, true);
+    }
+    this.fishFly = { id: f.catchId, x0: f.x, y0: f.y, t: 0 };
+    this.addXp('fishing', xp);
+    audio.play('splash', { vol: 0.8 });
+    audio.play('pickup', { vol: 0.6 });
+    this.splash(f.x, f.y, 12);
+    this.fishing = null;
+  }
+
+  /** droplets thrown up off the water */
+  splash(x: number, y: number, n: number): void {
+    for (let i = 0; i < n; i++) {
+      const life = 0.3 + Math.random() * 0.35;
+      this.parts.push({ x: x + (Math.random() - 0.5) * 8, y, vx: (Math.random() - 0.5) * 120, vy: -60 - Math.random() * 150, life, max: life, color: Math.random() < 0.5 ? '#9fd8ff' : '#e8f6ff', size: 2, grav: 700, glow: false });
+    }
+  }
+
+  // ------------------------------------------------------------------ water flow
+  /** queue the water around a tile to check whether it can now run somewhere */
+  wakeWater(x: number, y: number): void {
+    const w = this.world;
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, -1], [0, 1]]) {
+      const xx = x + dx;
+      const yy = y + dy;
+      if (w.inside(xx, yy) && w.fg[w.idx(xx, yy)] === B.WATER) this.waterQ.add(w.idx(xx, yy));
+    }
+  }
+
+  /** water runs down through holes and spreads toward drops; level pools stay put */
+  private flowWater(dt: number): void {
+    if (this.waterQ.size === 0) return;
+    this.waterT -= dt;
+    if (this.waterT > 0) return;
+    this.waterT = 0.05;
+    const w = this.world;
+    const list = [...this.waterQ].sort((a, b) => b - a);
+    this.waterQ.clear();
+    let budget = 700;
+    for (const i of list) {
+      if (budget-- <= 0) {
+        this.waterQ.add(i);
+        continue;
+      }
+      if (w.fg[i] !== B.WATER) continue;
+      const x = i % w.w;
+      const y = (i / w.w) | 0;
+      if (y + 1 < w.h && w.fg[i + w.w] === B.AIR) {
+        this.moveWater(x, y, x, y + 1);
+        continue;
+      }
+      const dirs = Math.random() < 0.5 ? [-1, 1] : [1, -1];
+      for (const d of dirs) {
+        let found = false;
+        for (let k = 1; k <= 12; k++) {
+          const xx = x + d * k;
+          if (w.get(xx, y) !== B.AIR) break;
+          if (w.get(xx, y + 1) === B.AIR) {
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          this.moveWater(x, y, x + d, y);
+          break;
+        }
+      }
+    }
+  }
+
+  private moveWater(x0: number, y0: number, x1: number, y1: number): void {
+    const w = this.world;
+    const a = w.idx(x0, y0);
+    const b = w.idx(x1, y1);
+    w.fg[a] = B.AIR;
+    w.dirty.add(a);
+    // water meeting lava cools it to obsidian and boils away
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (w.get(x1 + dx, y1 + dy) === B.LAVA) {
+        w.set(x1 + dx, y1 + dy, B.OBSIDIAN);
+        this.burst((x1 + dx + 0.5) * TILE, (y1 + dy + 0.5) * TILE, 10, ['#e8e8f0', '#b0b0c0'], 90, true);
+        audio.play('sizzle', { vol: 0.5 });
+        this.wakeWater(x0, y0);
+        return;
+      }
+    }
+    w.fg[b] = B.WATER;
+    w.dirty.add(b);
+    if (w.decor[b] && !propOf(w.decor[b])) w.decor[b] = 0;
+    this.wakeWater(x0, y0);
+    this.wakeWater(x1, y1);
+  }
+
   private fireGrapple(): void {
     const pl = this.player;
     if (this.ride || pl.dead || pl.recallT > 0 || this.hook) return;
@@ -959,6 +1379,11 @@ export class Game {
       if (lmb && pl.useT <= 0) this.fireBow(hd);
       return;
     }
+    // a rod casts and reels; with no line out, a click on rock still digs
+    if (hd && hd.kind === 'rod' && (this.fishing || !this.wantsToBreak())) {
+      if (press) this.rodClick();
+      return;
+    }
     if (hd && hd.id === 'grapple') {
       if (press) {
         if (this.hook) this.releaseHook(false);
@@ -969,7 +1394,11 @@ export class Game {
     // with something that is not a tool in hand, a click on anything breakable breaks it
     // (with the best pickaxe on your hotbar); a click on empty space uses the item instead
     const tool = kind === 'pick' || kind === 'hammer' || kind === 'sword';
-    if (hd && !tool && !this.wantsToBreak()) {
+    if (!lmb) this.lmbMode = 'none';
+    else if (press || this.lmbMode === 'none') this.lmbMode = hd && !tool && !this.wantsToBreak() ? 'use' : 'break';
+    // a hold that started by digging keeps digging: it never drops the held block into the hole it just made
+    if (lmb && this.lmbMode === 'break' && hd && !tool && !this.wantsToBreak()) return;
+    if (hd && !tool && (lmb ? this.lmbMode === 'use' : !this.wantsToBreak())) {
       if (kind === 'block' || kind === 'wall' || kind === 'place' || kind === 'deed') {
         if (lmb && pl.useT <= 0) this.placeHeld(hd, press);
         return;
@@ -1166,6 +1595,7 @@ export class Game {
     w.placed[i] = 0;
     w.set(tx, ty, B.AIR);
     w.damage.delete(i);
+    this.wakeWater(tx, ty);
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
     // decor resting on (or hanging from) this block goes with it; big formations break loose
@@ -1470,8 +1900,10 @@ export class Game {
     if (!w.inside(x, y)) return;
     let ok = false;
     if (hd.kind === 'block' && hd.block !== undefined) {
-      if (!this.emptyAt(x, y) || this.bodyBlocks(x, y)) return;
-      const touching = w.getWall(x, y) || w.rock(x - 1, y) || w.rock(x + 1, y) || w.rock(x, y - 1) || w.rock(x, y + 1) || w.getObj(x, y + 1) === Obj.LADDER;
+      // blocks can go into water too (filling a pond, bridging a pool)
+      const intoWater = w.get(x, y) === B.WATER && !w.getObj(x, y);
+      if ((!this.emptyAt(x, y) && !intoWater) || this.bodyBlocks(x, y)) return;
+      const touching = intoWater || w.getWall(x, y) || w.rock(x - 1, y) || w.rock(x + 1, y) || w.rock(x, y - 1) || w.rock(x, y + 1) || w.getObj(x, y + 1) === Obj.LADDER;
       if (!touching) return;
       w.set(x, y, hd.block);
       w.decor[w.idx(x, y)] = 0;
@@ -2540,7 +2972,7 @@ export class Game {
     }
 
     // lava
-    if (inLiquid(w, pl)) {
+    if (touches(w, pl, B.LAVA)) {
       pl.lavaT -= dt;
       if (pl.lavaT <= 0) {
         pl.lavaT = 0.4;

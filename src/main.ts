@@ -11,6 +11,7 @@ import { Renderer } from './render';
 import { newProgress } from './state';
 import { generateWorld, worldSpawn } from './world/gen';
 import { saveGame, loadGame, hasSave, deleteSave, loadSettings, storeSettings } from './save';
+import { TitleScene } from './title';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const loading = document.getElementById('loading') as HTMLElement;
@@ -18,12 +19,16 @@ const loadBar = document.getElementById('loadFill') as HTMLElement;
 const title = document.getElementById('title') as HTMLElement;
 const intro = document.getElementById('intro') as HTMLElement;
 const hud = document.getElementById('hud') as HTMLElement;
-(document.querySelector('.title-art') as HTMLElement).style.backgroundImage = 'url(./assets/bg/title.png)';
+const caption = document.getElementById('titleCaption') as HTMLElement;
+const capLabel = document.getElementById('capLabel') as HTMLElement;
+const capSub = document.getElementById('capSub') as HTMLElement;
 
 let game: Game | null = null;
 let renderer: Renderer | null = null;
 let input: Input | null = null;
 let ui: UI | null = null;
+/** the live scene behind the title menu */
+let scene: TitleScene | null = null;
 let last = 0;
 
 async function boot(): Promise<void> {
@@ -34,6 +39,8 @@ async function boot(): Promise<void> {
   input = new Input(canvas);
   ui = new UI();
   ui.bindSettings();
+  makeScene(0x5eed ^ Math.floor(Math.random() * 6));
+  if (import.meta.env.DEV) Object.assign(window as object, { __renderer: renderer, __titleSeed: makeScene, __scene: () => scene });
   const s = loadSettings();
   audio.setVolumes(s.music, s.sfx);
   ui.onSettings = (music, sfx) => {
@@ -49,6 +56,7 @@ async function boot(): Promise<void> {
   };
   window.addEventListener('resize', () => {
     if (game && renderer) renderer.resize(game);
+    else if (scene && renderer) renderer.resize(scene.game);
   });
   window.addEventListener('beforeunload', () => {
     if (game && ui && !(window as { __noSave?: boolean }).__noSave) saveGame(game.saveSnapshot(ui.cursorStack()), game.world);
@@ -58,8 +66,27 @@ async function boot(): Promise<void> {
   requestAnimationFrame(loop);
 }
 
+/** a fresh world for the live scene behind the title menu */
+function makeScene(seed: number): void {
+  if (!input || !renderer) return;
+  scene = new TitleScene(input, seed);
+  scene.onCaption = (label, sub) => {
+    caption.classList.add('fade');
+    setTimeout(() => {
+      capLabel.textContent = label;
+      capSub.textContent = sub;
+      caption.classList.remove('fade');
+    }, 450);
+  };
+  renderer.resize(scene.game);
+}
+
 function showTitle(): void {
   title.classList.add('show');
+  if (scene && renderer) {
+    renderer.resize(scene.game);
+    scene.caption();
+  }
   const cont = document.getElementById('btnContinue') as HTMLButtonElement;
   cont.style.display = hasSave() ? '' : 'none';
 }
@@ -132,6 +159,9 @@ function loop(t: number): void {
     ui.update(dt);
     renderer.draw(game);
     input.endFrame();
+  } else if (scene && renderer) {
+    scene.update(dt);
+    renderer.draw(scene.game);
   }
   audio.update(dt);
   requestAnimationFrame(loop);

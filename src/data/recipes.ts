@@ -54,6 +54,7 @@ export const RECIPES: Recipe[] = [
   r('anvil', 1, 'workbench', { copperbar: 8, stone: 10 }),
   r('alchemy', 1, 'workbench', { wood: 12, sporecap: 3, gel: 4 }),
   r('woodbow', 1, 'workbench', { wood: 10, hide: 1 }),
+  r('fishingrod', 1, 'workbench', { wood: 8, hide: 1 }),
   r('arrows', 10, 'workbench', { wood: 1, stone: 1 }),
   r('leathercoat', 1, 'workbench', { hide: 8, batwing: 4 }),
   r('deed_trade', 1, 'workbench', { wood: 30, stone: 15, copperbar: 2 }),
@@ -72,6 +73,10 @@ export const RECIPES: Recipe[] = [
   r('roastshroom', 1, 'fire', { mushroom: 2 }),
   r('stew', 1, 'fire', { mushroom: 2, sporecap: 1, wood: 1 }),
   r('bread', 1, 'fire', { wheat: 3 }),
+  r('grilledfish', 1, 'fire', { perch: 1 }),
+  r('grilledfish', 1, 'fire', { trout: 1 }),
+  r('grilledfish', 1, 'fire', { minnow: 2 }),
+  r('grilledfish', 1, 'fire', { glowfin: 1 }),
 
   // anvil
   r('copperpick', 1, 'anvil', { copperbar: 10, wood: 4 }),
@@ -81,6 +86,7 @@ export const RECIPES: Recipe[] = [
   r('minecart', 1, 'anvil', { copperbar: 6, wood: 8 }),
   r('lamp', 2, 'anvil', { copperbar: 1, torch: 2 }),
   r('grapple', 1, 'anvil', { ironbar: 3, hide: 3 }),
+  r('brassrod', 1, 'anvil', { ironbar: 3, copperbar: 2, wood: 4 }),
   r('coppershield', 1, 'anvil', { copperbar: 7 }),
   r('springboots', 1, 'anvil', { copperbar: 4, gel: 6, shell: 4 }),
   r('ironpick', 1, 'anvil', { ironbar: 12, wood: 4 }),

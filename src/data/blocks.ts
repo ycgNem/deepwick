@@ -33,6 +33,8 @@ export enum B {
   HEARTSTONE,
   GRASS,
   STONE_BRICK,
+  /** still water: ponds on the surface, pools in the caves */
+  WATER,
   COUNT,
 }
 
@@ -92,6 +94,7 @@ const D: Partial<Record<B, BlockDef>> = {
   [B.HEARTSTONE]: { name: 'Heartstone', tex: ['o', 14], solid: true, tier: 6, hp: 30, xp: 20, color: '#7a1020', light: [0.28, 0.02, 0.06] },
   [B.GRASS]: { name: 'Grassy Dirt', tex: ['r', 0], solid: true, tier: 0, hp: 1.6, xp: 1, drop: 'dirt', color: '#4a8a2a', topper: 'grass' },
   [B.STONE_BRICK]: { name: 'Stone Brick', tex: ['x', 0], solid: true, tier: 1, hp: 4, xp: 0, drop: 'stonebrick', color: '#8a8a90' },
+  [B.WATER]: { name: 'Water', tex: ['r', 18], solid: false, tier: 99, hp: 0, xp: 0, color: '#2a6ab0', liquid: true, unbreakable: true },
 };
 
 export const BLOCKS: BlockDef[] = [];

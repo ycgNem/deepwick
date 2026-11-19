@@ -94,6 +94,16 @@ export function overlaps(a: { x: number; y: number; w: number; h: number }, b: {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
+/** is any part of the body in a tile of this block (lava burns, water only slows) */
+export function touches(world: World, b: Body, block: number): boolean {
+  const x0 = Math.floor(b.x / TILE);
+  const x1 = Math.floor((b.x + b.w) / TILE);
+  const y0 = Math.floor(b.y / TILE);
+  const y1 = Math.floor((b.y + b.h) / TILE);
+  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (world.get(tx, ty) === block) return true;
+  return false;
+}
+
 export function inLiquid(world: World, b: Body): boolean {
   const x0 = Math.floor(b.x / TILE);
   const x1 = Math.floor((b.x + b.w) / TILE);

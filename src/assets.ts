@@ -14,6 +14,8 @@ export interface Assets {
   icons16: HTMLImageElement;
   icons32: HTMLImageElement;
   iconsN: HTMLImageElement;
+  /** fishing icons (tools/gen_fish.py) */
+  iconsF: HTMLImageElement;
   miner: HTMLImageElement;
   enemies: Record<string, HTMLImageElement>;
   camp: Record<string, HTMLImageElement>;
@@ -33,7 +35,7 @@ export const A = {} as Assets;
 
 const ENEMY_FILES = ['bat', 'slime', 'beetle', 'toad', 'spider', 'wisp', 'imp', 'slug', 'wraith', 'sentinel', 'boss', 'rabbit', 'boar', 'hollow'];
 const CAMP_FILES = ['npc_merchant', 'npc_smith', 'npc_archivist', 'shop', 'forge', 'archive', 'pine1', 'pine2', 'oak', 'birch', 'bed', 'rocks', 'minecart'];
-const BG_FILES = ['surface', 'day', 'title'];
+const BG_FILES = ['surface', 'day'];
 
 function loadImg(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -62,6 +64,7 @@ export async function loadAssets(onProgress: (f: number) => void): Promise<void>
     ['sheets/icons16.png', (i) => (A.icons16 = i)],
     ['sheets/icons32.png', (i) => (A.icons32 = i)],
     ['sheets/icons_n32.png', (i) => (A.iconsN = i)],
+    ['sheets/icons_fish.png', (i) => (A.iconsF = i)],
     ['player/miner.png', (i) => (A.miner = i)],
   ];
   A.enemies = {};
@@ -221,8 +224,10 @@ function buildIconUrls(): void {
     ['i16', 16, A.icons16],
     ['i32', 32, A.icons32],
     ['n32', 32, A.iconsN],
+    ['f32', 32, A.iconsF],
   ] as const) {
-    for (let i = 0; i < 64; i++) {
+    const n = (img.width / size) * (img.height / size);
+    for (let i = 0; i < n; i++) {
       const [c, ctx] = makeCanvas(size, size);
       ctx.drawImage(img, (i % 8) * size, Math.floor(i / 8) * size, size, size, 0, 0, size, size);
       A.iconUrl.set(`${sheet}:${i}`, c.toDataURL());
@@ -240,7 +245,7 @@ export function iconSrc(ref: IconRef): { img: CanvasImageSource; sx: number; sy:
   if (ref.sheet === 'blk') return { img: A.blockIcon[ref.idx], sx: 0, sy: 0, size: 32 };
   if (ref.sheet === 'cv') return { img: A.cvIcons[ref.idx], sx: 0, sy: 0, size: 32 };
   const size = ref.sheet === 'i16' ? 16 : 32;
-  const img = ref.sheet === 'i16' ? A.icons16 : ref.sheet === 'i32' ? A.icons32 : A.iconsN;
+  const img = ref.sheet === 'i16' ? A.icons16 : ref.sheet === 'i32' ? A.icons32 : ref.sheet === 'f32' ? A.iconsF : A.iconsN;
   return { img, sx: (ref.idx % 8) * size, sy: Math.floor(ref.idx / 8) * size, size };
 }
 

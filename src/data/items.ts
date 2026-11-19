@@ -2,7 +2,7 @@ import { B } from './blocks';
 import { Obj } from '../world/world';
 
 /** i16/i32 = original icon sheets, n32 = survival icon sheet, blk = a block's own texture, cv = drawn at load */
-export type IconRef = { sheet: 'i16' | 'i32' | 'n32' | 'blk' | 'cv'; idx: number };
+export type IconRef = { sheet: 'i16' | 'i32' | 'n32' | 'f32' | 'blk' | 'cv'; idx: number };
 
 export type ItemKind =
   | 'block'
@@ -21,6 +21,7 @@ export type ItemKind =
   | 'boots'
   | 'charm'
   | 'material'
+  | 'rod'
   | 'relic';
 
 export type EquipSlot = 'armor' | 'lantern' | 'boots' | 'charm';
@@ -63,11 +64,15 @@ export interface ItemDef {
   fallSafe?: number;
   fx?: CharmFx;
   deed?: 'trade' | 'forge' | 'archive';
+  /** fishing rods: how much quicker the bites, how wide the catch zone, how good the odds */
+  rod?: number;
 }
 
 const i16 = (idx: number): IconRef => ({ sheet: 'i16', idx });
 const i32 = (idx: number): IconRef => ({ sheet: 'i32', idx });
 const n32 = (idx: number): IconRef => ({ sheet: 'n32', idx });
+/** fishing icons (tools/gen_fish.py) */
+const f32 = (idx: number): IconRef => ({ sheet: 'f32', idx });
 const blk = (b: B): IconRef => ({ sheet: 'blk', idx: b });
 /** icons drawn at load time: 0 rail, 1 minecart, 2 mine lamp */
 const cv = (idx: number): IconRef => ({ sheet: 'cv', idx });
@@ -154,6 +159,15 @@ const LIST: Record<string, Partial2> = {
   steak: { name: 'Cooked Meat', icon: n32(25), kind: 'food', food: 32, heal: 10, value: 6, desc: 'Hot, filling and smells wonderful.' },
   roastshroom: { name: 'Roasted Mushrooms', icon: n32(27), kind: 'food', food: 20, heal: 4, value: 4, desc: 'Smoky and chewy.' },
   stew: { name: 'Mushroom Stew', icon: n32(26), kind: 'food', food: 42, heal: 8, value: 10, desc: 'A whole meal in a bowl.' },
+  perch: { name: 'Meadow Perch', icon: f32(0), kind: 'food', food: 6, heal: 0, value: 5, desc: 'A pond fish. Cook it on a campfire or furnace.' },
+  trout: { name: 'Speckled Trout', icon: f32(1), kind: 'food', food: 7, heal: 0, value: 12, desc: 'Quick and speckled. Lovely grilled.' },
+  minnow: { name: 'Cave Minnow', icon: f32(3), kind: 'food', food: 4, heal: 0, value: 3, desc: 'A pale little fish from the underground pools.' },
+  glowfin: { name: 'Glowfin', icon: f32(4), kind: 'food', food: 8, heal: 4, value: 24, desc: 'Its fins never stop glowing. Lives in the grotto pools.', glow: '#4af0d0' },
+  goldcarp: { name: 'Golden Carp', icon: f32(2), kind: 'material', value: 70, desc: 'A rare gleam in the meadow ponds. Pell pays well for one.', glow: '#ffd75a' },
+  crystalcarp: { name: 'Crystal Carp', icon: f32(5), kind: 'material', value: 110, desc: 'Scales like cut amethyst. Only the Crystal Hollows pools have them.', glow: '#c27aff' },
+  voidangler: { name: 'Void Angler', icon: f32(6), kind: 'material', value: 320, desc: 'Hunts by its own little lamp in the pools of the Sunless Vault.', glow: '#ffe08a' },
+  oldboot: { name: 'Old Boot', icon: f32(7), kind: 'material', value: 1, desc: "Somebody's lost boot. Still soggy." },
+  grilledfish: { name: 'Grilled Fish', icon: f32(8), kind: 'food', food: 30, heal: 12, value: 10, desc: 'Flaky, smoky and filling.' },
   bread: { name: 'Bread', icon: n32(50), kind: 'food', food: 30, heal: 6, value: 5, desc: 'Baked from wheat.' },
 
   // ---- usable
@@ -161,6 +175,8 @@ const LIST: Record<string, Partial2> = {
   oil: { name: 'Lamp Oil', icon: i16(24), kind: 'use', value: 8, desc: 'Refills 60% of your lantern.', stack: 20 },
   recall: { name: 'Recall Charm', icon: i16(26), kind: 'use', value: 15, desc: 'Returns you to your bed after a short channel.', stack: 10 },
   bomb: { name: 'Blast Charge', icon: i16(23), kind: 'use', value: 10, desc: 'Thrown toward the cursor. Breaks rock up to one tier above your pick.', stack: 30 },
+  fishingrod: { name: 'Fishing Rod', icon: n32(46), kind: 'rod', rod: 1, value: 10, stack: 1, desc: 'Click on water to cast. When the bobber dips, click to hook the fish, then click as the needle crosses the green.' },
+  brassrod: { name: 'Brass Rod', icon: f32(9), kind: 'rod', rod: 1.5, value: 90, stack: 1, desc: 'Quicker bites, a wider catch zone and better odds of something rare.' },
   grapple: { name: 'Grappling Hook', icon: n32(48), kind: 'use', value: 40, stack: 1, desc: 'Press G, or click while holding it, to throw it at the cursor. It bites into rock and hauls you up. W and S climb the rope, Space jumps off.' },
   heartcrystal: { name: 'Heart Crystal', icon: n32(43), kind: 'use', value: 50, desc: 'Use it to raise your max health by 10 (up to +100).', glow: '#ff6a9a', stack: 10 },
 
@@ -258,6 +274,7 @@ export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
   { id: 'bomb', price: 30, n: 1 },
   { id: 'recall', price: 45, n: 1 },
   { id: 'seeds', price: 4, n: 3 },
+  { id: 'fishingrod', price: 30, n: 1 },
   { id: 'steak', price: 14, n: 1 },
   { id: 'copperlantern', price: 220, n: 1 },
   { id: 'heartcrystal', price: 900, n: 1 },

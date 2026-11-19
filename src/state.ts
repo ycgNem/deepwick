@@ -1,7 +1,7 @@
 import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
 import { TILE, INV_SIZE, DAY_LENGTH } from './constants';
 
-export type SkillId = 'mining' | 'combat' | 'delving';
+export type SkillId = 'mining' | 'combat' | 'delving' | 'fishing';
 export interface Skill {
   lvl: number;
   xp: number;
@@ -89,7 +89,7 @@ export function newProgress(seed: number, spawnX: number, spawnY: number): Progr
     equip: { armor: null, lantern: null, boots: null, charm1: null, charm2: null },
     chests: {},
     buildings: [],
-    skills: { mining: { lvl: 1, xp: 0 }, combat: { lvl: 1, xp: 0 }, delving: { lvl: 1, xp: 0 } },
+    skills: { mining: { lvl: 1, xp: 0 }, combat: { lvl: 1, xp: 0 }, delving: { lvl: 1, xp: 0 }, fishing: { lvl: 1, xp: 0 } },
     catalogued: [],
     relicsDropped: [],
     maxDepth: 0,
@@ -281,6 +281,7 @@ export function computeStats(p: Progress): Stats {
       mining: (1 + all) * (has(p, 'r_ammonite') ? 1.1 : 1),
       combat: (1 + all) * (has(p, 'r_idol') ? 1.15 : 1),
       delving: (1 + all) * (has(p, 'r_starmap') ? 1.25 : 1),
+      fishing: 1 + all,
     },
     heatResist: has(p, 'r_tooth') ? 0.5 : 1,
     heatWard: charms.some((ch) => ch.fx?.heat),

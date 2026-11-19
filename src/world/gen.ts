@@ -238,6 +238,10 @@ export function generateWorld(seed: number): World {
     }
   }
 
+  // ---- water: ponds in the meadow, still pools in the caves ----------------------------------
+  placePonds(w, rng);
+  placePools(w, rng);
+
   // ---- surface life ----------------------------------------------------------------------
   placeSurface(w, rng);
 
@@ -248,9 +252,145 @@ export function generateWorld(seed: number): World {
   placeHeartCrystals(w, rng);
 
   unburyObjects(w);
+  clearWater(w);
   w.updateAllSky();
   w.dirty.clear();
   return w;
+}
+
+// ---------------------------------------------------------------------------- water
+
+/** two ponds in the meadow, a short walk either side of where you wake */
+function placePonds(w: World, rng: Rng): void {
+  for (const side of [-1, 1]) {
+    let best = -1;
+    let bestRough = 99;
+    for (let t = 0; t < 40; t++) {
+      const x0 = SPAWN_X + side * rng.int(16, 30);
+      let lo = 1e9;
+      let hi = -1e9;
+      for (let x = x0 - 6; x <= x0 + 6; x++) {
+        lo = Math.min(lo, w.surface[x]);
+        hi = Math.max(hi, w.surface[x]);
+      }
+      if (hi - lo < bestRough) {
+        bestRough = hi - lo;
+        best = x0;
+      }
+    }
+    if (best < 0 || bestRough > 6) continue;
+    const hw = rng.int(3, 5);
+    const depth = rng.int(2, 3);
+    // the water line sits at the lowest ground under the pond; banks are raised to hold it
+    let level = -1;
+    for (let x = best - hw; x <= best + hw; x++) level = Math.max(level, w.surface[x]);
+    for (const bx of [best - hw - 1, best + hw + 1]) {
+      for (let y = level; y < w.surface[bx]; y++) {
+        w.fg[w.idx(bx, y)] = B.DIRT;
+        w.wall[w.idx(bx, y)] = 0;
+      }
+      if (w.surface[bx] > level) {
+        w.fg[w.idx(bx, level)] = B.GRASS;
+        w.surface[bx] = level;
+      }
+    }
+    for (let x = best - hw; x <= best + hw; x++) {
+      const k = (x - best) / (hw + 0.6);
+      const d = Math.max(1, Math.round(depth * (1 - k * k) + 0.4));
+      for (let y = w.surface[x]; y < level; y++) {
+        w.fg[w.idx(x, y)] = B.AIR;
+        w.wall[w.idx(x, y)] = 0;
+      }
+      for (let y = level; y < level + d; y++) {
+        w.fg[w.idx(x, y)] = B.WATER;
+        if (y === level) w.wall[w.idx(x, y)] = 0;
+      }
+      // a muddy bed under the water (sealing any tunnel that runs underneath)
+      const bed = w.idx(x, level + d);
+      if (w.fg[bed] === B.GRASS || w.fg[bed] === B.DIRT || !BLOCKS[w.fg[bed]].solid) w.fg[bed] = rng.chance(0.5) ? B.CLAY : B.DIRT;
+      w.surface[x] = level;
+    }
+    // and banks that hold it in
+    for (const bx of [best - hw - 1, best + hw + 1]) {
+      for (let y = level; y <= level + depth; y++) if (!BLOCKS[w.fg[w.idx(bx, y)]].solid) w.fg[w.idx(bx, y)] = B.DIRT;
+    }
+  }
+}
+
+/** still pools in cave hollows: fill a basin row by row while rock holds the water on both sides */
+function placePools(w: World, rng: Rng): void {
+  const per = [16, 16, 12, 0, 8];
+  for (let bi = 0; bi < per.length; bi++) {
+    const bm = BIOMES[bi];
+    let made = 0;
+    for (let t = 0; t < per[bi] * 40 && made < per[bi]; t++) {
+      let x = rng.int(6, w.w - 7);
+      let y = rng.int(bm.top + 6, bm.bottom - 4);
+      if (w.fg[w.idx(x, y)] !== B.AIR) continue;
+      // roll downhill like a drop of water until it settles in a hollow
+      for (let step = 0; step < 80; step++) {
+        if (y + 1 < bm.bottom && w.fg[w.idx(x, y + 1)] === B.AIR) y++;
+        else if (w.fg[w.idx(x - 1, y)] === B.AIR && w.fg[w.idx(x - 1, y + 1)] === B.AIR) x--;
+        else if (w.fg[w.idx(x + 1, y)] === B.AIR && w.fg[w.idx(x + 1, y + 1)] === B.AIR) x++;
+        else break;
+        if (x < 5 || x > w.w - 6) break;
+      }
+      if (x < 5 || x > w.w - 6 || y >= bm.bottom - 1 || !BLOCKS[w.fg[w.idx(x, y + 1)]].solid) continue;
+      if (fillBasin(w, x, y, rng.int(2, 4), 18) > 0) made++;
+    }
+  }
+}
+
+function fillBasin(w: World, sx: number, sy: number, maxDepth: number, maxW: number): number {
+  const filled: number[] = [];
+  let y = sy;
+  let seed = sx;
+  for (let depth = 0; depth < maxDepth; depth++) {
+    if (w.fg[w.idx(seed, y)] !== B.AIR) break;
+    let a = seed;
+    let b = seed;
+    while (a > 3 && w.fg[w.idx(a - 1, y)] === B.AIR) a--;
+    while (b < w.w - 4 && w.fg[w.idx(b + 1, y)] === B.AIR) b++;
+    if (b - a + 1 > maxW) break;
+    if (!BLOCKS[w.fg[w.idx(a - 1, y)]].solid || !BLOCKS[w.fg[w.idx(b + 1, y)]].solid) break;
+    let ok = true;
+    let airAbove = 0;
+    for (let x = a; x <= b && ok; x++) {
+      const i = w.idx(x, y);
+      const below = w.fg[i + w.w];
+      if (!(BLOCKS[below].solid || below === B.WATER) || below === B.LAVA) ok = false;
+      if (w.obj[i] || w.rail[i] || w.obj[i - w.w] || propOf(w.decor[i])) ok = false;
+      if (w.fg[i - 1] === B.LAVA || w.fg[i + 1] === B.LAVA) ok = false;
+      if (w.fg[i - w.w] === B.AIR) airAbove++;
+    }
+    // keep a breathing gap under the roof so there is a surface to fish from
+    if (!ok || airAbove === 0) break;
+    for (let x = a; x <= b; x++) {
+      const i = w.idx(x, y);
+      w.fg[i] = B.WATER;
+      filled.push(i);
+    }
+    // the next row up starts wherever there is open air over this one
+    let next = -1;
+    for (let x = a; x <= b && next < 0; x++) if (w.fg[w.idx(x, y - 1)] === B.AIR) next = x;
+    if (next < 0) break;
+    seed = next;
+    y--;
+  }
+  if (filled.length < 4) {
+    for (const i of filled) w.fg[i] = B.AIR;
+    return 0;
+  }
+  return filled.length;
+}
+
+/** nothing sits or grows under water */
+function clearWater(w: World): void {
+  for (let i = 0; i < w.fg.length; i++) {
+    if (w.fg[i] !== B.WATER) continue;
+    if (w.obj[i]) w.obj[i] = Obj.NONE;
+    if (w.decor[i]) w.decor[i] = 0;
+  }
 }
 
 /** every biome gets more relic-bearing rock than it has relics, so none can be missed */
