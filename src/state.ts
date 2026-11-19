@@ -1,4 +1,4 @@
-import { ITEMS, RELICS, ItemDef } from './data/items';
+import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
 import { TILE, INV_SIZE, DAY_LENGTH } from './constants';
 
 export type SkillId = 'mining' | 'combat' | 'delving';
@@ -61,6 +61,10 @@ export interface Progress {
   stats: { mined: number; ores: number; kills: number; deaths: number; chests: number; time: number; earned: number; crafted: number; days: number };
   satchel: { x: number; y: number; items: Stack[] } | null;
   bossDefeated: boolean;
+  /** the boss died but its reward was not handed over yet (saved so it can't be lost) */
+  bossRewardPending?: boolean;
+  /** you have owned a lantern before (a new one comes full, a re-equipped one does not) */
+  hadLantern?: boolean;
   seen: Record<string, boolean>;
   hp: number;
   oil: number;
@@ -227,6 +231,18 @@ export function bestPick(p: Progress): ItemDef | null {
   return best;
 }
 
+/** the strongest pickaxe in the ten hotbar slots */
+export function bestHotbarPick(p: Progress): ItemDef | null {
+  let best: ItemDef | null = null;
+  for (let i = 0; i < 10; i++) {
+    const s = p.inv[i];
+    if (!s) continue;
+    const d = ITEMS[s.id];
+    if (d?.kind === 'pick' && (!best || (d.tier ?? 0) > (best.tier ?? 0) || ((d.tier ?? 0) === (best.tier ?? 0) && (d.power ?? 0) > (best.power ?? 0)))) best = d;
+  }
+  return best;
+}
+
 export function computeStats(p: Progress): Stats {
   const arm = eq(p, 'armor');
   const lan = eq(p, 'lantern');
@@ -238,7 +254,9 @@ export function computeStats(p: Progress): Stats {
   const d = p.skills.delving.lvl;
   const all = has(p, 'r_heart') ? 0.25 : 0;
   const hd = heldDef(p);
-  const pick = hd?.kind === 'pick' ? hd : null;
+  // holding a pick uses it; holding anything that is not a weapon or hammer borrows the
+  // best pickaxe on the hotbar, so torches and blocks in hand never stop you digging
+  const pick = hd?.kind === 'pick' ? hd : hd?.kind === 'sword' || hd?.kind === 'hammer' || hd?.kind === 'bow' ? null : bestHotbarPick(p);
   const pickPower = (pick?.power ?? 0.55) * (1 + p.sharpen * 0.08);
   let attack = 2.5;
   if (hd?.kind === 'sword') attack = (hd.dmg ?? 1) * (1 + p.hone * 0.08);
@@ -272,8 +290,11 @@ export function computeStats(p: Progress): Stats {
 
 export function itemValue(id: string, st: Stats): number {
   const def = ITEMS[id];
-  if (!def) return 0;
-  return Math.max(1, Math.round(def.value * st.sellMult));
+  if (!def || def.value <= 0 || def.kind === 'ammo') return 0;
+  const v = Math.max(1, Math.round(def.value * st.sellMult));
+  // anything Pell stocks sells back for well under what it costs, so the shop can't print money
+  const stock = SHOP_STOCK.find((s) => s.id === id);
+  return stock ? Math.min(v, Math.floor((stock.price / stock.n) * 0.4)) : v;
 }
 
 /** the next relic of a biome that has not dropped yet */

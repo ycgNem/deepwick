@@ -17,5 +17,5 @@ export const DAY_LENGTH = 720;
 export const INV_SIZE = 40;
 export const HOTBAR = 10;
 
-export const SAVE_KEY = 'deepwick-save-v2';
+export const SAVE_KEY = 'deepwick-save-v3';
 export const SETTINGS_KEY = 'deepwick-settings-v1';

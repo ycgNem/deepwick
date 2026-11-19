@@ -33,6 +33,8 @@ const SFX = [
   'door',
   'bow',
   'rustle',
+  'cart_roll',
+  'cart_bump',
 ] as const;
 export type SfxId = (typeof SFX)[number];
 

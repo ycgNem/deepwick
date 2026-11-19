@@ -31,6 +31,10 @@ export enum Obj {
   CROP1,
   CROP2,
   CROP3,
+  /** a mine cart parked on a rail */
+  MINECART,
+  /** an oil lamp hanging in the old mine */
+  LAMP,
 }
 
 /** objects that block movement */
@@ -50,6 +54,10 @@ export class World {
   wall = new Uint8Array(WORLD_W * WORLD_H);
   decor = new Uint8Array(WORLD_W * WORLD_H);
   obj = new Uint8Array(WORLD_W * WORLD_H);
+  /** blocks the player put down (they give no mining experience back) */
+  placed = new Uint8Array(WORLD_W * WORLD_H);
+  /** mine rails, a layer of their own so frames and lamps can share their tiles */
+  rail = new Uint8Array(WORLD_W * WORLD_H);
   explored = new Uint8Array(WORLD_W * WORLD_H);
   /** surface row for every column (as generated) */
   surface = new Int16Array(WORLD_W);
@@ -58,6 +66,8 @@ export class World {
   damage = new Map<number, TileDamage>();
   /** tiles changed since the minimap last redrew them */
   dirty = new Set<number>();
+  /** called whenever a block or wall changes (the renderer's chunk cache listens) */
+  onChange: ((x: number, y: number) => void) | null = null;
   seed = 1;
 
   idx(x: number, y: number): number {
@@ -77,6 +87,7 @@ export class World {
     const i = y * this.w + x;
     this.fg[i] = b;
     this.dirty.add(i);
+    this.onChange?.(x, y);
     if (BLOCKS[b].solid) {
       if (y < this.skyline[x]) this.skyline[x] = y;
     } else if (y === this.skyline[x]) this.updateSky(x);
@@ -114,6 +125,15 @@ export class World {
   setWall(x: number, y: number, b: number): void {
     if (!this.inside(x, y)) return;
     this.wall[y * this.w + x] = b;
+    this.dirty.add(y * this.w + x);
+    this.onChange?.(x, y);
+  }
+  hasRail(x: number, y: number): boolean {
+    return this.inside(x, y) && this.rail[y * this.w + x] !== 0;
+  }
+  setRail(x: number, y: number, on: boolean): void {
+    if (!this.inside(x, y)) return;
+    this.rail[y * this.w + x] = on ? 1 : 0;
     this.dirty.add(y * this.w + x);
   }
   solidAtPx(px: number, py: number): boolean {

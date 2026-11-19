@@ -1,8 +1,8 @@
 import { B } from './blocks';
 import { Obj } from '../world/world';
 
-/** i16/i32 = original icon sheets, n32 = survival icon sheet, blk = a block's own texture */
-export type IconRef = { sheet: 'i16' | 'i32' | 'n32' | 'blk'; idx: number };
+/** i16/i32 = original icon sheets, n32 = survival icon sheet, blk = a block's own texture, cv = drawn at load */
+export type IconRef = { sheet: 'i16' | 'i32' | 'n32' | 'blk' | 'cv'; idx: number };
 
 export type ItemKind =
   | 'block'
@@ -69,6 +69,8 @@ const i16 = (idx: number): IconRef => ({ sheet: 'i16', idx });
 const i32 = (idx: number): IconRef => ({ sheet: 'i32', idx });
 const n32 = (idx: number): IconRef => ({ sheet: 'n32', idx });
 const blk = (b: B): IconRef => ({ sheet: 'blk', idx: b });
+/** icons drawn at load time: 0 rail, 1 minecart, 2 mine lamp */
+const cv = (idx: number): IconRef => ({ sheet: 'cv', idx });
 
 type Partial2 = Omit<ItemDef, 'id' | 'stack'> & { stack?: number };
 const LIST: Record<string, Partial2> = {
@@ -159,11 +161,15 @@ const LIST: Record<string, Partial2> = {
   oil: { name: 'Lamp Oil', icon: i16(24), kind: 'use', value: 8, desc: 'Refills 60% of your lantern.', stack: 20 },
   recall: { name: 'Recall Charm', icon: i16(26), kind: 'use', value: 15, desc: 'Returns you to your bed after a short channel.', stack: 10 },
   bomb: { name: 'Blast Charge', icon: i16(23), kind: 'use', value: 10, desc: 'Thrown toward the cursor. Breaks rock up to one tier above your pick.', stack: 30 },
+  grapple: { name: 'Grappling Hook', icon: n32(48), kind: 'use', value: 40, stack: 1, desc: 'Press G, or click while holding it, to throw it at the cursor. It bites into rock and hauls you up. W and S climb the rope, Space jumps off.' },
   heartcrystal: { name: 'Heart Crystal', icon: n32(43), kind: 'use', value: 50, desc: 'Use it to raise your max health by 10 (up to +100).', glow: '#ff6a9a', stack: 10 },
 
   // ---- placeables
   torch: { name: 'Torch', icon: i16(21), kind: 'place', obj: Obj.TORCH, value: 1, desc: 'Lights the dark. Holding one lights your way. Creatures will not spawn in its glow.', stack: 250 },
   ladder: { name: 'Ladder', icon: i16(22), kind: 'place', obj: Obj.LADDER, value: 1, desc: 'Climb with W / S.', stack: 250 },
+  rail: { name: 'Rail', icon: cv(0), kind: 'place', value: 1, desc: 'Lay track along a floor. Minecarts ride it.', stack: 250 },
+  minecart: { name: 'Minecart', icon: cv(1), kind: 'place', obj: Obj.MINECART, value: 14, desc: 'Set it on a rail, then press E to climb in. A / D to roll, Space to jump out.', stack: 5 },
+  lamp: { name: 'Mine Lamp', icon: cv(2), kind: 'place', obj: Obj.LAMP, value: 3, desc: 'An oil lamp that hangs from a ceiling and lights a wide area.', stack: 50 },
   workbench: { name: 'Workbench', icon: n32(15), kind: 'place', obj: Obj.WORKBENCH, value: 4, desc: 'Craft tools, furniture and building parts nearby.', stack: 10 },
   furnace: { name: 'Furnace', icon: n32(16), kind: 'place', obj: Obj.FURNACE, value: 8, desc: 'Smelts ore into bars and cooks food.', stack: 10 },
   anvil: { name: 'Anvil', icon: i32(51), kind: 'place', obj: Obj.ANVIL, value: 30, desc: 'Forge metal tools, weapons, armor and lanterns.', stack: 10 },
@@ -241,7 +247,7 @@ export function equipSlotOf(def: ItemDef): EquipSlot | null {
 
 /** what Pell will pay attention to */
 export function sellable(def: ItemDef): boolean {
-  return def.value > 0 && def.kind !== 'relic' && def.kind !== 'deed';
+  return def.value > 0 && def.kind !== 'relic' && def.kind !== 'deed' && def.kind !== 'ammo';
 }
 
 export const SHOP_STOCK: { id: string; price: number; n: number }[] = [

@@ -108,6 +108,7 @@ export class LightMap {
         if (o) {
           const fl = 0.92 + 0.08 * Math.sin(time * 11 + x * 3.1) * Math.sin(time * 7.3 + y);
           if (o === Obj.TORCH) add(R, G, Bc, k, 1.05 * fl, 0.72 * fl, 0.38 * fl);
+          else if (o === Obj.LAMP) add(R, G, Bc, k, 1.15 * fl, 0.85 * fl, 0.5 * fl);
           else if (o === Obj.CAMPFIRE) add(R, G, Bc, k, 1.25 * fl, 0.75 * fl, 0.32 * fl);
           else if (o === Obj.FURNACE) add(R, G, Bc, k, 0.8 * fl, 0.42 * fl, 0.15 * fl);
           else if (o === Obj.HEART_CRYSTAL) add(R, G, Bc, k, 0.55, 0.15, 0.32);

@@ -154,6 +154,11 @@ export class UI implements UIHooks {
     this.tipEl.classList.remove('show');
   }
 
+  /** the stack held on the mouse, if any (saved with the pack) */
+  cursorStack(): Stack | null {
+    return this.cursor;
+  }
+
   private returnCursor(): void {
     if (!this.cursor) return;
     const left = give(this.game.p.inv, this.cursor.id, this.cursor.n);
@@ -177,6 +182,8 @@ export class UI implements UIHooks {
       else if (!this.panel) this.open('map');
     } else if (e.code === 'KeyE' && this.panel && this.panel !== 'pause' && this.panel !== 'victory') {
       this.close();
+      // otherwise the same press reopens whatever you are standing next to
+      this.game.input.consume('KeyE');
     } else if (this.panel === 'inv' || this.panel === 'chest') {
       // number keys still pick the hotbar slot while the inventory is open
       const m = /^Digit(\d)$/.exec(e.code);
@@ -367,6 +374,8 @@ export class UI implements UIHooks {
 
   // ------------------------------------------------------------------ panels
   render(): void {
+    // the element under the mouse is about to be replaced; its tooltip goes with it
+    this.tipEl.classList.remove('show');
     let html = '';
     switch (this.panel) {
       case 'inv':
@@ -483,8 +492,9 @@ export class UI implements UIHooks {
         if (!s) return;
         const def = ITEMS[s.id];
         if (!def || !sellable(def)) return;
-        any = true;
         const v = itemValue(s.id, g.st);
+        if (v <= 0) return;
+        any = true;
         html += `<div class="li">${img(def.icon)}<div class="nm"><b>${esc(def.name)}</b> <span class="dim">×${s.n}</span><small>${esc(def.desc)}</small></div><div class="pr">${v}c ea</div><button data-a="sell" data-i="${i}" data-n="1">Sell 1</button><button data-a="sell" data-i="${i}" data-n="${s.n}">All (${fmt(v * s.n)}c)</button></div>`;
       });
       if (!any) html += '<p class="empty-note">Nothing worth coin in your pack. Ore, gems, bars and creature parts sell well.</p>';
@@ -606,10 +616,10 @@ export class UI implements UIHooks {
       <div class="settings"><label>Music <input type="range" min="0" max="100" value="${m}" data-set="music"></label><label>Sound <input type="range" min="0" max="100" value="${s}" data-set="sfx"></label></div>
       <div class="controls"><h3 class="sub">Controls</h3>
       <div><kbd>A</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>W</kbd><kbd>S</kbd> climb ladders, <kbd>S</kbd> drops through ladder tops</div>
-      <div><kbd>Left mouse</kbd> use the held item: dig, chop, attack, place, eat</div>
-      <div><kbd>Right mouse</kbd> open chests and doors, use beds and stations, pick berries</div>
+      <div><kbd>Left mouse</kbd> use the held item: dig, chop, attack, place, eat. Clicking rock with anything in hand digs with your best pickaxe</div>
+      <div><kbd>Right mouse</kbd> open chests and doors, use beds and stations, pick berries, climb into carts; otherwise place or eat what you hold</div>
       <div><kbd>1</kbd>–<kbd>0</kbd> or wheel: hotbar · <kbd>Q</kbd> drop held stack</div>
-      <div><kbd>E</kbd> talk / interact · <kbd>F</kbd> lamp oil · <kbd>H</kbd> tonic · <kbd>R</kbd> recall to bed</div>
+      <div><kbd>E</kbd> talk / interact / ride a cart · <kbd>F</kbd> lamp oil · <kbd>H</kbd> tonic · <kbd>R</kbd> recall to bed · <kbd>G</kbd> grappling hook</div>
       <div><kbd>Tab</kbd> pack &amp; crafting · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</div></div>
       <div class="row-actions"><button class="big" data-a="close">Resume</button><button data-a="save">Save now</button><button class="ghost" data-a="quit">Save &amp; quit to title</button></div>`;
   }
@@ -803,7 +813,7 @@ export class UI implements UIHooks {
     if (def.kind === 'bow') stats.push(`${def.dmg} damage + arrows`);
     if (def.kind === 'food') stats.push(`+${def.food} food${def.heal ? `, +${def.heal} health` : ''}`);
     if (def.kind === 'lantern') stats.push(`Light ${def.radius} · ${def.oil}s of oil`);
-    if (def.value > 0 && sellable(def)) stats.push(`Sells for ${itemValue(def.id, this.game.st)}c`);
+    if (def.value > 0 && sellable(def) && itemValue(def.id, this.game.st) > 0) stats.push(`Sells for ${itemValue(def.id, this.game.st)}c`);
     const slotName = equipSlotOf(def);
     this.tipEl.innerHTML = `<b>${esc(def.name)}${n > 1 ? ` ×${n}` : ''}</b>${stats.length ? `<em>${stats.join(' · ')}</em>` : ''}<small>${esc(def.desc)}</small>${slotName ? '<small class="dim">Shift-click to equip</small>' : ''}`;
     this.tipEl.classList.add('show');

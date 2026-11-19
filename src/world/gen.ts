@@ -1,8 +1,10 @@
 ﻿import { World, Obj } from './world';
 import { B, BLOCKS } from '../data/blocks';
 import { BIOMES, BiomeDef, SURFACE_DECOR } from '../data/biomes';
+import { RELICS } from '../data/items';
 import { WORLD_W, WORLD_H, SURFACE_Y } from '../constants';
 import { Rng, fbm, valueNoise, clamp } from '../rng';
+import { propOf, propsOfKind, PROPS } from '../data/props';
 
 /** the centre of the world, where a new delver wakes up */
 export const SPAWN_X = Math.floor(WORLD_W / 2);
@@ -70,7 +72,7 @@ export function generateWorld(seed: number): World {
         if (n2 > 0.73) b = bm.pocket;
       }
       w.fg[i] = b;
-      w.wall[i] = y === s ? 0 : b === B.CLAY || b === B.GRAVEL ? B.DIRT : b;
+      w.wall[i] = y === s ? 0 : wallFor(bi, y - s, x, seed);
     }
   }
 
@@ -139,6 +141,60 @@ export function generateWorld(seed: number): World {
     }
   }
 
+  // ---- tidy the open caverns: tiny holes in the back wall read as square glitches ----
+  {
+    const hole = (x: number, y: number): boolean => x >= 2 && x < W - 2 && y >= 0 && y < WORLD_H && y >= w.surface[x] + 3 && w.wall[y * W + x] === 0;
+    const restore = (i: number): void => {
+      const x = i % W;
+      const y = (i - x) / W;
+      w.wall[i] = wallFor(biomeIndexAt(x, y), y - w.surface[x], x, seed);
+    };
+    // one smoothing pass: open tiles with few open neighbours close up
+    const close: number[] = [];
+    for (let y = 0; y < WORLD_H; y++) {
+      for (let x = 2; x < W - 2; x++) {
+        if (!hole(x, y)) continue;
+        let n = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && hole(x + dx, y + dy)) n++;
+        if (n <= 3) close.push(y * W + x);
+      }
+    }
+    for (const i of close) restore(i);
+    // then any pocket of open wall too small to read as a cavern is walled back in
+    const seen = new Uint8Array(W * WORLD_H);
+    const stack: number[] = [];
+    const comp: number[] = [];
+    for (let y = 0; y < WORLD_H; y++) {
+      for (let x = 2; x < W - 2; x++) {
+        const i = y * W + x;
+        if (seen[i] || !hole(x, y)) continue;
+        comp.length = 0;
+        stack.push(i);
+        seen[i] = 1;
+        while (stack.length) {
+          const j = stack.pop() as number;
+          comp.push(j);
+          const jx = j % W;
+          const jy = (j - jx) / W;
+          const near = [
+            [jx + 1, jy],
+            [jx - 1, jy],
+            [jx, jy + 1],
+            [jx, jy - 1],
+          ];
+          for (const [nx, ny] of near) {
+            if (!hole(nx, ny)) continue;
+            const k = ny * W + nx;
+            if (seen[k]) continue;
+            seen[k] = 1;
+            stack.push(k);
+          }
+        }
+        if (comp.length < 60) for (const j of comp) restore(j);
+      }
+    }
+  }
+
   // ---- ores --------------------------------------------------------------------
   for (let bi = 0; bi < 5; bi++) {
     const bm = BIOMES[bi];
@@ -164,10 +220,12 @@ export function generateWorld(seed: number): World {
   placeLava(w, BIOMES[3], seed);
 
   // ---- structures ------------------------------------------------------------------
-  buildMineshafts(w, rng);
+  buildMines(w, rng);
   buildGeodes(w, rng);
   buildRuins(w, rng);
   buildHeartChamber(w);
+
+  ensureRelicSources(w, rng);
 
   // ---- bedrock ----------------------------------------------------------------------
   for (let y = 0; y < WORLD_H; y++) {
@@ -183,14 +241,76 @@ export function generateWorld(seed: number): World {
   // ---- surface life ----------------------------------------------------------------------
   placeSurface(w, rng);
 
-  // ---- decor, chests, heart crystals --------------------------------------------------------
+  // ---- formations, decor, chests, heart crystals ----------------------------------------------
+  placeProps(w, rng);
   placeDecor(w, rng);
   placeChests(w, rng);
   placeHeartCrystals(w, rng);
 
+  unburyObjects(w);
   w.updateAllSky();
   w.dirty.clear();
   return w;
+}
+
+/** every biome gets more relic-bearing rock than it has relics, so none can be missed */
+function ensureRelicSources(w: World, rng: Rng): void {
+  for (let bi = 0; bi < 5; bi++) {
+    const bm = BIOMES[bi];
+    const want = RELICS.filter((r) => r.biome === bi).length + 3;
+    let have = 0;
+    for (let y = bm.top; y <= bm.bottom; y++) {
+      for (let x = 0; x < w.w; x++) {
+        const b = w.fg[y * w.w + x];
+        if (b === B.FOSSIL || b === B.RELIC_STONE) have++;
+      }
+    }
+    const block = bi === 0 || bi === 1 ? B.FOSSIL : B.RELIC_STONE;
+    for (let tries = 0; have < want && tries < 20000; tries++) {
+      const x = rng.int(4, w.w - 5);
+      const y = rng.int(bm.top + 3, bm.bottom - 1);
+      if (bi === 0 && y < w.surface[x] + 6) continue;
+      if (!isHostRock(w.get(x, y), bm)) continue;
+      w.fg[w.idx(x, y)] = block;
+      have++;
+    }
+  }
+}
+
+/** structures built later can bury things placed earlier: dig chests out, drop anything else */
+function unburyObjects(w: World): void {
+  for (let i = 0; i < w.fg.length; i++) {
+    const o = w.obj[i];
+    if (!o || !BLOCKS[w.fg[i]].solid) continue;
+    if (o === Obj.CHEST) {
+      w.fg[i] = B.AIR;
+      w.decor[i] = 0;
+      const below = i + w.w;
+      if (below < w.fg.length && !BLOCKS[w.fg[below]].solid) {
+        w.fg[below] = B.STONE;
+        w.decor[below] = 0;
+        w.obj[below] = 0;
+      }
+    } else w.obj[i] = 0;
+  }
+}
+
+/** back walls are one rock per layer (soil near the top), so they read as a single surface */
+function wallFor(bi: number, depth: number, x: number, seed: number): number {
+  switch (bi) {
+    case 0:
+      return depth < 8 + valueNoise(x * 0.11, 3.7, seed) * 9 ? B.DIRT : B.STONE;
+    case 1:
+      return B.GROTTO_ROCK;
+    case 2:
+      return B.CRYSTAL_ROCK;
+    case 3:
+      return B.BASALT;
+    case 4:
+      return B.ABYSS_STONE;
+    default:
+      return B.HEARTSTONE;
+  }
 }
 
 /** the first solid row of a column, as the world is now */
@@ -303,26 +423,133 @@ function placeLava(w: World, bm: BiomeDef, seed: number): void {
   for (let i = 0; i < cand.length; i++) if (cand[i]) w.fg[i] = B.LAVA;
 }
 
-function buildMineshafts(w: World, rng: Rng): void {
-  const bm = BIOMES[0];
-  for (let k = 0; k < 5; k++) {
-    const len = rng.int(14, 28);
-    const x0 = rng.int(4, w.w - 5 - len);
-    const y = rng.int(bm.top + 16, bm.bottom - 6);
-    for (let x = x0; x < x0 + len; x++) {
-      for (let dy = -2; dy <= 0; dy++) {
-        const i = w.idx(x, y + dy);
-        if (w.fg[i] === B.BEDROCK) continue;
-        w.fg[i] = B.AIR;
-        if (w.wall[i] === 0) w.wall[i] = B.STONE;
-      }
-      w.fg[w.idx(x, y + 1)] = B.PLANKS;
-      if ((x - x0) % 5 === 2) w.obj[w.idx(x, y)] = Obj.BEAM;
+/** clear one tile of the old mine: open air with timber behind it */
+function carveMine(w: World, x: number, y: number): void {
+  if (!w.inside(x, y) || x < 3 || x >= w.w - 3) return;
+  const i = w.idx(x, y);
+  if (BLOCKS[w.fg[i]].unbreakable) return;
+  w.fg[i] = B.AIR;
+  w.wall[i] = B.PLANKS;
+  w.decor[i] = 0;
+  w.obj[i] = 0;
+}
+
+/**
+ * The old Deepwick mines: a few abandoned workings away from where you wake up.
+ * Each is a timbered shaft with a ladder, drifts branching off it with rail lines,
+ * support frames and hanging lamps, store rooms at the ends, a parked cart or two
+ * and the odd collapse. One of them still opens onto the hills.
+ */
+function buildMines(w: World, rng: Rng): void {
+  const sites: number[] = [];
+  const count = 3;
+  for (let k = 0; k < count; k++) {
+    let sx = -1;
+    for (let t = 0; t < 80; t++) {
+      const x = rng.int(16, w.w - 18);
+      if (Math.abs(x - SPAWN_X) < 28) continue;
+      if (sites.some((o) => Math.abs(o - x) < 36)) continue;
+      sx = x;
+      break;
     }
-    w.obj[w.idx(x0 + len - 2, y)] = Obj.CHEST;
-    w.obj[w.idx(x0 + 1, y - 1)] = Obj.TORCH;
-    w.decor[w.idx(x0 + 4, y)] = rng.pick([143, 144, 145]);
-    w.decor[w.idx(x0 + len - 6, y)] = rng.pick([152, 144, 143]);
+    if (sx < 0) continue;
+    sites.push(sx);
+    const surf = Math.min(w.surface[sx], w.surface[sx + 1]);
+    const entrance = k === 0;
+    const top = entrance ? surf - 2 : surf + rng.int(9, 15);
+    const bottom = Math.min(BIOMES[1].top + 26, surf + rng.int(52, 76));
+    // the shaft: two wide, a ladder all the way down
+    for (let y = top; y <= bottom; y++) {
+      carveMine(w, sx, y);
+      carveMine(w, sx + 1, y);
+      if (y >= surf - 1) w.obj[w.idx(sx, y)] = Obj.LADDER;
+      if (entrance && y < surf) {
+        // no timber against the open sky
+        w.wall[w.idx(sx, y)] = 0;
+        w.wall[w.idx(sx + 1, y)] = 0;
+      }
+    }
+    // a sump at the bottom so the shaft has a floor
+    for (const x of [sx, sx + 1]) {
+      const i = w.idx(x, bottom + 1);
+      if (!BLOCKS[w.fg[i]].solid) w.fg[i] = B.PLANKS;
+    }
+    if (entrance) {
+      // a timber headframe over the hole and a sign
+      w.obj[w.idx(sx - 1, surf - 1)] = Obj.BEAM;
+      w.obj[w.idx(sx + 2, surf - 1)] = Obj.BEAM;
+      w.obj[w.idx(sx - 2, surf - 1)] = Obj.LAMP;
+      const signX = sx + 4;
+      if (w.fg[w.idx(signX, surf - 1)] === B.AIR) w.decor[w.idx(signX, surf - 1)] = 148;
+    }
+    // drifts off the shaft
+    let y = Math.max(top + 6, surf + 6);
+    let side = rng.chance(0.5) ? -1 : 1;
+    while (y < bottom - 2) {
+      const both = rng.chance(0.3);
+      buildDrift(w, rng, side < 0 ? sx - 1 : sx + 2, y, side);
+      if (both) buildDrift(w, rng, side < 0 ? sx + 2 : sx - 1, y, -side);
+      side = -side;
+      y += rng.int(9, 13);
+    }
+    buildDrift(w, rng, side < 0 ? sx - 1 : sx + 2, bottom, side);
+  }
+}
+
+function buildDrift(w: World, rng: Rng, x0: number, floorY: number, dir: number): void {
+  const len = rng.int(16, 34);
+  const xs: number[] = [];
+  let x = x0;
+  for (let k = 0; k < len; k++) {
+    if (x < 5 || x > w.w - 6) break;
+    for (let yy = floorY - 2; yy <= floorY; yy++) carveMine(w, x, yy);
+    // keep a floor under the rails: plank bridges over gaps
+    const fi = w.idx(x, floorY + 1);
+    if (!BLOCKS[w.fg[fi]].solid || w.fg[fi] === B.LAVA) w.fg[fi] = B.PLANKS;
+    xs.push(x);
+    x += dir;
+  }
+  if (xs.length < 6) return;
+  // rails along the floor
+  for (let k = 1; k < xs.length; k++) w.rail[w.idx(xs[k], floorY)] = 1;
+  // support frames, some with a lamp still burning
+  for (let k = 3; k < xs.length - 1; k += rng.int(4, 6)) {
+    w.obj[w.idx(xs[k], floorY)] = Obj.BEAM;
+    if (rng.chance(0.4)) w.obj[w.idx(xs[k] + dir, floorY - 2)] = Obj.LAMP;
+  }
+  // a parked cart, sometimes a dead one tipped over as scenery
+  if (rng.chance(0.6)) {
+    const k = rng.int(4, xs.length - 2);
+    const i = w.idx(xs[k], floorY);
+    if (!w.obj[i]) w.obj[i] = Obj.MINECART;
+  } else if (rng.chance(0.5)) {
+    const k = rng.int(4, xs.length - 2);
+    const i = w.idx(xs[k], floorY);
+    if (!w.obj[i]) w.decor[i] = rng.pick(propsOfKind('cart'));
+  }
+  const end = xs[xs.length - 1];
+  // a store room at the far end
+  if (rng.chance(0.55)) {
+    const rw = rng.int(5, 7);
+    for (let k = 1; k <= rw; k++) {
+      const rx = end + dir * k;
+      for (let yy = floorY - 3; yy <= floorY; yy++) carveMine(w, rx, yy);
+      const fi = w.idx(rx, floorY + 1);
+      if (!BLOCKS[w.fg[fi]].solid) w.fg[fi] = B.PLANKS;
+    }
+    const mid = end + dir * Math.ceil(rw / 2);
+    w.obj[w.idx(mid, floorY)] = Obj.CHEST;
+    w.decor[w.idx(end + dir * 2, floorY)] = rng.pick([144, 145]);
+    w.decor[w.idx(end + dir * rw, floorY)] = rng.pick([144, 145, 152, 153]);
+    w.obj[w.idx(mid, floorY - 3)] = Obj.LAMP;
+  } else if (rng.chance(0.5)) {
+    // the far end caved in
+    for (let k = 0; k < 3; k++) {
+      const rx = end - dir * k;
+      for (let yy = floorY - 2; yy <= floorY; yy++) if (rng.chance(0.8)) w.fg[w.idx(rx, yy)] = B.GRAVEL;
+      w.rail[w.idx(rx, floorY)] = 0;
+      w.obj[w.idx(rx, floorY)] = 0;
+    }
   }
 }
 
@@ -423,7 +650,16 @@ function buildHeartChamber(w: World): void {
 }
 
 const LIGHT_DECOR = new Set([37, 39, 44, 45, 54, 139, 140, 141, 156, 157]);
+const PROP_LIGHT: Record<string, [number, number, number]> = {
+  mushroom: [0.1, 0.55, 0.5],
+  crystal: [0.42, 0.14, 0.62],
+  magma: [0.9, 0.38, 0.08],
+  ruin: [0.1, 0.28, 0.62],
+  roots: [0.03, 0.2, 0.18],
+};
 export function decorLight(code: number): [number, number, number] | null {
+  const prop = propOf(code);
+  if (prop) return PROP_LIGHT[prop.kind] ?? null;
   if (!LIGHT_DECOR.has(code)) return null;
   switch (code) {
     case 37:
@@ -446,6 +682,57 @@ export function decorLight(code: number): [number, number, number] | null {
       return [0.15, 0.35, 0.7];
   }
   return null;
+}
+
+const solidFloor = (w: World, x: number, y: number): boolean => {
+  const b = w.get(x, y);
+  return BLOCKS[b].solid && b !== B.BEDROCK;
+};
+const open = (w: World, x: number, y: number): boolean => w.inside(x, y) && w.get(x, y) === B.AIR && !w.obj[w.idx(x, y)];
+
+function propNear(w: World, x: number, y: number): boolean {
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -3; dx <= 3; dx++) {
+      if (w.inside(x + dx, y + dy) && propOf(w.decor[w.idx(x + dx, y + dy)])) return true;
+    }
+  }
+  return false;
+}
+
+/** big formations: stalagmites, glowing mushrooms, crystals, roots... chosen per biome */
+function placeProps(w: World, rng: Rng): void {
+  for (let y = SURFACE_Y + 4; y < w.h - 7; y++) {
+    for (let x = 4; x < w.w - 4; x++) {
+      const i = w.idx(x, y);
+      if (!open(w, x, y) || w.decor[i]) continue;
+      if (y < w.surface[x] + 3) continue;
+      // keep the old mine workings tidy
+      if (w.wall[i] === B.PLANKS) continue;
+      const cfg = BIOMES[biomeIdx(y)].props;
+      // a floor at least three tiles wide with headroom above
+      const floor = solidFloor(w, x - 1, y + 1) && solidFloor(w, x, y + 1) && solidFloor(w, x + 1, y + 1) && open(w, x - 1, y) && open(w, x + 1, y);
+      if (floor && cfg.floor.length && rng.chance(cfg.floorChance)) {
+        let head = 0;
+        while (head < 3 && open(w, x, y - 1 - head) && open(w, x - 1, y - 1 - head) && open(w, x + 1, y - 1 - head)) head++;
+        if (head >= 1 && !propNear(w, x, y)) {
+          const options = propsOfKind(rng.pick(cfg.floor)).filter((c) => PROPS[c - PROPS[0].code].h <= 32 * (head + 1) - 4);
+          if (options.length) {
+            w.decor[i] = rng.pick(options);
+            continue;
+          }
+        }
+      }
+      const ceil = solidFloor(w, x - 1, y - 1) && solidFloor(w, x, y - 1) && solidFloor(w, x + 1, y - 1) && open(w, x - 1, y) && open(w, x + 1, y);
+      if (ceil && cfg.ceil.length && rng.chance(cfg.ceilChance)) {
+        let room = 0;
+        while (room < 4 && open(w, x, y + 1 + room)) room++;
+        if (room >= 2 && !propNear(w, x, y)) {
+          const options = propsOfKind(rng.pick(cfg.ceil)).filter((c) => PROPS[c - PROPS[0].code].h <= 32 * room);
+          if (options.length) w.decor[i] = rng.pick(options);
+        }
+      }
+    }
+  }
 }
 
 function placeDecor(w: World, rng: Rng): void {

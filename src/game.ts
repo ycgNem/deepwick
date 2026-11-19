@@ -4,6 +4,7 @@ import { LightMap, PointLight } from './world/light';
 import { TILE, WORLD_W, DAY_LENGTH, INV_SIZE } from './constants';
 import { BLOCKS, B, PLACED_WALLS } from './data/blocks';
 import { BIOMES, biomeAt, DECOR_DROPS } from './data/biomes';
+import { propOf } from './data/props';
 import { ITEMS, ItemDef, RELICS, SHOP_STOCK, equipSlotOf } from './data/items';
 import { ENEMIES, DAY_SURFACE, NIGHT_SURFACE } from './data/enemies';
 import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
@@ -24,6 +25,7 @@ import {
   heldDef,
   itemValue,
   nextRelic,
+  bestPick,
   xpToNext,
   MAX_LEVEL,
   SkillId,
@@ -52,11 +54,12 @@ export interface UIHooks {
   toast(msg: string, color?: string): void;
   open(panel: string): void;
   isOpen(): boolean;
+  close(): void;
   levelUp(skill: SkillId, lvl: number): void;
   victory(): void;
 }
 
-export type HoverKind = 'none' | 'block' | 'tree' | 'obj' | 'decor' | 'wall';
+export type HoverKind = 'none' | 'block' | 'tree' | 'obj' | 'decor' | 'wall' | 'rail';
 
 export const BUILDING_INFO: Record<BuildingKind, { sprite: string; npc: string; panel: string; label: string; name: string }> = {
   trade: { sprite: 'shop', npc: 'npc_merchant', panel: 'shop', label: 'Trade with Pell', name: 'Trading Post' },
@@ -82,6 +85,8 @@ const OBJ_ITEM: Partial<Record<Obj, string>> = {
   [Obj.DOOR_OPEN_TOP]: 'door',
   [Obj.SAPLING]: 'sapling',
   [Obj.HEART_CRYSTAL]: 'heartcrystal',
+  [Obj.MINECART]: 'minecart',
+  [Obj.LAMP]: 'lamp',
 };
 
 /** objects that fall off when the block under them goes */
@@ -107,7 +112,38 @@ const NEEDS_FLOOR = new Set<number>([
   Obj.HEART_CRYSTAL,
   Obj.CHEST,
   Obj.CHEST_OPEN,
+  Obj.MINECART,
 ]);
+
+/** a cart you are riding: centre x in px, the rail row it runs on, speed */
+interface Ride {
+  x: number;
+  row: number;
+  vx: number;
+  rollT: number;
+}
+const CART_MAX = 560;
+
+/** the grappling hook: flying out, bitten into rock and hauling you in, or reeling back empty */
+export interface Hook {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  stuck: boolean;
+  back: boolean;
+  /** reeled all the way in (or wedged): now hanging, climbing with W and S */
+  hang: boolean;
+  /** the tile it bit into */
+  tx: number;
+  ty: number;
+  /** closest the rider has come to the anchor, and how long since that improved */
+  best: number;
+  stall: number;
+}
+const HOOK_RANGE = 11 * TILE;
+const HOOK_SPEED = 1150;
+const HOOK_PULL = 640;
 
 export function sharpenCost(level: number): number {
   return Math.round(80 * Math.pow(1.7, level));
@@ -153,6 +189,10 @@ export class Game {
   tickT = 0;
   biome = 0;
   near: Interactable | null = null;
+  /** the minecart you are sitting in, if any */
+  ride: Ride | null = null;
+  /** the grappling hook, while it is out */
+  hook: Hook | null = null;
   hoverTile = { x: 0, y: 0, inReach: false, kind: 'none' as HoverKind, tx: 0, ty: 0, ok: false };
   hintCooldown = 0;
   lowOilWarned = false;
@@ -175,18 +215,47 @@ export class Game {
     pl.x = p.px - pl.w / 2;
     pl.y = p.py - pl.h;
     pl.hp = Math.min(p.hp, this.st.maxHp);
-    pl.oil = Math.min(p.oil, this.st.oilMax);
+    pl.oil = this.st.oilMax > 0 ? Math.min(p.oil, this.st.oilMax) : p.oil;
     pl.fallStartY = pl.y;
     this.wasNight = isNight(p.clock);
     if (this.p.bounties.length === 0) this.refillBounties();
+    this.reconcileRelics();
+    if (this.p.bossRewardPending) setTimeout(() => this.grantBossReward(this.player.cx, this.player.cy), 800);
     this.snapCamera();
+  }
+
+  /**
+   * Relics are marked as dropped when they spawn so the same one never drops twice. Ground
+   * drops aren't saved, so after a reload any relic that isn't actually owned can drop again.
+   */
+  private reconcileRelics(): void {
+    const owned = new Set<string>(this.p.catalogued);
+    const add = (s: Slot | undefined): void => {
+      if (s && s.id.startsWith('r_')) owned.add(s.id);
+    };
+    this.p.inv.forEach(add);
+    for (const c of Object.values(this.p.chests)) c.forEach(add);
+    for (const s of this.p.satchel?.items ?? []) add(s);
+    this.p.relicsDropped = this.p.relicsDropped.filter((id) => owned.has(id));
+  }
+
+  private grantBossReward(x: number, y: number): void {
+    this.p.bossRewardPending = false;
+    this.drops.push(new Drop('r_heart', 1, x, y));
+    this.drops.push(new Drop('coin', 2500, x, y));
+    if (!this.p.relicsDropped.includes('r_heart')) this.p.relicsDropped.push('r_heart');
+    audio.play('relic', { vary: 0 });
+    this.burst(x, y, 80, ['#ffd75a', '#ffffff', '#ff4a7a'], 300, true);
+    this.ui.victory();
+    this.onSave?.();
   }
 
   // ------------------------------------------------------------------ helpers
   refresh(): void {
     this.st = computeStats(this.p);
     this.player.hp = Math.min(this.player.hp, this.st.maxHp);
-    this.player.oil = Math.min(this.player.oil, this.st.oilMax);
+    // without a lantern the oil you had waits for the next one
+    if (this.st.oilMax > 0) this.player.oil = Math.min(this.player.oil, this.st.oilMax);
   }
 
   toast(msg: string, color?: string): void {
@@ -350,6 +419,11 @@ export class Game {
     }
     if (pl.invuln > 0) pl.invuln -= dt;
     if (pl.hurtT > 0) pl.hurtT -= dt;
+    if (this.ride) {
+      this.updateRide(dt);
+      this.updateHotbarAndUse(dt);
+      return;
+    }
 
     const left = inp.isDown('KeyA', 'ArrowLeft');
     const right = inp.isDown('KeyD', 'ArrowRight');
@@ -358,12 +432,13 @@ export class Game {
     const jumpPressed = !inp.blocked && inp.wasPressed('Space');
     const jumpHeld = inp.isDown('Space');
     const liquid = inLiquid(this.world, pl);
+    const hooked = this.updateHook(dt);
 
     // ladders
     const ptx = Math.floor(pl.cx / TILE);
     const onLadder = this.world.getObj(ptx, Math.floor((pl.y + pl.h - 4) / TILE)) === Obj.LADDER || this.world.getObj(ptx, Math.floor((pl.y + 6) / TILE)) === Obj.LADDER;
     const ladderBelow = this.world.getObj(ptx, Math.floor((pl.y + pl.h + 4) / TILE)) === Obj.LADDER;
-    if (!pl.climbing && ((onLadder && (up || down)) || (ladderBelow && down && pl.onGround))) {
+    if (!hooked && !pl.climbing && ((onLadder && (up || down)) || (ladderBelow && down && pl.onGround))) {
       pl.climbing = true;
       pl.vx = 0;
       pl.x = ptx * TILE + TILE / 2 - pl.w / 2;
@@ -371,7 +446,9 @@ export class Game {
     if (pl.climbing && !onLadder && !ladderBelow) pl.climbing = false;
 
     const dir = (right ? 1 : 0) - (left ? 1 : 0);
-    if (pl.climbing) {
+    if (hooked) {
+      this.hookPull(dt, dir, jumpPressed, up, down);
+    } else if (pl.climbing) {
       pl.vy = ((down ? 1 : 0) - (up ? 1 : 0)) * 150;
       pl.vx = dir * 70;
       if (dir && !onLadder) pl.climbing = false;
@@ -443,12 +520,7 @@ export class Game {
       if (pl.onGround) pl.fallStartY = pl.y;
     }
 
-    // hotbar
-    for (let i = 0; i < 10; i++) if (inp.wasPressed('Digit' + ((i + 1) % 10))) this.p.sel = i;
-    if (inp.wheel !== 0 && !inp.blocked) this.p.sel = (this.p.sel + inp.wheel + 10) % 10;
-
-    this.updateTargeting();
-    this.updateUse(dt);
+    this.updateHotbarAndUse(dt);
 
     if (!inp.blocked) {
       if (inp.mouseRightPressed) this.rightClick();
@@ -457,6 +529,11 @@ export class Game {
       if (inp.wasPressed('KeyH')) this.useFromInventory('tonic');
       if (inp.wasPressed('KeyF')) this.useFromInventory('oil');
       if (inp.wasPressed('KeyQ')) this.dropHeld();
+      if (inp.wasPressed('KeyG')) {
+        if (this.hook) this.releaseHook(false);
+        else if (count(this.p, 'grapple') > 0) this.fireGrapple();
+        else this.toast('You have no Grappling Hook. Forge one at an anvil.');
+      }
     }
 
     // recall channel
@@ -487,6 +564,271 @@ export class Game {
     }
 
     pl.x = Math.max(2 * TILE, Math.min(pl.x, (WORLD_W - 2) * TILE - pl.w));
+  }
+
+  private updateHotbarAndUse(dt: number): void {
+    const inp = this.input;
+    for (let i = 0; i < 10; i++) if (inp.wasPressed('Digit' + ((i + 1) % 10))) this.p.sel = i;
+    if (inp.wheel !== 0 && !inp.blocked) this.p.sel = (this.p.sel + inp.wheel + 10) % 10;
+    this.updateTargeting();
+    this.updateUse(dt);
+  }
+
+  // ------------------------------------------------------------------ minecarts
+  /** climb into the cart parked at a tile */
+  private mountCart(tx: number, ty: number): void {
+    const w = this.world;
+    if (w.getObj(tx, ty) !== Obj.MINECART) return;
+    this.hook = null;
+    w.setObj(tx, ty, Obj.NONE);
+    this.ride = { x: tx * TILE + TILE / 2, row: ty, vx: 0, rollT: 0 };
+    const pl = this.player;
+    pl.climbing = false;
+    pl.vx = 0;
+    pl.vy = 0;
+    audio.play('cart_bump', { vol: 0.4, pitch: 1.3 });
+    this.hint('cart', 'A / D to roll along the rails, Space to jump out. Carts ram anything in the way.');
+  }
+
+  /** park the cart on the nearest free rail tile and hop out, keeping some speed */
+  private dismount(jump: boolean): void {
+    const r = this.ride;
+    if (!r) return;
+    const w = this.world;
+    const pl = this.player;
+    let tx = Math.floor(r.x / TILE);
+    for (const d of [0, -1, 1, -2, 2]) {
+      const x = tx + d;
+      if (w.hasRail(x, r.row) && !w.getObj(x, r.row) && !w.rock(x, r.row)) {
+        tx = x;
+        break;
+      }
+    }
+    if (!w.getObj(tx, r.row) && !w.rock(tx, r.row)) w.setObj(tx, r.row, Obj.MINECART);
+    else this.giveOrDrop('minecart', 1);
+    this.ride = null;
+    pl.vx = r.vx * 0.8;
+    pl.vy = jump ? -JUMP_V * 0.85 : 0;
+    pl.fallStartY = pl.y;
+  }
+
+  private updateRide(dt: number): void {
+    const r = this.ride as Ride;
+    const w = this.world;
+    const pl = this.player;
+    const inp = this.input;
+    const dir = (inp.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (inp.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
+    if (dir) r.vx += dir * 900 * dt;
+    else r.vx -= Math.sign(r.vx) * Math.min(Math.abs(r.vx), 110 * dt);
+    r.vx = Math.max(-CART_MAX, Math.min(CART_MAX, r.vx));
+    // the track must continue under the leading wheel, and the way must be clear
+    const nx = r.x + r.vx * dt;
+    const lead = Math.floor((nx + Math.sign(r.vx) * 15) / TILE);
+    const blocked = !w.hasRail(lead, r.row) || w.rock(lead, r.row) || w.solid(lead, r.row - 1) || w.getObj(lead, r.row) === Obj.MINECART;
+    if (r.vx !== 0 && blocked) {
+      if (Math.abs(r.vx) > 200) {
+        audio.play('cart_bump', { vol: 0.7 });
+        this.shake = Math.max(this.shake, Math.abs(r.vx) / 90);
+        this.burst(r.x + Math.sign(r.vx) * 16, (r.row + 1) * TILE - 6, 8, ['#ffd75a', '#8a8a9a'], 120, true);
+      }
+      const edge = Math.sign(r.vx) > 0 ? lead * TILE - 16 : (lead + 1) * TILE + 16;
+      r.x = Math.sign(r.vx) > 0 ? Math.min(nx, edge) : Math.max(nx, edge);
+      r.vx = 0;
+    } else r.x = nx;
+    // ram whatever is on the line
+    if (Math.abs(r.vx) > 220) {
+      for (const e of this.enemies) {
+        if (e.dead || e.def.passive) continue;
+        if (Math.abs(e.cx - r.x) < 26 && Math.abs(e.cy - ((r.row + 1) * TILE - 20)) < 34) {
+          this.damageEnemy(e, r.vx > 0 ? -0.5 : Math.PI + 0.5, Math.round(Math.abs(r.vx) / 40));
+          r.vx *= 0.55;
+        }
+      }
+    }
+    // sit the rider in the cart
+    pl.x = r.x - pl.w / 2;
+    pl.y = (r.row + 1) * TILE - 18 - pl.h;
+    pl.vx = r.vx;
+    pl.vy = 0;
+    pl.onGround = true;
+    pl.fallStartY = pl.y;
+    if (Math.abs(r.vx) > 5) pl.facing = Math.sign(r.vx);
+    pl.anim = pl.swinging ? 'mine' : 'idle';
+    pl.animT += dt;
+    // rumble
+    r.rollT -= dt * (Math.abs(r.vx) / 120);
+    if (Math.abs(r.vx) > 40 && r.rollT <= 0) {
+      r.rollT = 1;
+      audio.play('cart_roll', { vol: 0.25 + Math.min(0.35, Math.abs(r.vx) / 1200), pitch: 0.75 + Math.abs(r.vx) / 1100 });
+      if (Math.random() < 0.5) this.parts.push({ x: r.x - Math.sign(r.vx) * 14, y: (r.row + 1) * TILE - 6, vx: -r.vx * 0.1, vy: -40, life: 0.3, max: 0.3, color: '#ffd75a', size: 1, grav: 300, glow: true });
+    }
+    if (!inp.blocked && inp.wasPressed('Space')) this.dismount(true);
+    if (!w.hasRail(Math.floor(r.x / TILE), r.row) && !w.hasRail(Math.floor((r.x - 14) / TILE), r.row) && !w.hasRail(Math.floor((r.x + 14) / TILE), r.row)) this.dismount(false);
+  }
+
+  // ------------------------------------------------------------------ grappling hook
+  private fireGrapple(): void {
+    const pl = this.player;
+    if (this.ride || pl.dead || pl.recallT > 0 || this.hook) return;
+    const m = this.mouseWorld();
+    const ox = pl.cx;
+    const oy = pl.y + 14;
+    const a = Math.atan2(m.y - oy, m.x - ox);
+    this.hook = { x: ox, y: oy, vx: Math.cos(a) * HOOK_SPEED, vy: Math.sin(a) * HOOK_SPEED, stuck: false, back: false, hang: false, tx: 0, ty: 0, best: Infinity, stall: 0 };
+    pl.facing = m.x >= pl.cx ? 1 : -1;
+    audio.play('swing', { pitch: 0.6, vol: 0.8 });
+    this.hint('grapple', 'The hook bites into rock and hauls you to it. Hanging, W and S climb the rope; Space jumps off, G lets go.');
+  }
+
+  /** let go: the empty hook reels back to your hand */
+  private releaseHook(jump: boolean): void {
+    const h = this.hook;
+    if (!h) return;
+    const pl = this.player;
+    if (h.stuck) {
+      h.stuck = false;
+      h.hang = false;
+      h.back = true;
+      pl.fallStartY = pl.y;
+      if (jump) {
+        pl.vy = -JUMP_V * 0.85;
+        pl.jumpsUsed = 1;
+        pl.onGround = false;
+        audio.play('jump', { vol: 0.5 });
+      }
+    } else h.back = true;
+  }
+
+  /** move the hook; true while it is bitten in and hauling the player */
+  private updateHook(dt: number): boolean {
+    const h = this.hook;
+    if (!h) return false;
+    const pl = this.player;
+    const w = this.world;
+    const ox = pl.cx;
+    const oy = pl.y + 14;
+    if (h.stuck) {
+      // the rock it bit into may have been mined out from under it
+      if (!w.solid(h.tx, h.ty)) {
+        this.releaseHook(false);
+        return false;
+      }
+      return true;
+    }
+    if (h.back) {
+      const dx = ox - h.x;
+      const dy = oy - h.y;
+      const d = Math.hypot(dx, dy);
+      const step = HOOK_SPEED * 1.4 * dt;
+      if (d <= step + 10) this.hook = null;
+      else {
+        h.x += (dx / d) * step;
+        h.y += (dy / d) * step;
+      }
+      return false;
+    }
+    // fly in short steps so it cannot skip through a thin wall
+    const steps = Math.max(1, Math.ceil((Math.hypot(h.vx, h.vy) * dt) / 8));
+    for (let s = 0; s < steps; s++) {
+      h.x += (h.vx * dt) / steps;
+      h.y += (h.vy * dt) / steps;
+      const tx = Math.floor(h.x / TILE);
+      const ty = Math.floor(h.y / TILE);
+      if (w.solid(tx, ty)) {
+        h.stuck = true;
+        h.tx = tx;
+        h.ty = ty;
+        h.best = Infinity;
+        h.stall = 0;
+        pl.climbing = false;
+        audio.play('pick_hit', { pitch: 1.5, vol: 0.7 });
+        this.burst(h.x, h.y, 6, ['#c8c8d8', '#8a8a9a'], 70);
+        return true;
+      }
+      if (Math.hypot(h.x - ox, h.y - oy) > HOOK_RANGE) {
+        h.back = true;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /** hauled along the rope toward the anchor, then hanging from it */
+  private hookPull(dt: number, dir: number, jumpPressed: boolean, up: boolean, down: boolean): void {
+    const h = this.hook as Hook;
+    const pl = this.player;
+    pl.fallStartY = pl.y;
+    pl.jumpsUsed = 0;
+    if (jumpPressed) {
+      this.releaseHook(true);
+      moveBody(this.world, pl, dt);
+      return;
+    }
+    const dx = h.x - pl.cx;
+    const dy = h.y - (pl.y + 14);
+    const d = Math.hypot(dx, dy);
+    if (!h.hang) {
+      // hauled in along the rope; wedged under a ledge, you just hang where you are
+      const k = Math.min(1, dt * 12);
+      pl.vx += ((dx / d) * HOOK_PULL - pl.vx) * k;
+      pl.vy += ((dy / d) * HOOK_PULL - pl.vy) * k;
+      if (d < h.best - 3) {
+        h.best = d;
+        h.stall = 0;
+      } else h.stall += dt;
+      if (d <= 34 || h.stall > 0.35) {
+        h.hang = true;
+        pl.vx *= 0.2;
+        pl.vy *= 0.2;
+      }
+    } else {
+      // hanging: W climbs the rope, S lets it out, A and D sway a little
+      const k = Math.min(1, dt * 14);
+      if (up && d > 34) {
+        pl.vx += ((dx / d) * 150 - pl.vx) * k;
+        pl.vy += ((dy / d) * 150 - pl.vy) * k;
+      } else {
+        const tvy = down && d < HOOK_RANGE ? 160 : 0;
+        pl.vy += (tvy - pl.vy) * k;
+        pl.vx += (dir * 70 - pl.vx) * Math.min(1, dt * 8);
+        // the rope only lets you drift so far to either side of the anchor
+        const reach = 24 + Math.max(0, -dy) * 0.35;
+        const nx = pl.cx + pl.vx * dt - h.x;
+        if (Math.abs(nx) > reach && Math.sign(nx) === Math.sign(pl.vx)) pl.vx = 0;
+      }
+    }
+    if (Math.abs(dx) > 4) pl.facing = Math.sign(dx);
+    moveBody(this.world, pl, dt);
+    // feet on the floor: the rope goes slack and you stand
+    if (h.hang && pl.onGround) {
+      this.releaseHook(false);
+      return;
+    }
+    pl.onGround = false;
+  }
+
+  // ------------------------------------------------------------------ rails
+  private placeRail(x: number, y: number): boolean {
+    const w = this.world;
+    if (!this.emptyAt(x, y) && w.getObj(x, y) !== Obj.BEAM && w.getObj(x, y) !== Obj.TORCH) return false;
+    if (w.rock(x, y) || BLOCKS[w.get(x, y)].liquid || w.hasRail(x, y)) return false;
+    if (!w.rock(x, y + 1)) {
+      this.text(x * TILE + 16, y * TILE, 'Rails need a floor', '#ff9a6a');
+      return false;
+    }
+    w.setRail(x, y, true);
+    w.decor[w.idx(x, y)] = 0;
+    this.hint('rail', 'Lay a line of rails, then set a Minecart on it and press E to ride.');
+    return true;
+  }
+
+  private hitRail(x: number, y: number): void {
+    const w = this.world;
+    if (!w.hasRail(x, y) || w.getObj(x, y) === Obj.MINECART) return;
+    w.setRail(x, y, false);
+    this.drops.push(new Drop('rail', 1, x * TILE + 16, y * TILE + 20));
+    audio.play('block_break', { vol: 0.5, pitch: 1.4 });
+    this.burst(x * TILE + 16, y * TILE + 26, 6, ['#8a8a9a', '#6a4220'], 80);
   }
 
   mouseWorld(): { x: number; y: number } {
@@ -532,6 +874,11 @@ export class Game {
       return;
     }
     const b = w.get(tx, ty);
+    if (w.hasRail(tx, ty) && !BLOCKS[b].solid && hd?.id !== 'rail' && !(hd && (hd.kind === 'block' || hd.kind === 'place'))) {
+      h.kind = 'rail';
+      h.ok = h.inReach;
+      return;
+    }
     if (BLOCKS[b].solid) {
       h.kind = 'block';
       h.ok = h.inReach && !BLOCKS[b].unbreakable && !this.isProtected(tx, ty);
@@ -540,7 +887,39 @@ export class Game {
     if (w.decor[w.idx(tx, ty)]) {
       h.kind = 'decor';
       h.ok = h.inReach;
+      return;
     }
+    // the sprite of a big formation covers tiles around its anchor
+    const pr = this.propUnder(m.x, m.y);
+    if (pr) {
+      h.x = pr.x;
+      h.y = pr.y;
+      h.tx = pr.x;
+      h.ty = pr.y;
+      h.kind = 'decor';
+      h.inReach = Math.hypot(pr.x * TILE + TILE / 2 - pl.cx, pr.y * TILE + TILE / 2 - pl.cy) <= (this.st.reach + 1) * TILE;
+      h.ok = h.inReach;
+    }
+  }
+
+  /** the big formation whose picture is under a world point, if any */
+  propUnder(px: number, py: number): { x: number; y: number } | null {
+    const w = this.world;
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = tx + dx;
+        const y = ty + dy;
+        if (!w.inside(x, y)) continue;
+        const p = propOf(w.decor[w.idx(x, y)]);
+        if (!p) continue;
+        const left = x * TILE + 16 - p.w / 2;
+        const top = p.anchor === 'floor' ? (y + 1) * TILE + 3 - p.h : y * TILE - 5;
+        if (px >= left + 5 && px <= left + p.w - 5 && py >= top + 4 && py <= top + p.h - 2) return { x, y };
+      }
+    }
+    return null;
   }
 
   /** ground under a settler's building can't be dug away */
@@ -568,25 +947,41 @@ export class Game {
     const pl = this.player;
     const inp = this.input;
     if (pl.useT > 0) pl.useT -= dt;
+    // a swing in progress always plays out, whatever is in hand now
+    if (pl.swinging) this.advanceSwing(dt);
+    if (inp.blocked || pl.recallT > 0) return;
     const hd = heldDef(this.p);
-    const lmb = inp.mouseLeft && !inp.blocked && pl.recallT <= 0;
     const kind = hd?.kind;
-    if (hd && (kind === 'block' || kind === 'wall' || kind === 'place' || kind === 'deed')) {
-      if (lmb && pl.useT <= 0) this.placeHeld(hd);
-      if (pl.swinging) this.advanceSwing(dt);
-      return;
-    }
-    if (hd && kind === 'food') {
-      if (inp.mouseLeftPressed && !inp.blocked) this.eat(hd);
-      return;
-    }
-    if (hd && kind === 'use') {
-      if (inp.mouseLeftPressed && !inp.blocked) this.useItem(hd.id);
-      return;
-    }
+    // a click shorter than one frame still counts
+    const lmb = inp.mouseLeft || inp.mouseLeftPressed;
+    const press = inp.mouseLeftPressed;
     if (hd && kind === 'bow') {
       if (lmb && pl.useT <= 0) this.fireBow(hd);
       return;
+    }
+    if (hd && hd.id === 'grapple') {
+      if (press) {
+        if (this.hook) this.releaseHook(false);
+        else this.fireGrapple();
+      }
+      return;
+    }
+    // with something that is not a tool in hand, a click on anything breakable breaks it
+    // (with the best pickaxe on your hotbar); a click on empty space uses the item instead
+    const tool = kind === 'pick' || kind === 'hammer' || kind === 'sword';
+    if (hd && !tool && !this.wantsToBreak()) {
+      if (kind === 'block' || kind === 'wall' || kind === 'place' || kind === 'deed') {
+        if (lmb && pl.useT <= 0) this.placeHeld(hd, press);
+        return;
+      }
+      if (kind === 'food') {
+        if (press) this.eat(hd);
+        return;
+      }
+      if (kind === 'use') {
+        if (press) this.useItem(hd.id);
+        return;
+      }
     }
     // pickaxe, hammer, sword, bare hands, anything else: swing
     if (!pl.swinging && lmb) {
@@ -611,14 +1006,23 @@ export class Game {
       if (pl.attack) audio.play('swing', { vol: 0.5 });
       this.p.food = Math.max(0, this.p.food - 0.02);
     }
-    this.advanceSwing(dt);
+  }
+
+  /** is the cursor on something a swing would break or hit? */
+  private wantsToBreak(): boolean {
+    if (this.enemyNearCursor()) return true;
+    const h = this.hoverTile;
+    if (!h.inReach || !h.ok) return false;
+    if (h.kind === 'block' || h.kind === 'tree' || h.kind === 'obj' || h.kind === 'rail') return true;
+    if (h.kind === 'decor') return !!propOf(this.world.decor[this.world.idx(h.x, h.ty)]);
+    return false;
   }
 
   private advanceSwing(dt: number): void {
     const pl = this.player;
     if (!pl.swinging) return;
     const hd = heldDef(this.p);
-    const hands = !hd || (hd.kind !== 'pick' && hd.kind !== 'sword' && hd.kind !== 'hammer');
+    const hands = this.st.pickTier === 0 && hd?.kind !== 'sword' && hd?.kind !== 'hammer';
     const rate = pl.attack ? 1 / (hd?.cd ?? 0.32) : (this.st.mineSpeed / 0.34) * (hands ? 0.8 : 1);
     pl.swingT += dt * rate;
     if (!pl.swingHit && pl.swingT >= 0.5) {
@@ -629,6 +1033,7 @@ export class Game {
         const k = this.hoverTile.kind;
         if (pl.swingKind === 'wall') this.hitWall(x, y);
         else if (this.world.getObj(x, y) === Obj.TREE) this.hitTree(x, y);
+        else if (k === 'rail' && !this.world.getObj(x, y)) this.hitRail(x, y);
         else if (this.world.getObj(x, y)) this.hitObj(x, y);
         else if (this.world.rock(x, y)) this.hitBlock(x, y);
         else if (k === 'decor' || this.world.decor[this.world.idx(x, y)]) this.harvestDecor(x, y);
@@ -682,7 +1087,10 @@ export class Game {
     e.knock = 0.18;
     e.vx = Math.cos(ang) * 260;
     e.vy = Math.sin(ang) * 200 - 120;
-    if (e.def.behavior === 'charger') e.mode = 1;
+    if (e.def.behavior === 'charger') {
+      e.provoked = true;
+      if (e.mode === 0) e.mode = 1;
+    }
     if (e.def.behavior === 'critter') e.mode = 1;
     this.text(e.cx, e.y - 4, String(Math.max(1, Math.round(dmg))), crit ? '#ffd75a' : '#ffffff', crit);
     this.burst(e.cx, e.cy, 6, ['#ffffff', '#ffb0b0'], 120);
@@ -754,13 +1162,23 @@ export class Game {
     const b = w.get(tx, ty);
     const def = BLOCKS[b];
     const i = w.idx(tx, ty);
+    const placedByYou = w.placed[i] === 1;
+    w.placed[i] = 0;
     w.set(tx, ty, B.AIR);
     w.damage.delete(i);
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
-    // decor resting on (or hanging from) this block goes with it
-    if (ty > 0 && w.decor[w.idx(tx, ty - 1)] && !w.rock(tx, ty - 2)) w.decor[w.idx(tx, ty - 1)] = 0;
-    if (ty + 1 < w.h && w.decor[w.idx(tx, ty + 1)] && !w.rock(tx, ty + 2)) w.decor[w.idx(tx, ty + 1)] = 0;
+    // decor resting on (or hanging from) this block goes with it; big formations break loose
+    if (ty > 0) {
+      const up = w.decor[w.idx(tx, ty - 1)];
+      if (propOf(up)?.anchor === 'floor') this.harvestDecor(tx, ty - 1);
+      else if (up && !propOf(up) && !w.rock(tx, ty - 2)) w.decor[w.idx(tx, ty - 1)] = 0;
+    }
+    if (ty + 1 < w.h) {
+      const dn = w.decor[w.idx(tx, ty + 1)];
+      if (propOf(dn)?.anchor === 'ceil') this.harvestDecor(tx, ty + 1);
+      else if (dn && !propOf(dn) && !w.rock(tx, ty + 2)) w.decor[w.idx(tx, ty + 1)] = 0;
+    }
     // objects standing on it fall
     const above = w.getObj(tx, ty - 1);
     if (above && NEEDS_FLOOR.has(above)) {
@@ -768,10 +1186,16 @@ export class Game {
       else this.breakObj(tx, ty - 1, true);
     }
     this.checkTorches(tx, ty);
+    // rails need their floor, lamps their ceiling
+    if (w.hasRail(tx, ty - 1)) {
+      w.setRail(tx, ty - 1, false);
+      this.drops.push(new Drop('rail', 1, cx, cy - TILE));
+    }
+    if (w.getObj(tx, ty + 1) === Obj.LAMP) this.breakObj(tx, ty + 1, true);
 
     this.p.stats.mined++;
     this.burst(cx, cy, 12, [def.color, '#3a3030', def.color], 140);
-    if (byPlayer) this.addXp('mining', def.xp);
+    if (byPlayer && !placedByYou) this.addXp('mining', def.xp);
     if (def.drop) {
       if (def.drop === '@relic') {
         const biome = biomeAt(ty).id;
@@ -823,7 +1247,7 @@ export class Game {
       this.world.damage.set(i, d);
     }
     const hd = heldDef(this.p);
-    const power = hd?.kind === 'pick' ? this.st.pickPower : hd?.kind === 'sword' ? 0.7 : 0.6;
+    const power = this.st.pickTier > 0 && hd?.kind !== 'sword' ? this.st.pickPower : hd?.kind === 'sword' ? 0.7 : 0.6;
     d.hp -= power;
     d.t = 0;
     audio.play('chop', { vol: 0.8 });
@@ -907,6 +1331,14 @@ export class Game {
     if (!o) return;
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
+    // an unopened treasure chest spills its loot rather than vanishing
+    if (o === Obj.CHEST) this.lootChest(tx, ty);
+    // a storage chest broken by anything (a bomb, digging under it) spills what it held
+    if (o === Obj.STORAGE) {
+      const key = String(w.idx(tx, ty));
+      for (const st of this.p.chests[key] ?? []) if (st) this.drops.push(new Drop(st.id, st.n, cx + (Math.random() - 0.5) * 12, cy - 6));
+      if (this.openChest === w.idx(tx, ty) && this.ui.isOpen()) this.ui.close();
+    }
     w.setObj(tx, ty, 0);
     w.damage.delete(w.idx(tx, ty));
     // partner halves
@@ -976,7 +1408,25 @@ export class Game {
     const drop = DECOR_DROPS[dc];
     const cx = tx * TILE + 16;
     const cy = ty * TILE + 16;
-    if (drop && Math.random() < drop.chance) this.drops.push(new Drop(drop.id, 1, cx, cy));
+    if (drop && Math.random() < drop.chance) {
+      const n = drop.n ? drop.n[0] + Math.floor(Math.random() * (drop.n[1] - drop.n[0] + 1)) : 1;
+      this.drops.push(new Drop(drop.id, n, cx, cy));
+    }
+    const prop = propOf(dc);
+    if (prop) {
+      const cols: Record<string, string[]> = {
+        mushroom: ['#4af0d0', '#b0fff0', '#8a6aa0'],
+        crystal: ['#b47aee', '#f0dcff', '#6a3aa8'],
+        magma: ['#ff8a2a', '#3a3040', '#ffd060'],
+        ruin: ['#5a4a7a', '#7af0ff', '#3a2e50'],
+        roots: ['#4a7a2a', '#6a4a2a', '#8ad050'],
+      };
+      const midY = prop.anchor === 'floor' ? (ty + 1) * TILE - prop.h / 2 : ty * TILE + prop.h / 2;
+      this.burst(cx, midY, 22, cols[prop.kind] ?? ['#9a8a70', '#6a5a4a', '#c8b898'], 150, prop.kind === 'mushroom' || prop.kind === 'crystal');
+      audio.play(prop.kind === 'mushroom' || prop.kind === 'roots' ? 'rustle' : 'block_break', { vol: 0.75 });
+      this.shake = Math.max(this.shake, 2);
+      return;
+    }
     this.burst(cx, cy, 6, ['#6aa83a', '#a0d060', '#c8b090'], 70);
     audio.play('rustle', { vol: 0.6 });
   }
@@ -1011,7 +1461,7 @@ export class Game {
     return w.inside(tx, ty) && !w.rock(tx, ty) && !BLOCKS[w.get(tx, ty)].liquid && !w.getObj(tx, ty);
   }
 
-  private placeHeld(hd: ItemDef): void {
+  private placeHeld(hd: ItemDef, press = true): void {
     const h = this.hoverTile;
     const pl = this.player;
     const w = this.world;
@@ -1025,6 +1475,7 @@ export class Game {
       if (!touching) return;
       w.set(x, y, hd.block);
       w.decor[w.idx(x, y)] = 0;
+      w.placed[w.idx(x, y)] = 1;
       ok = true;
       pl.useT = 0.14;
     } else if (hd.kind === 'wall' && hd.wall !== undefined) {
@@ -1035,9 +1486,12 @@ export class Game {
       ok = true;
       pl.useT = 0.08;
     } else if (hd.kind === 'deed' && hd.deed) {
-      if (!this.input.mouseLeftPressed) return;
+      if (!press) return;
       ok = this.placeBuilding(hd.deed, x);
       pl.useT = 0.5;
+    } else if (hd.id === 'rail') {
+      ok = this.placeRail(x, y);
+      pl.useT = 0.08;
     } else if (hd.kind === 'place' && hd.obj !== undefined) {
       ok = this.placeObj(hd.obj, x, y);
       pl.useT = 0.2;
@@ -1102,6 +1556,23 @@ export class Game {
         w.decor[w.idx(x, y)] = 0;
         return true;
       }
+      case Obj.MINECART: {
+        if (!w.hasRail(x, y)) {
+          this.text(x * TILE + 16, y * TILE, 'Set it on a rail', '#ff9a6a');
+          return false;
+        }
+        w.setObj(x, y, o);
+        this.hint('cartplace', 'Press E next to the cart to climb in.');
+        return true;
+      }
+      case Obj.LAMP: {
+        if (!w.rock(x, y - 1)) {
+          this.text(x * TILE + 16, y * TILE, 'Hang it from a ceiling', '#ff9a6a');
+          return false;
+        }
+        w.setObj(x, y, o);
+        return true;
+      }
       case Obj.STORAGE: {
         if (!floor) return false;
         w.setObj(x, y, o);
@@ -1145,14 +1616,31 @@ export class Game {
       for (let cy = gy - 5; cy < gy; cy++) {
         if (w.getObj(cx, cy) === Obj.TREE) this.fellTree(cx, cy);
         else if (w.getObj(cx, cy) && !edge) this.breakObj(cx, cy, true);
-        if (!edge && w.rock(cx, cy)) w.set(cx, cy, B.AIR);
+        if (!edge && w.rock(cx, cy)) {
+          const drop = BLOCKS[w.get(cx, cy)].drop;
+          if (drop && !drop.startsWith('@')) this.drops.push(new Drop(drop, 1, cx * TILE + 16, cy * TILE + 16));
+          w.set(cx, cy, B.AIR);
+        }
         w.decor[w.idx(cx, cy)] = 0;
       }
       if (edge) continue;
       for (let cy = gy; cy < gy + 4; cy++) {
-        if (!w.rock(cx, cy)) w.set(cx, cy, cy === gy ? B.GRASS : B.DIRT);
+        if (w.rock(cx, cy)) continue;
+        if (w.getObj(cx, cy)) this.breakObj(cx, cy, true);
+        w.set(cx, cy, cy === gy ? B.GRASS : B.DIRT);
       }
     }
+    // anyone standing in a dip that was just filled in is lifted onto the new ground
+    const top = gy * TILE;
+    const lift = (b: { x: number; y: number; w: number; h: number; vy: number }): void => {
+      if (b.x + b.w <= (x0 - 1) * TILE || b.x >= (x0 + BUILDING_W + 1) * TILE) return;
+      if (b.y + b.h <= top || b.y >= top + 4 * TILE) return;
+      b.y = top - b.h - 0.5;
+      b.vy = 0;
+    };
+    lift(this.player);
+    this.player.fallStartY = this.player.y;
+    for (const e of this.enemies) if (!e.dead) lift(e);
     this.p.buildings.push({ kind, x, y: gy });
     audio.play('upgrade', { vary: 0 });
     this.burst(x * TILE, gy * TILE - 40, 50, ['#ffd75a', '#ffffff', '#c89a5a'], 220, true);
@@ -1202,6 +1690,7 @@ export class Game {
     pl.facing = m.x >= pl.cx ? 1 : -1;
     pl.useT = hd.cd ?? 0.6;
     pl.swinging = true;
+    pl.attack = true;
     pl.swingT = 0.3;
     pl.swingHit = true;
     audio.play('bow');
@@ -1222,7 +1711,9 @@ export class Game {
       case 'bomb': {
         const m = this.mouseWorld();
         const a = Math.atan2(m.y - pl.cy, m.x - pl.cx);
-        this.bombs.push(new Bomb(pl.cx, pl.cy - 6, Math.cos(a) * 330 + pl.vx * 0.5, Math.sin(a) * 330 - 120));
+        const bomb = new Bomb(pl.cx, pl.cy - 6, Math.cos(a) * 330 + pl.vx * 0.5, Math.sin(a) * 330 - 120);
+        bomb.tier = bestPick(this.p)?.tier ?? 0;
+        this.bombs.push(bomb);
         audio.play('swing');
         break;
       }
@@ -1249,6 +1740,10 @@ export class Game {
         pl.recallT = 1.6;
         this.text(pl.cx, pl.y - 6, 'Recalling...', '#7ac8ff');
         break;
+      case 'grapple':
+        if (this.hook) this.releaseHook(false);
+        else this.fireGrapple();
+        return;
       case 'heartcrystal':
         if (this.p.hearts >= 10) {
           this.toast('Your heart can hold no more crystals.');
@@ -1289,9 +1784,14 @@ export class Game {
   // ------------------------------------------------------------------ interacting
   private rightClick(): void {
     const h = this.hoverTile;
-    if (!h.inReach) return;
-    const o = this.world.getObj(h.x, h.y);
-    if (o) this.useObj(h.x, h.y, o);
+    const o = h.inReach ? this.world.getObj(h.x, h.y) : 0;
+    if (o && this.useObj(h.x, h.y, o)) return;
+    // nothing to interact with: right click places or uses what you hold (Minecraft style)
+    const hd = heldDef(this.p);
+    if (!hd || this.player.useT > 0) return;
+    if (hd.kind === 'block' || hd.kind === 'wall' || hd.kind === 'place' || hd.kind === 'deed') this.placeHeld(hd, true);
+    else if (hd.kind === 'food') this.eat(hd);
+    else if (hd.kind === 'use') this.useItem(hd.id);
   }
 
   private useObj(tx: number, ty: number, o: number): boolean {
@@ -1318,6 +1818,9 @@ export class Game {
         return true;
       case Obj.BUSH_BERRY:
         this.harvestBush(tx, ty);
+        return true;
+      case Obj.MINECART:
+        this.mountCart(tx, ty);
         return true;
       case Obj.CROP3:
         this.harvestCrop(tx, ty);
@@ -1451,6 +1954,7 @@ export class Game {
 
   private sap(dmg: number, label: string, color: string): void {
     const pl = this.player;
+    if (pl.dead) return;
     pl.hp -= dmg;
     pl.hurtT = 0.12;
     pl.regenT = 3;
@@ -1460,10 +1964,13 @@ export class Game {
 
   private die(): void {
     const pl = this.player;
+    if (pl.dead) return;
     pl.hp = 0;
     pl.dead = true;
     pl.deadT = 0;
     pl.swinging = false;
+    this.hook = null;
+    if (this.ride) this.dismount(false);
     audio.play('death', { vary: 0 });
     audio.music('none');
     this.p.stats.deaths++;
@@ -1476,6 +1983,7 @@ export class Game {
   }
 
   private respawn(): void {
+    this.hook = null;
     const pl = this.player;
     pl.dead = false;
     const lost = Math.floor(this.p.coins * 0.1);
@@ -1485,22 +1993,25 @@ export class Game {
     this.p.food = Math.max(this.p.food, 50);
     this.enemies = [];
     this.shots = [];
+    if (this.boss?.dead && this.p.bossRewardPending) this.grantBossReward(this.player.cx, this.player.cy);
     this.boss = null;
     this.toast(`You blacked out.${lost ? ` (-${lost} coins)` : ''}${this.p.satchel ? ' Everything you carried lies in a satchel where you fell.' : ''}`, '#ff9a9a');
   }
 
   teleportHome(): void {
+    this.hook = null;
     const s = this.p.spawn;
     const w = this.world;
-    // make sure there is room to stand
-    let y = s.y;
-    if (w.rock(s.x, y) || w.rock(s.x, y - 1)) {
+    // beds are two tiles wide and you wake standing over the middle of them
+    const bed = w.getObj(s.x, s.y) === Obj.BED;
+    const cols = bed ? [s.x, s.x + 1] : [s.x];
+    const blocked = cols.some((x) => w.solid(x, s.y) || w.solid(x, s.y - 1));
+    if (blocked) {
       const sp = worldSpawn(w);
-      y = sp.y;
-      this.placePlayer(sp.x * TILE + TILE / 2, (y + 1) * TILE);
+      this.placePlayer(sp.x * TILE + TILE / 2, (sp.y + 1) * TILE);
       return;
     }
-    this.placePlayer(s.x * TILE + TILE, (y + 1) * TILE);
+    this.placePlayer(bed ? s.x * TILE + TILE : s.x * TILE + TILE / 2, (s.y + 1) * TILE);
   }
 
   placePlayer(px: number, py: number): void {
@@ -1588,8 +2099,13 @@ export class Game {
 
   afterEquip(): void {
     const hadLantern = this.st.oilMax > 0;
+    const oil = this.player.oil;
     this.refresh();
-    if (!hadLantern && this.st.oilMax > 0) this.player.oil = this.st.oilMax;
+    if (!hadLantern && this.st.oilMax > 0) {
+      // your first lantern comes full; after that, swapping lanterns keeps the oil you had
+      this.player.oil = this.p.hadLantern ? Math.min(this.st.oilMax, oil) : this.st.oilMax;
+      this.p.hadLantern = true;
+    }
     audio.play('upgrade', { pitch: 1.4, vol: 0.5, vary: 0 });
   }
 
@@ -1604,7 +2120,13 @@ export class Game {
         this.hurtPlayer(e.def.dmg, e.cx);
         e.vx = -Math.sign(pl.cx - e.cx || 1) * 160;
         e.knock = 0.25;
-        if (e.def.behavior === 'charger') e.mode = 0;
+        // a boar that lands a hit usually trots off and calms down
+        if (e.def.behavior === 'charger') {
+          e.mode = 0;
+          e.stateT = 1.5;
+          e.facing = -Math.sign(pl.cx - e.cx || 1);
+          if (Math.random() < 0.6) e.provoked = false;
+        }
       }
       // Hollows crumble in daylight
       if (e.def.nocturnal && !night) {
@@ -1666,7 +2188,7 @@ export class Game {
     for (let dy = -5; dy <= 5; dy++) {
       for (let dx = -6; dx <= 6; dx++) {
         const o = w.getObj(tx + dx, ty + dy);
-        if (o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.FURNACE) return true;
+        if (o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.FURNACE || o === Obj.LAMP) return true;
       }
     }
     return false;
@@ -1705,12 +2227,7 @@ export class Game {
     b.update(this, dt);
     if (b.dead && b.deathT > 3.2) {
       this.boss = null;
-      this.drops.push(new Drop('r_heart', 1, b.x, b.y));
-      this.drops.push(new Drop('coin', 2500, b.x, b.y));
-      this.p.relicsDropped.push('r_heart');
-      audio.play('relic', { vary: 0 });
-      this.burst(b.x, b.y, 80, ['#ffd75a', '#ffffff', '#ff4a7a'], 300, true);
-      this.ui.victory();
+      this.grantBossReward(b.x, b.y);
     }
   }
 
@@ -1720,6 +2237,7 @@ export class Game {
     b.dead = true;
     b.hp = 0;
     this.p.bossDefeated = true;
+    this.p.bossRewardPending = true;
     this.shots = [];
     for (const e of this.enemies) e.dead = true;
     audio.play('roar', { pitch: 0.7, vary: 0 });
@@ -1778,7 +2296,7 @@ export class Game {
         if (d.onGround) d.vx *= 0.85;
         if (r.hitX) d.vx *= -0.5;
       }
-      if (d.age > 600) d.count = 0;
+      if (d.age > 600 && !d.item.startsWith('r_')) d.count = 0;
     }
     this.drops = this.drops.filter((d) => d.count > 0);
     if (full && this.hintCooldown <= 0) {
@@ -1804,7 +2322,8 @@ export class Game {
     const def = ITEMS[d.item];
     audio.play('pickup', { vol: 0.6 });
     this.text(d.x, d.y, `+${got} ${def ? def.name : d.item}`, def?.kind === 'relic' ? '#ffd75a' : '#e8e0d0');
-    if (def?.kind === 'relic') {
+    if (def?.kind === 'relic' && !this.p.seen['relic_' + d.item]) {
+      this.p.seen['relic_' + d.item] = true;
       this.toast(`Relic found: ${def.name}! Wren can catalogue it once her Archive is built.`, '#ffd75a');
       this.addXp('delving', 120);
     }
@@ -1857,19 +2376,19 @@ export class Game {
       if (r.hitX) b.vx *= -0.5;
       if (b.onGround) b.vx *= 0.9;
       if (Math.random() < dt * 30) this.parts.push({ x: b.x + 8, y: b.y, vx: 0, vy: -30, life: 0.3, max: 0.3, color: '#ffd75a', size: 2, grav: 0, glow: true });
-      if (b.fuse <= 0) this.explode(b.x + 6, b.y + 6);
+      if (b.fuse <= 0) this.explode(b.x + 6, b.y + 6, b.tier);
     }
     this.bombs = this.bombs.filter((b) => b.fuse > 0);
   }
 
-  private explode(x: number, y: number): void {
+  private explode(x: number, y: number, pickTier = this.st.pickTier): void {
     audio.play('explosion', { vary: 0.1 });
     this.shake = 10;
     this.burst(x, y, 40, ['#ffd75a', '#ff8a2a', '#ffffff', '#5a4a3a'], 280, true);
     this.burst(x, y, 24, ['#5a4a3a', '#3a3030'], 200);
     const tx = Math.floor(x / TILE);
     const ty = Math.floor(y / TILE);
-    const maxTier = Math.max(2, this.st.pickTier + 1);
+    const maxTier = Math.max(2, pickTier + 1);
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         if (dx * dx + dy * dy > 5) continue;
@@ -1885,10 +2404,9 @@ export class Game {
       const d = Math.hypot(e.cx - x, e.cy - y);
       if (d < 3 * TILE) this.damageEnemy(e, Math.atan2(e.cy - y, e.cx - x), 40 + this.st.attack * 2);
     }
-    if (this.boss && !this.boss.dead && Math.hypot(this.boss.x - x, this.boss.y - y) < 3 * TILE + this.boss.r) {
-      this.boss.hp -= 60 + this.st.attack * 2;
-      this.boss.flash = 0.2;
-      if (this.boss.hp <= 0) this.killBoss();
+    const boss = this.boss;
+    if (boss && !boss.dead && boss.intro <= 0 && Math.hypot(boss.x - x, boss.y - y) < 3 * TILE + boss.r) {
+      this.damageBoss(Math.round((60 + this.st.attack * 2) * boss.damageMult()), boss.x, boss.y - boss.r * 0.5, false);
     }
     const pl = this.player;
     if (Math.hypot(pl.cx - x, pl.cy - y) < 2.2 * TILE) this.hurtPlayer(14, x);
@@ -1973,7 +2491,7 @@ export class Game {
 
     // hunger
     const p = this.p;
-    p.food = Math.max(0, p.food - dt * 0.11);
+    p.food = Math.max(0, p.food - dt * 0.075);
     if (p.food <= 0) {
       pl.starveT += dt;
       if (pl.starveT > 3) {
@@ -2091,7 +2609,7 @@ export class Game {
     const lx = pl.cx / TILE;
     // your own eyes adjust a little to the dark
     const bonus = this.st.light - (this.st.oilMax > 0 ? (ITEMS[this.p.equip.lantern?.id ?? '']?.radius ?? 0) : 0);
-    lights.push({ x: lx, y: ly, r: 0.32, g: 0.3, b: 0.36, radius: (2.6 + Math.max(0, bonus)) * vault, cast: true });
+    lights.push({ x: lx, y: ly, r: 0.44, g: 0.4, b: 0.46, radius: (4.2 + Math.max(0, bonus)) * vault, cast: true });
     const hd = heldDef(this.p);
     if (hd?.id === 'torch' && !pl.dead) lights.push({ x: lx + pl.facing * 0.4, y: ly, r: 1.1, g: 0.74, b: 0.38, radius: 7 * flick * vault * dim, cast: true });
     if (this.st.oilMax > 0 && pl.oil > 0 && !pl.dead) {
@@ -2132,6 +2650,7 @@ export class Game {
     const s = this.p.inv[i];
     if (!s) return;
     n = Math.min(n, s.n);
+    if (itemValue(s.id, this.st) <= 0) return;
     const v = itemValue(s.id, this.st) * n;
     s.n -= n;
     if (s.n <= 0) this.p.inv[i] = null;
@@ -2295,8 +2814,24 @@ export class Game {
       this.p.px = pl.cx;
       this.p.py = pl.y + pl.h;
     }
-    this.p.hp = Math.max(1, pl.hp);
+    this.p.hp = pl.dead ? this.st.maxHp : Math.max(1, pl.hp);
     this.p.oil = pl.oil;
+  }
+
+  /**
+   * A copy of the progress for saving: includes a stack held on the inventory cursor and,
+   * if you are mid-death, the penalties you would wake up with.
+   */
+  saveSnapshot(cursor: Stack | null): Progress {
+    this.syncProgress();
+    const p = JSON.parse(JSON.stringify(this.p)) as Progress;
+    if (cursor) give(p.inv, cursor.id, cursor.n);
+    if (this.player.dead) {
+      p.coins -= Math.floor(p.coins * 0.1);
+      p.food = Math.max(p.food, 50);
+    }
+    if (this.ride) give(p.inv, 'minecart', 1);
+    return p;
   }
 
   bossHpFrac(): number {
@@ -2317,6 +2852,8 @@ function objLabel(o: number, clock: number): string | null {
   switch (o) {
     case Obj.STORAGE:
       return 'Open chest';
+    case Obj.MINECART:
+      return 'Ride the cart';
     case Obj.CHEST:
       return 'Open treasure chest';
     case Obj.BED:

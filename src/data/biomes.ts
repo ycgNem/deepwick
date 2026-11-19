@@ -1,5 +1,6 @@
 ﻿import { B } from './blocks';
 import { SURFACE_Y } from '../constants';
+import { PROPS, PropKind } from './props';
 
 export interface OreRule {
   block: B;
@@ -33,6 +34,8 @@ export interface BiomeDef {
   bigCeilDecor: number[];
   music: 'cave' | 'deep';
   flavor: string;
+  /** big cave formations: which kinds grow here and how often (per eligible tile) */
+  props: { floor: PropKind[]; ceil: PropKind[]; floorChance: number; ceilChance: number };
 }
 
 // decor codes: <100 = 16px icon index, >=100 = 32px icon index + 100
@@ -53,7 +56,7 @@ export const BIOMES: BiomeDef[] = [
     ],
     enemies: ['bat', 'slime'],
     enemyCap: 3,
-    memory: [0.09, 0.07, 0.06],
+    memory: [0.17, 0.14, 0.12],
     sky: ['#1a120c', '#0a0605'],
     caveThreshold: 0.6,
     floorDecor: [35, 38, 40, 41, 43, 48, 50, 52, 53],
@@ -62,6 +65,7 @@ export const BIOMES: BiomeDef[] = [
     bigCeilDecor: [138],
     music: 'cave',
     flavor: 'Old tunnels, older bones. Coal and copper for the taking.',
+    props: { floor: ['stalagmite'], ceil: ['stalactite', 'roots'], floorChance: 0.05, ceilChance: 0.06 },
   },
   {
     id: 1,
@@ -81,7 +85,7 @@ export const BIOMES: BiomeDef[] = [
     ],
     enemies: ['beetle', 'toad', 'bat'],
     enemyCap: 5,
-    memory: [0.04, 0.09, 0.08],
+    memory: [0.09, 0.16, 0.15],
     sky: ['#0a1a18', '#030a09'],
     caveThreshold: 0.56,
     floorDecor: [37, 37, 38, 44, 50, 43],
@@ -90,6 +94,7 @@ export const BIOMES: BiomeDef[] = [
     bigCeilDecor: [159, 159, 138],
     music: 'cave',
     flavor: 'Damp, green and humming with spores. Iron sleeps under the moss.',
+    props: { floor: ['mushroom', 'mushroom', 'stalagmite'], ceil: ['roots', 'roots', 'stalactite'], floorChance: 0.08, ceilChance: 0.1 },
   },
   {
     id: 2,
@@ -109,7 +114,7 @@ export const BIOMES: BiomeDef[] = [
     ],
     enemies: ['spider', 'wisp'],
     enemyCap: 5,
-    memory: [0.08, 0.06, 0.12],
+    memory: [0.14, 0.12, 0.2],
     sky: ['#160c24', '#06030c'],
     caveThreshold: 0.55,
     floorDecor: [39, 39, 40, 44, 35],
@@ -118,6 +123,7 @@ export const BIOMES: BiomeDef[] = [
     bigCeilDecor: [138],
     music: 'cave',
     flavor: 'Everything here glitters and something is always watching.',
+    props: { floor: ['crystal', 'crystal', 'stalagmite'], ceil: ['stalactite'], floorChance: 0.08, ceilChance: 0.05 },
   },
   {
     id: 3,
@@ -137,7 +143,7 @@ export const BIOMES: BiomeDef[] = [
     ],
     enemies: ['imp', 'slug'],
     enemyCap: 6,
-    memory: [0.12, 0.05, 0.03],
+    memory: [0.2, 0.11, 0.07],
     sky: ['#2a0c04', '#0c0301'],
     caveThreshold: 0.57,
     floorDecor: [45, 45, 46, 40, 41],
@@ -146,6 +152,7 @@ export const BIOMES: BiomeDef[] = [
     bigCeilDecor: [138],
     music: 'deep',
     flavor: 'The rock breathes heat. Without a ward, it will cook you slowly.',
+    props: { floor: ['magma'], ceil: ['stalactite'], floorChance: 0.07, ceilChance: 0.03 },
   },
   {
     id: 4,
@@ -165,7 +172,7 @@ export const BIOMES: BiomeDef[] = [
     ],
     enemies: ['wraith', 'sentinel'],
     enemyCap: 6,
-    memory: [0.05, 0.04, 0.1],
+    memory: [0.1, 0.09, 0.17],
     sky: ['#0c0618', '#020106'],
     caveThreshold: 0.58,
     floorDecor: [53, 48, 54, 46, 41],
@@ -174,6 +181,7 @@ export const BIOMES: BiomeDef[] = [
     bigCeilDecor: [],
     music: 'deep',
     flavor: 'Halls built by no one living. The dark here eats lantern light.',
+    props: { floor: ['ruin', 'stalagmite'], ceil: [], floorChance: 0.05, ceilChance: 0 },
   },
   {
     id: 5,
@@ -187,7 +195,7 @@ export const BIOMES: BiomeDef[] = [
     ores: [],
     enemies: [],
     enemyCap: 0,
-    memory: [0.12, 0.02, 0.05],
+    memory: [0.19, 0.06, 0.09],
     sky: ['#2a040c', '#0a0103'],
     caveThreshold: 1,
     floorDecor: [],
@@ -196,6 +204,7 @@ export const BIOMES: BiomeDef[] = [
     bigCeilDecor: [],
     music: 'deep',
     flavor: 'Something vast is beating down here.',
+    props: { floor: [], ceil: [], floorChance: 0, ceilChance: 0 },
   },
 ];
 
@@ -204,8 +213,26 @@ export function biomeAt(row: number): BiomeDef {
   return BIOMES[0];
 }
 
+export interface DecorDrop {
+  id: string;
+  chance: number;
+  n?: [number, number];
+}
+
+/** what each kind of big cave formation leaves behind when broken */
+const PROP_DROPS: Record<PropKind, DecorDrop> = {
+  stalactite: { id: 'stone', chance: 1, n: [1, 2] },
+  stalagmite: { id: 'stone', chance: 1, n: [1, 2] },
+  mushroom: { id: 'sporecap', chance: 1, n: [2, 3] },
+  roots: { id: 'wood', chance: 0.8, n: [1, 2] },
+  crystal: { id: 'amethyst', chance: 0.5, n: [1, 1] },
+  magma: { id: 'magmarock', chance: 1, n: [1, 2] },
+  ruin: { id: 'ruinbrick', chance: 1, n: [1, 2] },
+  cart: { id: 'wood', chance: 1, n: [3, 5] },
+};
+
 /** decor codes that can be harvested, and what they drop */
-export const DECOR_DROPS: Record<number, { id: string; chance: number }> = {
+export const DECOR_DROPS: Record<number, DecorDrop> = {
   43: { id: 'mushroom', chance: 1 },
   37: { id: 'sporecap', chance: 1 },
   139: { id: 'sporecap', chance: 1 },
@@ -215,6 +242,8 @@ export const DECOR_DROPS: Record<number, { id: string; chance: number }> = {
   44: { id: 'seeds', chance: 0.15 },
   51: { id: 'seeds', chance: 0.15 },
 };
+
+for (const p of PROPS) DECOR_DROPS[p.code] = PROP_DROPS[p.kind];
 
 /** small surface plants scattered on grass */
 export const SURFACE_DECOR = [49, 49, 50, 50, 44, 51, 43];

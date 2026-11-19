@@ -170,6 +170,8 @@ export class Enemy implements Body {
   flash = 0;
   stateT = Math.random() * 1.5;
   mode = 0;
+  /** chargers only charge after something has hit them */
+  provoked = false;
   shootT = 1.5 + Math.random() * 2;
   dead = false;
   knock = 0;
@@ -239,6 +241,8 @@ export class Bomb implements Body {
   vy: number;
   onGround = false;
   fuse = 1.7;
+  /** pick tier the thrower owned, which sets what the blast can break */
+  tier = 0;
   constructor(x: number, y: number, vx: number, vy: number) {
     this.x = x - 6;
     this.y = y - 6;

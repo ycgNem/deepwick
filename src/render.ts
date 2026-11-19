@@ -1,4 +1,8 @@
-﻿import { A, makeCanvas, iconSrc, decorIcon } from './assets';
+﻿import { A, makeCanvas, iconSrc, decorIcon, drawRailAt, drawLampAt } from './assets';
+import { Terrain, MAT, terrainTexture } from './terrain';
+import { buildBackdrops, Backdrop, BW, BH } from './backdrop';
+import { propOf } from './data/props';
+import type { World } from './world/world';
 import { TILE, TARGET_VIEW_H, SURFACE_Y } from './constants';
 import { BLOCKS, B } from './data/blocks';
 import { BIOMES } from './data/biomes';
@@ -46,7 +50,9 @@ export class Renderer {
   sctx: CanvasRenderingContext2D;
   scale = 2;
   dpr = 1;
-  private backdrops: HTMLCanvasElement[] = [];
+  private backdrops: Backdrop[] = [];
+  private terrain: Terrain | null = null;
+  private terrainWorld: World | null = null;
   private cracks: HTMLCanvasElement[] = [];
   private glowSprite: HTMLCanvasElement;
   private vignette: HTMLCanvasElement | null = null;
@@ -64,7 +70,7 @@ export class Renderer {
     this.ctx = ctx;
     [this.scene, this.sctx] = makeCanvas(640, 360);
     this.glowSprite = this.makeGlow();
-    this.buildBackdrops();
+    this.backdrops = buildBackdrops();
     this.buildCracks();
     this.skyDay = mirrored(A.bg.day);
     this.skyDusk = mirrored(A.bg.surface);
@@ -80,17 +86,6 @@ export class Renderer {
     g.fillStyle = grad;
     g.fillRect(0, 0, 64, 64);
     return c;
-  }
-
-  private buildBackdrops(): void {
-    for (let i = 0; i < 5; i++) {
-      const img = A.bg['cave' + i];
-      const [c, g] = makeCanvas(img.width * 2, img.height * 2);
-      for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) g.drawImage(img, x * img.width, y * img.height);
-      g.fillStyle = 'rgba(6,4,10,0.4)';
-      g.fillRect(0, 0, c.width, c.height);
-      this.backdrops.push(c);
-    }
   }
 
   private buildCracks(): void {
@@ -162,14 +157,26 @@ export class Renderer {
     }
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
+    if (this.terrainWorld !== g.world || !this.terrain) {
+      this.terrain = new Terrain(g.world);
+      this.terrainWorld = g.world;
+    }
     this.drawSky(g, ctx, camX, camY, vw, vh);
-    this.drawBack(g, ctx, camX, camY, vw, vh);
+    this.drawBackdrop(g, ctx, camX, camY, vw, vh);
+    this.terrain.drawBack(ctx, camX, camY, vw, vh);
     this.drawTrees(g, ctx, camX, camY, vw);
     this.drawBuildings(g, ctx, camX, camY);
-    this.drawBlocks(g, ctx, camX, camY, vw, vh);
+    this.drawLiquids(g, ctx, camX, camY, vw, vh);
+    this.terrain.drawFore(ctx, camX, camY, vw, vh);
+    this.drawBlockDetails(g, ctx, camX, camY, vw, vh);
     this.drawObjects(g, ctx, camX, camY, vw, vh);
     this.drawNpcs(g, ctx, camX, camY);
     this.drawEntities(g, ctx, camX, camY);
+    if (g.ride) {
+      const c = A.camp.minecart;
+      const bob = Math.abs(g.ride.vx) > 40 ? Math.round(Math.sin(g.time * 30) * 0.6) : 0;
+      ctx.drawImage(c, Math.round(g.ride.x - c.width / 2 - camX), Math.round((g.ride.row + 1) * TILE - c.height - 3 + bob - camY));
+    }
     this.updateAmbient(g, dt, camX, camY, vw, vh);
     this.drawGhost(g, ctx, camX, camY);
 
@@ -278,55 +285,60 @@ export class Renderer {
     }
   }
 
-  // ------------------------------------------------------------------ walls and cave backdrops
-  private drawBack(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+  // ------------------------------------------------------------------ cave backdrops
+  /** layered, parallax cave depths behind every open cavern, one look per biome */
+  private drawBackdrop(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
     const w = g.world;
-    const tx0 = Math.max(0, Math.floor(camX / TILE));
-    const ty0 = Math.max(0, Math.floor(camY / TILE));
-    const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
-    const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE));
-    const L = g.light;
-    for (let ty = ty0; ty <= ty1; ty++) {
-      const bd = this.backdrops[Math.min(4, biomeIndexRow(ty))];
-      for (let tx = tx0; tx <= tx1; tx++) {
-        const i = ty * w.w + tx;
-        const fg = w.fg[i];
-        if (fg !== B.AIR && !BLOCKS[fg].liquid) continue;
-        if (!w.explored[i] && L.at(tx, ty) < 0.004) continue;
-        const sx = tx * TILE - camX;
-        const sy = ty * TILE - camY;
-        const wall = w.wall[i];
-        if (wall) ctx.drawImage(A.wallTex[wall], sx, sy);
-        else if (ty > w.surface[tx]) {
-          const bw = bd.width / 2;
-          const bh = bd.height / 2;
-          ctx.drawImage(bd, mod(sx + camX * 0.5, bw), mod(sy + camY * 0.5, bh), TILE, TILE, sx, sy, TILE, TILE);
-        } else continue;
-        // soft shadow where open space meets rock
-        const su = w.rock(tx, ty - 1);
-        const sl = w.rock(tx - 1, ty);
-        const sr = w.rock(tx + 1, ty);
-        const sd = w.rock(tx, ty + 1);
-        if (su || sl || sr || sd) {
-          ctx.fillStyle = 'rgba(0,0,0,0.26)';
-          if (su) ctx.fillRect(sx, sy, TILE, 7);
-          if (sl) ctx.fillRect(sx, sy, 6, TILE);
-          if (sr) ctx.fillRect(sx + TILE - 6, sy, 6, TILE);
-          ctx.fillStyle = 'rgba(0,0,0,0.16)';
-          if (su) ctx.fillRect(sx, sy + 7, TILE, 5);
-          if (sl) ctx.fillRect(sx + 6, sy, 4, TILE);
-          if (sr) ctx.fillRect(sx + TILE - 10, sy, 4, TILE);
-          if (sd) ctx.fillRect(sx, sy + TILE - 3, TILE, 3);
-        }
-        // a wall that ends against open cave gets a dark lip
-        if (wall) {
-          ctx.fillStyle = 'rgba(0,0,0,0.45)';
-          if (!w.wall[i - 1] && !w.rock(tx - 1, ty)) ctx.fillRect(sx, sy, 2, TILE);
-          if (!w.wall[i + 1] && !w.rock(tx + 1, ty)) ctx.fillRect(sx + TILE - 2, sy, 2, TILE);
-          if (ty > 0 && !w.wall[i - w.w] && !w.rock(tx, ty - 1)) ctx.fillRect(sx, sy, TILE, 2);
-        }
-      }
+    const tx0 = Math.max(0, Math.floor(camX / TILE) - 1);
+    const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE) + 1);
+    let shallowest = 1e9;
+    let deepest = -1e9;
+    for (let tx = tx0; tx <= tx1; tx++) {
+      const y = (w.surface[tx] + 2) * TILE - camY;
+      shallowest = Math.min(shallowest, y);
+      deepest = Math.max(deepest, y);
     }
+    // nothing underground on screen
+    if (shallowest > vh) return;
+    ctx.save();
+    if (deepest > 0) {
+      // clip to below the ground line so the sky stays above it
+      ctx.beginPath();
+      ctx.moveTo(-2, vh + 2);
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const y = (w.surface[tx] + 2) * TILE - camY;
+        ctx.lineTo(tx * TILE - camX, y);
+        ctx.lineTo((tx + 1) * TILE - camX, y);
+      }
+      ctx.lineTo(vw + 2, vh + 2);
+      ctx.closePath();
+      ctx.clip();
+    }
+    const rowTop = Math.floor(camY / TILE);
+    const rowBot = Math.floor((camY + vh) / TILE);
+    for (let bi = 0; bi < BIOMES.length; bi++) {
+      const top = bi === 0 ? 0 : BIOMES[bi].top;
+      const bot = bi === BIOMES.length - 1 ? w.h : BIOMES[bi + 1].top;
+      if (bot < rowTop || top > rowBot) continue;
+      const y0 = Math.max(0, top * TILE - camY);
+      const y1 = Math.min(vh, bot * TILE - camY);
+      if (y1 <= y0) continue;
+      const bd = this.backdrops[Math.min(this.backdrops.length - 1, bi)];
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, y0, vw, y1 - y0);
+      ctx.clip();
+      this.tileLayer(ctx, bd.far, camX * 0.18, camY * 0.18 + bi * 97, vw, vh);
+      this.tileLayer(ctx, bd.mid, camX * 0.42, camY * 0.42 + bi * 53, vw, vh);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  private tileLayer(ctx: CanvasRenderingContext2D, img: HTMLCanvasElement, ox: number, oy: number, vw: number, vh: number): void {
+    const x0 = -mod(Math.round(ox), BW);
+    const y0 = -mod(Math.round(oy), BH);
+    for (let y = y0; y < vh; y += BH) for (let x = x0; x < vw; x += BW) ctx.drawImage(img, x, y);
   }
 
   // ------------------------------------------------------------------ trees + settlers
@@ -386,50 +398,54 @@ export class Renderer {
     }
   }
 
-  // ------------------------------------------------------------------ blocks
-  private drawBlocks(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+  // ------------------------------------------------------------------ liquids
+  private drawLiquids(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
     const w = g.world;
     const tx0 = Math.max(0, Math.floor(camX / TILE));
     const ty0 = Math.max(0, Math.floor(camY / TILE));
     const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
     const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE));
-    const L = g.light;
     const t = g.time;
+    const lava = terrainTexture(MAT.lava);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const fg = w.fg[ty * w.w + tx];
+        if (fg !== B.LAVA) continue;
+        const sx = tx * TILE - camX;
+        const sy = ty * TILE - camY;
+        const top = w.get(tx, ty - 1) !== B.LAVA;
+        const rip = top ? 5 + Math.round(Math.sin(t * 2.6 + tx * 0.9) * 1.5) : 0;
+        // slow churn: the seamless lava texture drifting under the surface
+        const ox = mod(Math.floor(tx * TILE + t * 9), 128);
+        const oy = mod(Math.floor(ty * TILE + rip + Math.sin(t * 0.7 + tx * 0.3) * 6), 128);
+        blitWrapped(ctx, lava, ox, oy, sx, sy + rip, TILE, TILE - rip);
+        if (top) {
+          ctx.fillStyle = '#fff1a8';
+          ctx.fillRect(sx, sy + rip, TILE, 1);
+          ctx.fillStyle = 'rgba(255,200,90,0.7)';
+          ctx.fillRect(sx, sy + rip + 1, TILE, 2);
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ grass, cracks, decor
+  private drawBlockDetails(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const w = g.world;
+    const tx0 = Math.max(0, Math.floor(camX / TILE));
+    const ty0 = Math.max(0, Math.floor(camY / TILE));
+    const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
+    const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE) + 1);
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = ty * w.w + tx;
         const fg = w.fg[i];
         if (fg === B.AIR) continue;
-        if (!w.explored[i] && L.at(tx, ty) < 0.004) continue;
+        const def = BLOCKS[fg];
+        if (!def.solid) continue;
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;
-        const def = BLOCKS[fg];
-        if (def.liquid) {
-          const off = Math.floor(t * 6) % 32;
-          ctx.save();
-          ctx.beginPath();
-          const surfaceTop = w.get(tx, ty - 1) !== B.LAVA;
-          const rip = surfaceTop ? 6 + Math.round(Math.sin(t * 3 + tx) * 2) : 0;
-          ctx.rect(sx, sy + rip, TILE, TILE - rip);
-          ctx.clip();
-          ctx.drawImage(A.blockTex[fg], sx - off, sy);
-          ctx.drawImage(A.blockTex[fg], sx - off + 32, sy);
-          ctx.restore();
-          if (surfaceTop) {
-            ctx.fillStyle = '#ffe08a';
-            ctx.fillRect(sx, sy + rip, TILE, 2);
-          }
-          continue;
-        }
-        const up = !BLOCKS[w.get(tx, ty - 1)].solid;
-        const rt = !BLOCKS[w.get(tx + 1, ty)].solid;
-        const dn = !BLOCKS[w.get(tx, ty + 1)].solid;
-        const lf = !BLOCKS[w.get(tx - 1, ty)].solid;
-        const mask = (up ? 1 : 0) | (rt ? 2 : 0) | (dn ? 4 : 0) | (lf ? 8 : 0);
-        const v = hash(tx * 3 + ty * 7, 11) < 0.5 ? 0 : 1;
-        const fr = A.framed[fg];
-        ctx.drawImage(fr.length ? fr[v * 16 + mask] : A.blockTex[fg], sx, sy);
-        if (up && def.topper) {
+        if (def.topper && !BLOCKS[w.get(tx, ty - 1)].solid) {
           const set = def.topper === 'grass' ? A.grassTop : A.mossTop;
           ctx.drawImage(set[(tx * 7 + ty) & 3], sx, sy - 7);
         }
@@ -440,12 +456,36 @@ export class Renderer {
         }
       }
     }
-    // decor
+    // mine rails
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
+        if (!w.hasRail(tx, ty)) continue;
+        drawRailAt(ctx, tx * TILE - camX, ty * TILE - camY, !w.hasRail(tx - 1, ty), !w.hasRail(tx + 1, ty));
+      }
+    }
+    // decor: big formations first (they sit behind the small stuff), then small decor
+    for (let ty = ty0 - 3; ty <= ty1 + 3; ty++) {
+      for (let tx = tx0 - 2; tx <= tx1 + 2; tx++) {
+        if (!w.inside(tx, ty)) continue;
+        const prop = propOf(w.decor[ty * w.w + tx]);
+        if (!prop) continue;
+        const flip = hash(tx, ty + 31) < 0.5;
+        const sx = Math.round(tx * TILE + 16 - prop.w / 2 + (hash(tx * 3, ty) - 0.5) * 6 - camX);
+        const sy = prop.anchor === 'floor' ? (ty + 1) * TILE + 3 - prop.h - camY : ty * TILE - 5 - camY;
+        if (flip) {
+          ctx.save();
+          ctx.translate(sx + prop.w, sy);
+          ctx.scale(-1, 1);
+          ctx.drawImage(A.props, prop.x, prop.y, prop.w, prop.h, 0, 0, prop.w, prop.h);
+          ctx.restore();
+        } else ctx.drawImage(A.props, prop.x, prop.y, prop.w, prop.h, sx, sy, prop.w, prop.h);
+      }
+    }
     for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) {
       for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
         if (!w.inside(tx, ty)) continue;
         const dc = w.decor[ty * w.w + tx];
-        if (!dc) continue;
+        if (!dc || propOf(dc)) continue;
         const src = iconSrc(decorIcon(dc));
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;
@@ -490,6 +530,14 @@ export class Renderer {
           break;
         case Obj.BEAM:
           drawBeam(ctx, sx, sy);
+          break;
+        case Obj.MINECART: {
+          const c = A.camp.minecart;
+          ctx.drawImage(c, Math.round(sx + 16 - c.width / 2), sy + TILE - c.height - 3);
+          break;
+        }
+        case Obj.LAMP:
+          drawLampAt(ctx, sx, sy, Math.floor(g.time * 9 + tx * 3) % 3);
           break;
         case Obj.TORCH: {
           const s = iconSrc({ sheet: 'i16', idx: 21 });
@@ -538,11 +586,11 @@ export class Renderer {
       const touching = w.getWall(h.x, h.y) || w.rock(h.x - 1, h.y) || w.rock(h.x + 1, h.y) || w.rock(h.x, h.y - 1) || w.rock(h.x, h.y + 1);
       if (!touching) return;
       ctx.globalAlpha = 0.45;
-      ctx.drawImage(A.framed[hd.block]?.[15] ?? A.blockTex[hd.block], sx, sy);
+      ctx.drawImage(A.blockIcon[hd.block], sx, sy);
       ctx.globalAlpha = 1;
     } else if (hd.kind === 'wall' && hd.wall !== undefined && !w.getWall(h.x, h.y)) {
-      ctx.globalAlpha = 0.5;
-      ctx.drawImage(A.wallTex[hd.wall], sx, sy);
+      ctx.globalAlpha = 0.3;
+      ctx.drawImage(A.blockIcon[hd.wall], sx, sy);
       ctx.globalAlpha = 1;
     } else if (hd.kind === 'place' && hd.obj !== undefined) {
       if (hd.obj === Obj.DOOR) this.drawObj(g, ctx, Obj.DOOR_TOP, sx, sy - TILE, h.x, 0.45);
@@ -627,6 +675,7 @@ export class Renderer {
         ctx.fillRect(Math.round(b.targetX - 60 - camX), fy - 3, 120, 3);
       }
     }
+    this.drawHook(g, ctx, camX, camY);
     this.drawPlayer(g, ctx, camX, camY);
     for (const q of g.parts) {
       if (q.glow) continue;
@@ -635,6 +684,52 @@ export class Renderer {
       ctx.fillRect(Math.round(q.x - camX), Math.round(q.y - camY), q.size, q.size);
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** the grappling hook's rope and claw */
+  private drawHook(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const h = g.hook;
+    if (!h) return;
+    const pl = g.player;
+    const x0 = pl.cx + pl.facing * 6 - camX;
+    const y0 = pl.y + 16 - camY;
+    const x1 = h.x - camX;
+    const y1 = h.y - camY;
+    const d = Math.hypot(x1 - x0, y1 - y0);
+    // slack while it flies or reels in, taut once it has bitten
+    const sag = h.stuck ? 0 : Math.min(22, d * 0.1);
+    const mx = (x0 + x1) / 2;
+    const my = (y0 + y1) / 2 + sag;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#2a170a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.quadraticCurveTo(mx, my, x1, y1);
+    ctx.stroke();
+    ctx.strokeStyle = '#b48a56';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.quadraticCurveTo(mx, my, x1, y1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // three iron prongs pointing the way it was thrown
+    const a = h.back ? Math.atan2(y0 - y1, x0 - x1) + Math.PI : Math.atan2(h.vy, h.vx);
+    ctx.translate(Math.round(x1), Math.round(y1));
+    ctx.rotate(a);
+    ctx.fillStyle = '#3a3a48';
+    ctx.fillRect(-7, -2, 9, 4);
+    ctx.fillStyle = '#a8a8bc';
+    ctx.fillRect(-6, -1, 8, 2);
+    ctx.fillStyle = '#d8d8e8';
+    ctx.fillRect(1, -5, 2, 10);
+    ctx.fillRect(3, -6, 2, 2);
+    ctx.fillRect(3, 4, 2, 2);
+    ctx.fillRect(2, -1, 4, 2);
+    ctx.restore();
   }
 
   private drawPlayer(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
@@ -791,6 +886,7 @@ export class Renderer {
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;
         if (o === Obj.TORCH) this.glowAt(ctx, sx + 16, sy + 9, 26 * (0.85 + Math.sin(g.time * 10 + tx) * 0.1), 'rgba(255,170,60,0.55)');
+        else if (o === Obj.LAMP) this.glowAt(ctx, sx + 16, sy + 17, 30 * (0.9 + Math.sin(g.time * 6 + tx) * 0.05), 'rgba(255,190,90,0.5)');
         else if (o === Obj.CAMPFIRE) {
           this.glowAt(ctx, sx + 16, sy + 20, 40 + Math.sin(g.time * 9 + tx) * 4, 'rgba(255,140,40,0.55)');
           if (Math.random() < 0.3) g.parts.push({ x: sx + camX + 10 + Math.random() * 12, y: sy + camY + 14, vx: (Math.random() - 0.5) * 10, vy: -30 - Math.random() * 30, life: 0.8, max: 0.8, color: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', size: 1, grav: 0, glow: true });
@@ -845,9 +941,12 @@ export class Renderer {
       ctx.fillRect(Math.round(q.x - camX), Math.round(q.y - camY), q.size, q.size);
     }
     for (const a of this.amb) {
-      const k = Math.min(1, a.life / 0.6, (a.max - a.life) / 0.6);
+      // dust is only seen where there is light to see it by
+      const lit = Math.min(1, g.light.at(Math.floor(a.x / TILE), Math.floor(a.y / TILE)) * 2.2);
+      if (lit < 0.05) continue;
+      const k = Math.min(1, a.life / 0.6, (a.max - a.life) / 0.6) * lit;
       ctx.globalAlpha = 1;
-      ctx.fillStyle = a.color + (a.drip ? 0.7 : 0.55 * k) + ')';
+      ctx.fillStyle = a.color + (a.drip ? 0.7 * lit : 0.55 * k) + ')';
       ctx.fillRect(Math.round(a.x - camX), Math.round(a.y - camY), a.size, a.drip ? 3 : a.size);
     }
     ctx.restore();
@@ -1060,4 +1159,15 @@ function hexA(hex: string, a: number): string {
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
   return `rgba(${r},${g},${b},${a})`;
+}
+
+/** copy a w x h region out of a seamless texture starting at (ox, oy), wrapping at its edges */
+function blitWrapped(ctx: CanvasRenderingContext2D, img: HTMLCanvasElement, ox: number, oy: number, dx: number, dy: number, w: number, h: number): void {
+  const S = img.width;
+  const w1 = Math.min(w, S - ox);
+  const h1 = Math.min(h, S - oy);
+  if (w1 > 0 && h1 > 0) ctx.drawImage(img, ox, oy, w1, h1, dx, dy, w1, h1);
+  if (w - w1 > 0 && h1 > 0) ctx.drawImage(img, 0, oy, w - w1, h1, dx + w1, dy, w - w1, h1);
+  if (h - h1 > 0 && w1 > 0) ctx.drawImage(img, ox, 0, w1, h - h1, dx, dy + h1, w1, h - h1);
+  if (w - w1 > 0 && h - h1 > 0) ctx.drawImage(img, 0, 0, w - w1, h - h1, dx + w1, dy + h1, w - w1, h - h1);
 }

@@ -10,6 +10,8 @@ interface SaveFile {
   obj: string;
   decor: string;
   explored: string;
+  rail?: string;
+  placed?: string;
 }
 
 /** run-length encode a byte array as (value, run) pairs, then base64 */
@@ -41,7 +43,7 @@ function unrle(b64: string, target: Uint8Array): void {
 }
 
 export function saveGame(p: Progress, w: World): boolean {
-  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored) };
+  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed) };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
@@ -70,6 +72,9 @@ export function loadGame(): { p: Progress; world: World } | null {
     unrle(data.obj, world.obj);
     unrle(data.decor, world.decor);
     unrle(data.explored, world.explored);
+    if (data.rail) unrle(data.rail, world.rail);
+    else world.rail.fill(0);
+    if (data.placed) unrle(data.placed, world.placed);
     world.updateAllSky();
     world.dirty.clear();
     return { p: data.p, world };

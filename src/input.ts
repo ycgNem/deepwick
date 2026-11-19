@@ -63,6 +63,10 @@ export class Input {
   wasPressed(...codes: string[]): boolean {
     return codes.some((c) => this.pressed.has(c));
   }
+  /** forget a key press so the game does not also act on it (the UI already did) */
+  consume(code: string): void {
+    this.pressed.delete(code);
+  }
   /** call at the end of each frame */
   endFrame(): void {
     this.pressed.clear();

@@ -41,10 +41,7 @@ async function boot(): Promise<void> {
     storeSettings({ music, sfx });
   };
   ui.onQuit = () => {
-    if (game) {
-      game.syncProgress();
-      saveGame(game.p, game.world);
-    }
+    if (game && ui) saveGame(game.saveSnapshot(ui.cursorStack()), game.world);
     game = null;
     hud.classList.remove('show');
     audio.music('none');
@@ -54,10 +51,7 @@ async function boot(): Promise<void> {
     if (game && renderer) renderer.resize(game);
   });
   window.addEventListener('beforeunload', () => {
-    if (game && !(window as { __noSave?: boolean }).__noSave) {
-      game.syncProgress();
-      saveGame(game.p, game.world);
-    }
+    if (game && ui && !(window as { __noSave?: boolean }).__noSave) saveGame(game.saveSnapshot(ui.cursorStack()), game.world);
   });
   showTitle();
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('auto')) startGame(!hasSave());
@@ -78,6 +72,12 @@ async function startAudio(): Promise<void> {
 function startGame(fresh: boolean): void {
   if (!input || !ui || !renderer) return;
   let loaded = fresh ? null : loadGame();
+  if (!fresh && !loaded) {
+    // never quietly replace a save we could not read: the autosave would overwrite it
+    alert('That save could not be loaded. It has been left untouched; start a New World to play on.');
+    showTitle();
+    return;
+  }
   if (!loaded) {
     const seed = (Math.random() * 1e9) | 0;
     const world = generateWorld(seed);
@@ -90,8 +90,8 @@ function startGame(fresh: boolean): void {
   ui.attach(g);
   renderer.resize(g);
   g.onSave = () => {
-    g.syncProgress();
-    saveGame(g.p, g.world);
+    if ((window as { __noSave?: boolean }).__noSave || !ui) return;
+    saveGame(g.saveSnapshot(ui.cursorStack()), g.world);
   };
   if (fresh) g.onSave();
   title.classList.remove('show');

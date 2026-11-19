@@ -48,10 +48,11 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
       break;
     }
     case 'charger': {
-      // wanders until provoked or crowded, then lowers its tusks and charges
+      // grazes peacefully until something hits it, then lowers its tusks and charges
       applyGravity(e, dt);
       const sameBand = Math.abs(dy) < 3 * TILE;
-      if (e.mode === 0 && aware && sameBand && Math.abs(dx) < 4 * TILE) e.mode = 1;
+      if (e.provoked && dist > 12 * TILE) e.provoked = false;
+      if (e.mode === 0 && e.provoked && aware && sameBand && Math.abs(dx) < 6 * TILE) e.mode = 1;
       let dir = e.facing;
       let speed = sp * 0.35;
       e.stateT -= dt;
