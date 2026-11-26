@@ -16,6 +16,7 @@ import { prefs } from './prefs';
 import { forTouch } from './touch';
 import { stepGas, sniff, gasOpen, isFlameObj, GAS_IGNITE, GAS_BURN, GAS_DENSE } from './world/gas';
 import { supported, propRoof, PROP_MAX, rockDamage } from './world/cavein';
+import { BREATH_MAX } from './world/flood';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
@@ -301,6 +302,11 @@ export class Game {
   working = new Map<number, number>();
   private caveT = 0;
   private creakT = 0;
+  /** seconds of air left while your head is under water */
+  breath = BREATH_MAX;
+  private drownT = 0;
+  private gaspReady = false;
+  private gushT = 0;
   parts: Particle[] = [];
   texts: FloatText[] = [];
   boss: Boss | null = null;
@@ -528,6 +534,7 @@ export class Game {
     this.updateBombs(dt);
     this.updateGas(dt);
     this.updateCaveIns(dt);
+    this.updateBreath(dt);
     this.updateParticles(dt);
     if (this.fishFly && (this.fishFly.t += dt) > 0.6) this.fishFly = null;
     this.updateEnvironment(dt, menu);
@@ -1360,6 +1367,14 @@ export class Game {
     if (w.decor[b] && !propOf(w.decor[b])) w.decor[b] = 0;
     this.wakeWater(x0, y0);
     this.wakeWater(x1, y1);
+    // water further along the row was looking for a way out through the gap just left behind
+    for (const d of [-1, 1]) {
+      for (let k = 2; k <= 12; k++) {
+        const b2 = w.get(x0 + d * k, y0);
+        if (b2 === B.WATER) this.waterQ.add(w.idx(x0 + d * k, y0));
+        else if (b2 !== B.AIR) break;
+      }
+    }
   }
 
   private fireGrapple(): void {
@@ -1936,6 +1951,7 @@ export class Game {
     w.damage.delete(i);
     this.wakeWater(tx, ty);
     this.checkBreach(tx, ty);
+    this.checkFlood(tx, ty);
     this.loosenAround(tx, ty);
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
@@ -4200,6 +4216,83 @@ export class Game {
     }
   }
 
+  // ------------------------------------------------------------------ floodwater
+  /** a block just came away at (x,y): if it held back a sealed pocket of water, it bursts */
+  private checkFlood(x: number, y: number): void {
+    const w = this.world;
+    const W = w.w;
+    const opened = w.idx(x, y);
+    for (const j0 of [opened - 1, opened + 1, opened - W, opened + W]) {
+      if (j0 < 0 || j0 >= w.fg.length || w.fg[j0] !== B.WATER) continue;
+      // follow the water: if it reaches open air anywhere but here, it is a pool, not a pocket
+      const seen = new Set<number>([j0]);
+      const q = [j0];
+      let sealed = true;
+      while (q.length && seen.size < 160 && sealed) {
+        const i = q.pop() as number;
+        for (const j of [i - 1, i + 1, i - W, i + W]) {
+          if (j < 0 || j >= w.fg.length || seen.has(j) || j === opened) continue;
+          const b = w.fg[j];
+          if (b === B.WATER) {
+            seen.add(j);
+            q.push(j);
+          } else if (!BLOCKS[b].solid) sealed = false;
+        }
+      }
+      if (!sealed) continue;
+      const cx = (x + 0.5) * TILE;
+      const cy = (y + 0.5) * TILE;
+      if (this.gushT <= 0) {
+        audio.play('gush', { vol: Math.min(1, 0.5 + seen.size / 60) });
+        this.gushT = 1.5;
+      }
+      this.shake = Math.max(this.shake, 3);
+      for (let k = 0; k < 18; k++) {
+        const life = 0.4 + Math.random() * 0.4;
+        const a = Math.atan2(cy - ((j0 / W) | 0) * TILE - 16, cx - (j0 % W) * TILE - 16) + (Math.random() - 0.5) * 1.2;
+        const sp = 90 + Math.random() * 160;
+        this.parts.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40, life, max: life, color: Math.random() < 0.5 ? '#9fd8ff' : '#e8f6ff', size: 2, grav: 600, glow: false });
+      }
+      this.hint('flood', 'Water bursts from the rock! A tunnel can fill over your head: climb out, or swim up with Space. Rock that looks dark and wet is weeping: there is water close behind it.');
+      return;
+    }
+  }
+
+  /** your head under water: you hold your breath, then you drown */
+  private updateBreath(dt: number): void {
+    const pl = this.player;
+    if (this.gushT > 0) this.gushT -= dt;
+    if (pl.dead) {
+      this.breath = BREATH_MAX;
+      this.gaspReady = false;
+      return;
+    }
+    const w = this.world;
+    const under = w.get(Math.floor(pl.cx / TILE), Math.floor((pl.y + 8) / TILE)) === B.WATER;
+    if (!under) {
+      if (this.gaspReady) {
+        this.gaspReady = false;
+        audio.play('gasp', { vol: 0.75 });
+      }
+      this.breath = Math.min(BREATH_MAX, this.breath + dt * 5);
+      this.drownT = 0;
+      return;
+    }
+    this.breath = Math.max(0, this.breath - dt);
+    if (this.breath < BREATH_MAX * 0.6) this.gaspReady = true;
+    if (this.breath < BREATH_MAX - 1.5) this.hint('breath', 'Under water you hold your breath: the bubbles over your head. Get your head above the surface before they run out.');
+    if (Math.random() < dt * 2.5) {
+      this.parts.push({ x: pl.cx + pl.facing * 5, y: pl.y + 8, vx: (Math.random() - 0.5) * 10, vy: -40 - Math.random() * 30, life: 0.9, max: 0.9, color: '#cfeeff', size: Math.random() < 0.5 ? 2 : 1, grav: -30, glow: false });
+    }
+    if (this.breath > 0) return;
+    this.drownT -= dt;
+    if (this.drownT > 0) return;
+    this.drownT = 1;
+    this.p.nerve = Math.max(0, this.p.nerve - 4);
+    audio.play('hurt', { pitch: 0.7, vol: 0.6 });
+    this.sap(5, 'Drowning!', '#7ac8ff');
+  }
+
   /** the loose rock at (x,y) lets go */
   private dropRock(x: number, y: number): void {
     const w = this.world;
@@ -4212,6 +4305,7 @@ export class Game {
     w.damage.delete(i);
     this.wakeWater(x, y);
     this.checkBreach(x, y);
+    this.checkFlood(x, y);
     this.loosenAround(x, y);
     this.rocks.push({ x: x * TILE + TILE / 2, y: y * TILE, vy: 40, b, hitPlayer: false, hit: new Set(), done: false });
     // what rested on it follows hard behind; loose rock beside it soon after

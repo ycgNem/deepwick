@@ -7,6 +7,7 @@ import { Rng, fbm, valueNoise, clamp } from '../rng';
 import { propOf, propsOfKind, PROPS } from '../data/props';
 import { seedGas } from './gas';
 import { seedLoose } from './cavein';
+import { seedAquifers } from './flood';
 
 /** the centre of the world, where a new delver wakes up */
 export const SPAWN_X = Math.floor(WORLD_W / 2);
@@ -258,6 +259,8 @@ export function generateWorld(seed: number): World {
 
   unburyObjects(w);
   clearWater(w);
+  // ---- floodwater: sealed pockets of water in the rock ----------------------------------------
+  w.aquifers = seedAquifers(w, seed);
   w.updateAllSky();
   // ---- bad ground: loose rock in patches, around rich ore, over the old drifts --------------
   seedLoose(w, seed);

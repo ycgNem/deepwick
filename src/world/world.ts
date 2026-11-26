@@ -65,6 +65,8 @@ export class World {
   gas = new Uint8Array(WORLD_W * WORLD_H);
   /** cracked rock that falls once nothing holds it up (see cavein.ts) */
   loose = new Uint8Array(WORLD_W * WORLD_H);
+  /** tiles filled by the sealed water pockets at creation (not saved: it brings older saves up to date) */
+  aquifers: number[] = [];
   /** surface row for every column (as generated) */
   surface = new Int16Array(WORLD_W);
   /** first solid row from the top of each column, kept up to date as blocks change */

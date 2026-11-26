@@ -16,6 +16,8 @@ const SFX = [
   'chirp',
   'creak',
   'rockfall',
+  'gush',
+  'gasp',
   'torch',
   'chest_open',
   'upgrade',

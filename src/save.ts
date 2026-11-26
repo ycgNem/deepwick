@@ -19,6 +19,8 @@ interface SaveFile {
   gas?: string;
   /** loose rock (bad ground), from cycle 13 */
   loose?: string;
+  /** set once the world has its sealed water pockets (cycle 14) */
+  flood?: number;
   /** set once worlds had water in them */
   water?: number;
 }
@@ -52,7 +54,7 @@ function unrle(b64: string, target: Uint8Array): void {
 }
 
 export function saveGame(p: Progress, w: World): boolean {
-  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed), gas: rle(w.gas), loose: rle(w.loose), water: 1 };
+  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed), gas: rle(w.gas), loose: rle(w.loose), water: 1, flood: 1 };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
@@ -86,6 +88,7 @@ export function loadGame(): { p: Progress; world: World } | null {
     if (!data.gas) for (let i = 0; i < world.gas.length; i++) if (world.gas[i]) gassy.push(i);
     // worlds from before bad ground keep the generated loose rock only where the rock is untouched
     const genFg = data.loose ? null : world.fg.slice();
+    const aquifers = data.flood ? [] : world.aquifers;
     unrle(data.fg, world.fg);
     if (data.wall) unrle(data.wall, world.wall);
     unrle(data.obj, world.obj);
@@ -108,11 +111,31 @@ export function loadGame(): { p: Progress; world: World } | null {
         else if (def.solid || world.fg[i] === B.WATER || world.fg[i] === B.LAVA) world.gas[i] = 0;
       }
     }
+    if (aquifers.length) {
+      // a world from before floodwater: fill its pockets where the rock all round is still whole
+      const pocket = new Set(aquifers);
+      for (const i of aquifers) {
+        const def = BLOCKS[world.fg[i]];
+        if (!def.solid || def.unbreakable || def.liquid || world.placed[i] || world.obj[i] || world.rail[i]) continue;
+        let sealed = true;
+        for (const j of [i - 1, i + 1, i - world.w, i + world.w, i - world.w - 1, i - world.w + 1, i + world.w - 1, i + world.w + 1]) {
+          if (pocket.has(j)) continue;
+          const d = BLOCKS[world.fg[j]];
+          if (!d.solid || d.liquid) sealed = false;
+        }
+        if (sealed) {
+          world.fg[i] = B.WATER;
+          world.gas[i] = 0;
+        }
+      }
+    }
     if (data.loose) unrle(data.loose, world.loose);
     else if (genFg) {
       for (let i = 0; i < world.loose.length; i++) if (world.loose[i] && (world.fg[i] !== genFg[i] || world.placed[i] || world.obj[i])) world.loose[i] = 0;
       settleLoose(world);
     }
+    // nothing loose may hang over water that came in above
+    if (aquifers.length) settleLoose(world);
     world.updateAllSky();
     world.dirty.clear();
     return { p: data.p, world };

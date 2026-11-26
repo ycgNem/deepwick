@@ -16,6 +16,7 @@ import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 import { prefs } from './prefs';
 import { LOST } from './data/lost';
 import { propRoof, PROP_REACH } from './world/cavein';
+import { dampAt, BREATH_MAX } from './world/flood';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -98,6 +99,8 @@ export class Renderer {
   /** fault lines over loose rock, and the crumbling underside it shows when nothing is below */
   private looseArt: HTMLCanvasElement[] = [];
   private looseUnder: HTMLCanvasElement[] = [];
+  /** rock with water close behind it: dark seeps and wet glints */
+  private dampArt: HTMLCanvasElement[] = [];
   private glowSprite: HTMLCanvasElement;
   private vignette: HTMLCanvasElement | null = null;
   /** the dark closing in as your nerve goes */
@@ -127,6 +130,7 @@ export class Renderer {
     this.backdrops = buildBackdrops();
     this.buildCracks();
     this.buildLoose();
+    this.buildDamp();
     this.skyDay = mirrored(A.bg.day);
     this.skyDusk = mirrored(A.bg.surface);
     this.skyDayTop = skyTop(this.skyDay, [0.62, 0.74, 0.9]);
@@ -201,6 +205,37 @@ export class Renderer {
         g.fillRect(x, 31, 2, 2);
       }
       this.looseUnder.push(c);
+    }
+  }
+
+  /** weeping rock: a cold darkening, seep streaks running down, and a few wet glints */
+  private buildDamp(): void {
+    let seed = 57;
+    const rnd = (): number => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    for (let v = 0; v < 4; v++) {
+      const [c, g] = makeCanvas(32, 32);
+      g.fillStyle = 'rgba(8,18,34,0.2)';
+      g.fillRect(0, 0, 32, 32);
+      for (let k = 0; k < 3; k++) {
+        const x = 3 + Math.floor(rnd() * 26);
+        const y0 = Math.floor(rnd() * 14);
+        const len = 8 + Math.floor(rnd() * 16);
+        g.fillStyle = 'rgba(10,26,50,0.4)';
+        g.fillRect(x, y0, rnd() < 0.5 ? 2 : 1, len);
+        g.fillStyle = 'rgba(150,200,240,0.35)';
+        g.fillRect(x, y0 + 1, 1, Math.floor(len * 0.4));
+        // a bead gathering at the bottom of the streak
+        g.fillStyle = 'rgba(190,226,255,0.7)';
+        g.fillRect(x, y0 + len, 1, 1);
+      }
+      for (let k = 0; k < 4; k++) {
+        g.fillStyle = 'rgba(200,232,255,0.55)';
+        g.fillRect(Math.floor(rnd() * 31), Math.floor(rnd() * 31), 1, 1);
+      }
+      this.dampArt.push(c);
     }
   }
 
@@ -325,6 +360,7 @@ export class Renderer {
     this.drawGlows(g, ctx, camX, camY, vw, vh);
     this.drawShades(g, ctx, camX, camY);
     this.drawReelMeter(g, ctx, camX, camY);
+    this.drawBreath(g, ctx, camX, camY);
     if (this.vignette) ctx.drawImage(this.vignette, 0, 0);
     this.drawDread(g, ctx, vw, vh);
     this.drawHover(g, ctx, camX, camY);
@@ -812,6 +848,7 @@ export class Renderer {
           const set = def.topper === 'grass' ? A.grassTop : A.mossTop;
           ctx.drawImage(set[(tx * 7 + ty) & 3], sx, sy - 7);
         }
+        if (fg !== B.LAVA && dampAt(w, tx, ty)) ctx.drawImage(this.dampArt[(tx * 7 + ty * 3) & 3], sx, sy);
         if (w.loose[i]) {
           // rock that has started to give shudders
           const j = g.working.has(i) ? Math.round((Math.random() - 0.5) * 2.4) : 0;
@@ -1273,11 +1310,13 @@ export class Renderer {
       const life = 2 + Math.random() * 3;
       this.amb.push({ x, y, vx, vy, life, max: life, color, size, grav: 0, drip: false });
     }
-    // drips from damp ceilings
-    if (under && bi <= 1 && Math.random() < dt * 3) {
+    // drips from damp ceilings (weeping rock, with water close behind it, drips most)
+    if (under && Math.random() < dt * 6) {
       const tx = Math.floor((camX + Math.random() * vw) / TILE);
       for (let ty = Math.floor(camY / TILE); ty < Math.floor((camY + vh) / TILE); ty++) {
-        if (w.rock(tx, ty) && !w.rock(tx, ty + 1) && w.explored[(ty + 1) * w.w + tx] && Math.random() < 0.15) {
+        if (!w.rock(tx, ty) || w.rock(tx, ty + 1) || !w.explored[(ty + 1) * w.w + tx] || w.get(tx, ty + 1) === B.WATER) continue;
+        const chance = dampAt(w, tx, ty) ? 0.6 : bi <= 1 ? 0.08 : 0;
+        if (Math.random() < chance) {
           this.amb.push({ x: tx * TILE + 6 + Math.random() * 20, y: (ty + 1) * TILE, vx: 0, vy: 0, life: 3, max: 3, color: 'rgba(170,210,255,', size: 1, grav: 500, drip: true });
           break;
         }
@@ -1647,6 +1686,40 @@ export class Renderer {
     L.drawImage(this.gasMap, 0, 0, tw, th, tx0 * TILE - camX, ty0 * TILE - camY, tw * TILE, th * TILE);
     L.globalCompositeOperation = 'source-over';
     ctx.drawImage(this.gasLayer, 0, 0);
+  }
+
+  /** five bubbles over your head while you hold your breath; each one is two seconds of air */
+  private drawBreath(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const pl = g.player;
+    if (g.breath >= BREATH_MAX || pl.dead) return;
+    const per = BREATH_MAX / 5;
+    const left = g.breath / per;
+    const x0 = Math.round(pl.cx - camX) - 22;
+    const y = Math.round(pl.y - camY) - 16;
+    const warn = g.breath < per && Math.floor(g.time * 6) % 2 === 1;
+    for (let k = 0; k < 5; k++) {
+      const x = x0 + k * 9;
+      const fill = Math.max(0, Math.min(1, left - k));
+      if (fill <= 0) {
+        // a burst bubble: a faint broken ring
+        ctx.fillStyle = 'rgba(160,210,255,0.3)';
+        ctx.fillRect(x + 1, y + 3, 1, 1);
+        ctx.fillRect(x + 5, y + 3, 1, 1);
+        ctx.fillRect(x + 3, y + 1, 1, 1);
+        continue;
+      }
+      // a round 7px bubble, shrinking as it runs out
+      const s = fill > 0.5 ? 0 : 1;
+      ctx.fillStyle = 'rgba(8,26,52,0.85)';
+      ctx.fillRect(x + 1 + s, y + s, 5 - s * 2, 7 - s * 2);
+      ctx.fillRect(x + s, y + 1 + s, 7 - s * 2, 5 - s * 2);
+      ctx.fillStyle = warn ? '#ff9a8a' : '#8fd0ff';
+      ctx.fillRect(x + 1 + s, y + 1 + s, 5 - s * 2, 5 - s * 2);
+      ctx.fillStyle = warn ? '#ffd0c8' : '#d8f0ff';
+      ctx.fillRect(x + 2 + s, y + 2 + s, 2, 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x + 2 + s, y + 2 + s, 1, 1);
+    }
   }
 
   /** the canary's cage, hanging from the pack on the miner's back; the bird inside shows how it feels */
