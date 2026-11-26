@@ -8,7 +8,9 @@ import { Recipe, STATION_NAME, RECIPES } from './data/recipes';
 import { SkillId, xpToNext, count, itemValue, MAX_LEVEL, Slot, Stack, EquipKey, give } from './state';
 import { TILE, WORLD_W, WORLD_H, HOTBAR, INV_SIZE } from './constants';
 import { Obj } from './world/world';
+import { WICK_X, WICK_Y } from './data/wick';
 import { audio } from './audio';
+import { FLAME, KINDLING, LUMEN, MAX_FLAME, lumenToNext } from './data/wick';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -43,7 +45,7 @@ const EQUIP_SLOTS: { key: EquipKey; label: string; slot: string }[] = [
   { key: 'charm2', label: 'Charm', slot: 'charm' },
 ];
 
-type Panel = 'inv' | 'chest' | 'shop' | 'smith' | 'archive' | 'map' | 'pause' | 'victory' | null;
+type Panel = 'inv' | 'chest' | 'shop' | 'smith' | 'archive' | 'wick' | 'map' | 'pause' | 'victory' | null;
 
 export class UI implements UIHooks {
   game!: Game;
@@ -80,7 +82,7 @@ export class UI implements UIHooks {
     this.miniCtx = mc;
     [this.mapCanvas, this.mapCtx] = makeCanvas(WORLD_W, WORLD_H);
     this.mapImg = this.mapCtx.createImageData(WORLD_W, WORLD_H);
-    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'coins', 'clock', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill']) {
+    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill']) {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -223,11 +225,16 @@ export class UI implements UIHooks {
     const mins = Math.floor((((c * 24 + 6) % 1) * 60) / 10) * 10;
     h.clock.innerHTML = `<i class="${isNight(c) ? 'moon' : 'sun'}"></i>Day ${g.p.stats.days} · ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
     h.clock.classList.toggle('night', daylight(c) < 0.5);
+    const fl = g.flame;
+    const nextNeed = fl > 0 && fl < MAX_FLAME ? FLAME[fl + 1].need : 0;
+    const prog = fl === 0 ? 'cold' : nextNeed ? `${fmt(g.p.wick.lumen)}/${fmt(nextNeed)}` : 'radiant';
+    h.wickChip.innerHTML = `<i class="fl l${fl}"></i>Wick ${fl > 0 ? `<b>${FLAME[fl].name}</b>` : ''}<small>${prog}</small>`;
+    h.wickChip.classList.toggle('cold', fl === 0);
     const pt = g.playerTile();
     const surf = g.world.surface[Math.max(0, Math.min(WORLD_W - 1, pt.x))];
     const depth = Math.max(0, pt.y - surf);
     h.depth.textContent = pt.y <= surf + 2 ? 'Surface' : `${depth}m`;
-    h.biome.textContent = pt.y <= surf + 2 ? (g.p.buildings.length ? 'Your settlement' : 'The Wild Meadow') : biomeAt(pt.y).name;
+    h.biome.textContent = pt.y <= surf + 2 ? (g.p.wick.kindled ? 'Deepwick' : 'The Wild Meadow') : biomeAt(pt.y).name;
     this.updateHotbar();
     let sk = '';
     for (const id of ['mining', 'combat', 'delving', 'fishing'] as SkillId[]) {
@@ -344,9 +351,16 @@ export class UI implements UIHooks {
     const p = g.p;
     const pt = g.playerTile();
     for (const b of p.buildings) {
-      ctx.fillStyle = '#ffd75a';
+      ctx.fillStyle = '#c8963a';
       ctx.fillRect(mx(b.x) - z * 2, my(b.y - 2) - z, z * 4, z * 3);
     }
+    // the Wick: a bright beacon (dim while cold)
+    ctx.fillStyle = g.flame > 0 ? '#fff0a0' : '#6a6070';
+    ctx.fillRect(mx(WICK_X) - z, my(WICK_Y - 6) - z, z * 3, z * 6);
+    const w0 = g.world;
+    ctx.fillStyle = '#ffd75a';
+    for (let y = Math.max(0, pt.y - range); y < Math.min(w0.h, pt.y + range); y++)
+      for (let x = Math.max(0, pt.x - range); x < Math.min(w0.w, pt.x + range); x++) if (w0.obj[y * w0.w + x] === Obj.WICKPOST) ctx.fillRect(mx(x), my(y - 1), z * 2, z * 3);
     ctx.fillStyle = '#ff7a9a';
     ctx.fillRect(mx(p.spawn.x) - z, my(p.spawn.y) - z, z * 3, z * 2);
     if (p.satchel) {
@@ -393,6 +407,9 @@ export class UI implements UIHooks {
         break;
       case 'archive':
         html = this.archiveHtml();
+        break;
+      case 'wick':
+        html = this.wickHtml();
         break;
       case 'map':
         html = this.mapHtml();
@@ -460,7 +477,8 @@ export class UI implements UIHooks {
       const have = count(g.p, id);
       need += `<span class="cost ${have >= n ? 'ok' : 'no'}" title="${esc(ITEMS[id]?.name ?? id)}">${img(ITEMS[id].icon)}${n}</span>`;
     }
-    const where = here ? '' : `<small class="where">${STATION_NAME[r.at]}</small>`;
+    const flameNote = (r.flame ?? 0) > g.flame ? `<small class="where">Needs the Wick ${FLAME[r.flame ?? 0].name}</small>` : '';
+    const where = (here ? '' : `<small class="where">${STATION_NAME[r.at]}</small>`) + flameNote;
     return `<div class="rc ${ok ? 'ok' : ''}" data-tipitem="${r.out}">${img(out.icon, 'ic big')}<div class="rn"><b>${esc(out.name)}${r.n > 1 ? ` ×${r.n}` : ''}</b><div class="needs">${need}</div>${where}</div><button data-a="craft" data-r="${idx}" ${ok ? '' : 'disabled'}>Craft</button><button class="ghost" data-a="craft5" data-r="${idx}" ${ok ? '' : 'disabled'} title="Craft up to 5">×5</button></div>`;
   }
 
@@ -481,7 +499,7 @@ export class UI implements UIHooks {
   private shopHtml(): string {
     const g = this.game;
     const p = g.p;
-    const lines = ['You built all this yourself? Then you can afford my prices.', 'Bring me shiny things and I make you less poor.', 'The deeper the rock, the better the price.'];
+    const lines = ['You lit the Wick again? Then you can afford my prices.', 'Bring me shiny things and I make you less poor. The glowing ones, though... the Wick wants those.', 'The deeper the rock, the better the price.'];
     let html = this.header("Pell's Trading Post", 'Old Pell, merchant', lines[Math.floor(g.time / 20) % lines.length], 'npc_merchant');
     html += `<div class="tabs"><button class="${this.tab === 'sell' ? 'on' : ''}" data-a="tab" data-v="sell">Sell</button><button class="${this.tab === 'buy' ? 'on' : ''}" data-a="tab" data-v="buy">Buy</button></div>`;
     if (this.tab === 'sell') {
@@ -506,6 +524,74 @@ export class UI implements UIHooks {
         const def = ITEMS[it.id];
         html += `<div class="li">${img(def.icon)}<div class="nm"><b>${esc(def.name)}${it.n > 1 ? ` ×${it.n}` : ''}</b> <span class="dim">have ${count(p, it.id)}</span><small>${esc(def.desc)}</small></div><div class="pr">${it.price * it.n}c</div><button data-a="buy" data-k="${k}" ${p.coins >= it.price * it.n ? '' : 'disabled'}>Buy</button></div>`;
       });
+      html += '</div>';
+    }
+    return html;
+  }
+
+  private wickHtml(): string {
+    const g = this.game;
+    const p = g.p;
+    const lvl = g.flame;
+    const atPost = !!g.wickFrom;
+    const lines = lvl === 0
+      ? 'Iron and dusty glass. Once, the whole valley lived in its light.'
+      : lvl >= MAX_FLAME
+        ? 'The Wick burns as it did in the old days. The dark keeps well away.'
+        : 'It drinks whatever glows. Bring the mountain’s light home.';
+    let html = `<div class="hd"><img class="portrait wickport" src="./assets/camp/${atPost ? 'wickpost' : lvl > 0 ? 'wick_lit' : 'wick'}.png" alt=""><div><h2>${atPost ? 'Wickpost' : 'The Wick'}</h2><div class="who">${lvl > 0 ? `${FLAME[lvl].name} · flame ${lvl} of ${MAX_FLAME}` : 'Cold'}</div><p class="line">${atPost ? 'A little of the Wick’s flame, carried down into the dark.' : lines}</p></div></div>`;
+    if (!atPost) {
+      // the ladder of flame levels
+      html += '<div class="flames">';
+      for (let i = 1; i <= MAX_FLAME; i++) {
+        const f = FLAME[i];
+        html += `<div class="fstep ${i <= lvl ? 'lit' : ''} ${i === lvl + 1 ? 'next' : ''}"><i class="fl l${i <= lvl ? i : 0}"></i><b>${f.name}</b><small>${i === 1 ? 'Kindle it' : `${fmt(f.need)} Lumen`}</small><em>${esc(f.perk)}</em></div>`;
+      }
+      html += '</div>';
+      if (!p.wick.kindled) {
+        let need = '';
+        for (const [id, n] of Object.entries(KINDLING)) need += `<span class="cost ${count(p, id) >= n ? 'ok' : 'no'}">${img(ITEMS[id].icon)}${count(p, id)}/${n}</span>`;
+        const ok = Object.entries(KINDLING).every(([id, n]) => count(p, id) >= n);
+        html += `<div class="card kindle"><h3>Kindle the Wick</h3><div class="costs">${need}</div><button class="big" data-a="kindle" ${ok ? '' : 'disabled'}>Kindle it</button><small>Wood from trees; coal from the rock below the meadow (a Wooden Pickaxe will do).</small></div>`;
+      } else {
+        const toNext = lumenToNext(p.wick);
+        if (lvl < MAX_FLAME) {
+          const base = FLAME[lvl].need;
+          const span = FLAME[lvl + 1].need - base;
+          const frac = Math.max(0, Math.min(1, (p.wick.lumen - base) / span));
+          html += `<div class="lumenbar"><div class="fill" style="width:${frac * 100}%"></div><span>${fmt(p.wick.lumen)} Lumen · ${fmt(toNext)} more to ${FLAME[lvl + 1].name}</span></div>`;
+        }
+        // what you carry that would feed it
+        const have = new Map<string, number>();
+        for (const st of p.inv) if (st && LUMEN[st.id]) have.set(st.id, (have.get(st.id) ?? 0) + st.n);
+        let total = 0;
+        for (const [id, n] of have) total += LUMEN[id] * n;
+        html += `<div class="row-actions"><button class="big" data-a="offerall" ${total ? '' : 'disabled'}>Offer everything that glows${total ? ` (+${fmt(total)} Lumen)` : ''}</button><span class="hint">Anything a bounty still needs is kept back.</span></div>`;
+        if (have.size) {
+          html += '<div class="list">';
+          for (const [id, n] of have) {
+            const def = ITEMS[id];
+            html += `<div class="li">${img(def.icon)}<div class="nm"><b>${esc(def.name)}</b> <span class="dim">×${n}</span><small>${LUMEN[id]} Lumen each</small></div><div class="pr lum">+${fmt(LUMEN[id] * n)}</div><button data-a="offer" data-id="${id}">Offer</button></div>`;
+          }
+          html += '</div>';
+        } else {
+          html += '<p class="empty-note">You carry nothing that glows. These feed the flame:</p><div class="glowlist">';
+          for (const [id, v] of Object.entries(LUMEN)) html += `<span class="cost" title="${esc(ITEMS[id]?.name ?? id)}">${img(ITEMS[id].icon)}${v}</span>`;
+          html += '</div>';
+        }
+      }
+    }
+    // travel along the light
+    if (lvl >= 1) {
+      const posts = g.wickposts().filter((q) => !(atPost && g.wickFrom && q.x === g.wickFrom.x && q.y === g.wickFrom.y));
+      html += '<h3 class="sub">Follow the light</h3><div class="list">';
+      if (atPost) html += `<div class="li"><i class="fl l${lvl} big"></i><div class="nm"><b>The Wick</b><small>Home, in the meadow</small></div><button data-a="travel">Travel</button></div>`;
+      for (const q of posts) {
+        const surf = g.world.surface[q.x] ?? 0;
+        const depth = Math.max(0, q.y - surf);
+        html += `<div class="li"><img class="ic" src="${iconUrl(ITEMS.wickpost.icon)}" alt=""><div class="nm"><b>Wickpost</b><small>${depth <= 2 ? 'On the surface' : `${esc(biomeAt(q.y).name)} · ${depth}m down`}</small></div><button data-a="travel" data-x="${q.x}" data-y="${q.y}">Travel</button></div>`;
+      }
+      if (!posts.length && !atPost) html += `<p class="empty-note">${lvl >= 2 ? 'Craft Wickposts at a workbench and plant them as you delve. You can travel to any of them from here.' : 'At the Glowing flame you can build Wickposts: lit waypoints you can travel between.'}</p>`;
       html += '</div>';
     }
     return html;
@@ -816,6 +902,7 @@ export class UI implements UIHooks {
     if (def.kind === 'food') stats.push(`+${def.food} food${def.heal ? `, +${def.heal} health` : ''}`);
     if (def.kind === 'lantern') stats.push(`Light ${def.radius} · ${def.oil}s of oil`);
     if (def.kind === 'rod') stats.push(def.rod && def.rod > 1 ? `Bites ${Math.round((def.rod - 1) * 100)}% sooner, wider catch zone` : 'Catches pond and pool fish');
+    if (LUMEN[def.id]) stats.push(`Feeds the Wick: ${LUMEN[def.id]} Lumen`);
     if (def.value > 0 && sellable(def) && itemValue(def.id, this.game.st) > 0) stats.push(`Sells for ${itemValue(def.id, this.game.st)}c`);
     const slotName = equipSlotOf(def);
     this.tipEl.innerHTML = `<b>${esc(def.name)}${n > 1 ? ` ×${n}` : ''}</b>${stats.length ? `<em>${stats.join(' · ')}</em>` : ''}<small>${esc(def.desc)}</small>${slotName ? '<small class="dim">Shift-click to equip</small>' : ''}`;
@@ -904,6 +991,20 @@ export class UI implements UIHooks {
       case 'reroll':
         g.rerollBounty(Number(t.dataset.i));
         break;
+      case 'kindle':
+        g.kindleWick();
+        break;
+      case 'offer':
+        g.offerLumen(t.dataset.id ?? '');
+        break;
+      case 'offerall':
+        g.offerLumen();
+        break;
+      case 'travel': {
+        const x = t.dataset.x;
+        g.travelTo(x === undefined ? null : { x: Number(x), y: Number(t.dataset.y) });
+        return;
+      }
       case 'save':
         g.onSave?.();
         this.toast('Game saved.', '#9af0a0');

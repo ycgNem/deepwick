@@ -43,9 +43,11 @@ the flame) decides how far the light reaches tomorrow.
 
 - [x] Cycle 1: empty-handed miner; tools drawn in hand only when held and swung
       (each pick tier looks different). Playthrough bug fixes.
-- [ ] Cycle 2: the Wick. Lumen refining, flame levels, settlers arrive by flame
-      level (deeds removed), Wick safe radius at night, Wickposts (lit
-      waypoints with fast travel back to the Wick).
+- [x] Cycle 2: the Wick. Kindle it (15 wood, 3 coal), feed it Lumen from
+      anything that glows, five flame levels. Settlers arrive by flame level
+      (deeds removed; old saves migrate), nothing hostile survives in its light,
+      a warm safe pool at night, rest heals faster there. Wickposts at flame 2:
+      lit waypoints, travel between any of them and the Wick.
 - [ ] Cycle 3: darkness. A Nerve meter that drains in the dark and recovers in
       light; Gloamlings that only exist in darkness; difficulty modes
       (Hearthkeeper, Delver, Gloamwalker).

@@ -8,6 +8,7 @@ import { propOf } from './data/props';
 import { ITEMS, ItemDef, RELICS, SHOP_STOCK, equipSlotOf } from './data/items';
 import { ENEMIES, DAY_SURFACE, NIGHT_SURFACE } from './data/enemies';
 import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
+import { FLAME, KINDLING, LUMEN, MAX_FLAME, WICK_GLOW, WICK_X, WICK_Y, flameLevel } from './data/wick';
 import {
   Progress,
   Stats,
@@ -88,6 +89,7 @@ const OBJ_ITEM: Partial<Record<Obj, string>> = {
   [Obj.HEART_CRYSTAL]: 'heartcrystal',
   [Obj.MINECART]: 'minecart',
   [Obj.LAMP]: 'lamp',
+  [Obj.WICKPOST]: 'wickpost',
 };
 
 /** objects that fall off when the block under them goes */
@@ -114,6 +116,7 @@ const NEEDS_FLOOR = new Set<number>([
   Obj.CHEST,
   Obj.CHEST_OPEN,
   Obj.MINECART,
+  Obj.WICKPOST,
 ]);
 
 /** a cart you are riding: centre x in px, the rail row it runs on, speed */
@@ -236,6 +239,8 @@ export class Game {
   /** tile index of the storage chest the UI has open */
   openChest = -1;
   wasNight = false;
+  /** where the Wick panel was opened from: the Wick itself, or a Wickpost's tile */
+  wickFrom: { x: number; y: number } | null = null;
   /** what the current left-button hold is doing: decided when it starts, so digging never turns into placing */
   private lmbMode: 'none' | 'break' | 'use' = 'none';
 
@@ -257,6 +262,9 @@ export class Game {
     this.wasNight = isNight(p.clock);
     if (this.p.bounties.length === 0) this.refillBounties();
     this.reconcileRelics();
+    this.migrateWick();
+    this.ensureWick();
+    this.settleMissing(false);
     if (this.p.bossRewardPending) setTimeout(() => this.grantBossReward(this.player.cx, this.player.cy), 800);
     this.snapCamera();
     // settle any water a migrated save left hanging
@@ -434,7 +442,8 @@ export class Game {
     const night = isNight(p.clock);
     if (night && !this.wasNight) {
       this.toast('Night falls. The Hollows are rising...', '#b09aff');
-      this.hint('night', 'At night Hollows roam the surface. Wall yourself in, add a door and torches, or sleep in a bed to skip the night.');
+      if (this.flame > 0) this.hint('night', 'At night Hollows roam the surface. Nothing from the dark survives inside the Wick’s light: stay in the warm glow, or sleep in a bed to skip the night.');
+      else this.hint('nightcold', 'At night Hollows roam the surface, and the Wick is cold. Kindle it, or wall yourself in with a door and torches until dawn.');
       audio.play('groan', { vol: 0.5, vary: 0 });
     } else if (!night && this.wasNight) this.toast('Dawn breaks.', '#ffd79a');
     this.wasNight = night;
@@ -1345,6 +1354,8 @@ export class Game {
 
   /** ground under a settler's building can't be dug away */
   isProtected(tx: number, ty: number): boolean {
+    // the Wick's plinth and the ground under it
+    if (tx >= WICK_X - 2 && tx <= WICK_X + 2 && ty >= WICK_Y && ty <= WICK_Y + 2) return true;
     for (const b of this.p.buildings) {
       if (tx >= b.x - BUILDING_W / 2 && tx < b.x + BUILDING_W / 2 && ty >= b.y && ty <= b.y + 1) return true;
     }
@@ -1400,8 +1411,8 @@ export class Game {
     // a hold that started by digging keeps digging: it never drops the held block into the hole it just made
     if (lmb && this.lmbMode === 'break' && hd && !tool && !this.wantsToBreak()) return;
     if (hd && !tool && (lmb ? this.lmbMode === 'use' : !this.wantsToBreak())) {
-      if (kind === 'block' || kind === 'wall' || kind === 'place' || kind === 'deed') {
-        if (lmb && pl.useT <= 0) this.placeHeld(hd, press);
+      if (kind === 'block' || kind === 'wall' || kind === 'place') {
+        if (lmb && pl.useT <= 0) this.placeHeld(hd);
         return;
       }
       if (kind === 'food') {
@@ -1894,13 +1905,15 @@ export class Game {
     return w.inside(tx, ty) && !w.rock(tx, ty) && !BLOCKS[w.get(tx, ty)].liquid && !w.getObj(tx, ty);
   }
 
-  private placeHeld(hd: ItemDef, press = true): void {
+  private placeHeld(hd: ItemDef): void {
     const h = this.hoverTile;
     const pl = this.player;
     const w = this.world;
     if (!h.inReach) return;
     const { x, y } = h;
     if (!w.inside(x, y)) return;
+    // nothing gets built into the Wick itself
+    if (x >= WICK_X - 1 && x <= WICK_X + 1 && y >= WICK_Y - 5 && y < WICK_Y && hd.kind !== 'wall') return;
     let ok = false;
     if (hd.kind === 'block' && hd.block !== undefined) {
       // blocks can go into water too (filling a pond, bridging a pool)
@@ -1920,10 +1933,6 @@ export class Game {
       w.setWall(x, y, hd.wall);
       ok = true;
       pl.useT = 0.08;
-    } else if (hd.kind === 'deed' && hd.deed) {
-      if (!press) return;
-      ok = this.placeBuilding(hd.deed, x);
-      pl.useT = 0.5;
     } else if (hd.id === 'rail') {
       ok = this.placeRail(x, y);
       pl.useT = 0.08;
@@ -1933,7 +1942,7 @@ export class Game {
     }
     if (!ok) return;
     takeItems(this.p, hd.id, 1);
-    if (hd.kind !== 'deed') audio.play(hd.id === 'torch' ? 'torch' : 'place', { vol: 0.7 });
+    audio.play(hd.id === 'torch' ? 'torch' : 'place', { vol: 0.7 });
     pl.swinging = true;
     pl.swingT = 0.4;
     pl.swingHit = true;
@@ -2015,6 +2024,18 @@ export class Game {
         this.p.chests[String(w.idx(x, y))] = new Array<Slot>(CHEST_SLOTS).fill(null);
         return true;
       }
+      case Obj.WICKPOST: {
+        if (!floor || w.rock(x, y - 1)) {
+          this.text(x * TILE + 16, y * TILE, 'Needs a floor and room above', '#ff9a6a');
+          return false;
+        }
+        w.setObj(x, y, o);
+        w.decor[w.idx(x, y)] = 0;
+        this.burst(x * TILE + 23, y * TILE - 4, 18, ['#ffe08a', '#ffb84a', '#ffffff'], 90, true);
+        audio.play('upgrade', { pitch: 1.6, vol: 0.4, vary: 0 });
+        this.hint('wickpost', 'The Wickpost takes the flame. Nothing spawns in its light, and pressing E beside it takes you home to the Wick, or to any other Wickpost.');
+        return true;
+      }
       default: {
         if (!floor) {
           this.text(x * TILE + 16, y * TILE, 'Needs a floor', '#ff9a6a');
@@ -2029,23 +2050,55 @@ export class Game {
     }
   }
 
-  private placeBuilding(kind: BuildingKind, x: number): boolean {
+  /** can a settler's house stand with its centre on column x? (and how much of yours is in the way) */
+  private plotScore(x: number): number {
     const w = this.world;
-    const info = BUILDING_INFO[kind];
-    if (this.p.buildings.some((b) => b.kind === kind)) {
-      this.toast(`${info.name} is already built.`);
-      return false;
+    const x0 = x - BUILDING_W / 2;
+    if (x0 < 4 || x0 + BUILDING_W > w.w - 4) return -1;
+    if (Math.abs(x - WICK_X) < BUILDING_W / 2 + 3) return -1;
+    if (this.p.buildings.some((b) => Math.abs(b.x - x) < BUILDING_W + 2)) return -1;
+    const gy = groundAt(w, x);
+    if (gy > w.surface[x] + 4 || gy < w.surface[x] - 4) return -1;
+    // count what you built there: a settler would rather not knock your house down
+    let mine = 0;
+    for (let cx = x0 - 1; cx < x0 + BUILDING_W + 1; cx++) {
+      for (let cy = gy - 5; cy < gy + 2; cy++) {
+        const i = w.idx(cx, cy);
+        if (w.placed[i]) mine++;
+        const o = w.obj[i];
+        if (o && o !== Obj.TREE && o !== Obj.BUSH && o !== Obj.BUSH_BERRY) mine++;
+      }
     }
-    if (this.p.buildings.some((b) => Math.abs(b.x - x) < BUILDING_W + 2)) {
-      this.toast('Too close to another building.', '#ff9a6a');
-      return false;
+    return mine;
+  }
+
+  /** bring home every settler the flame has called who is not here yet */
+  private settleMissing(announce: boolean): void {
+    const lvl = this.flame;
+    for (let i = 1; i <= lvl; i++) {
+      const kind = FLAME[i].settler;
+      if (!kind || this.p.buildings.some((b) => b.kind === kind)) continue;
+      let best = -1;
+      let bestScore = 1e9;
+      for (const d of [9, 15, 21, 27, 33]) {
+        for (const x of [WICK_X - d, WICK_X + d]) {
+          const sc = this.plotScore(x);
+          if (sc >= 0 && sc < bestScore) {
+            best = x;
+            bestScore = sc;
+          }
+        }
+        if (bestScore === 0) break;
+      }
+      if (best >= 0) this.placeBuilding(kind, best, announce);
     }
+  }
+
+  private placeBuilding(kind: BuildingKind, x: number, announce = true): boolean {
+    const w = this.world;
+    if (this.p.buildings.some((b) => b.kind === kind)) return false;
     const x0 = x - BUILDING_W / 2;
     const gy = groundAt(w, x);
-    if (gy > w.surface[x] + 4 || x0 < 4 || x0 + BUILDING_W > w.w - 4) {
-      this.toast('Settlers want open ground under the sky.', '#ff9a6a');
-      return false;
-    }
     // level the plot: fill dips with dirt, clear bumps and plants
     for (let cx = x0 - 2; cx < x0 + BUILDING_W + 2; cx++) {
       const edge = cx < x0 - 1 || cx >= x0 + BUILDING_W + 1;
@@ -2078,17 +2131,169 @@ export class Game {
     this.player.fallStartY = this.player.y;
     for (const e of this.enemies) if (!e.dead) lift(e);
     this.p.buildings.push({ kind, x, y: gy });
+    if (!announce) return true;
     audio.play('upgrade', { vary: 0 });
     this.burst(x * TILE, gy * TILE - 40, 50, ['#ffd75a', '#ffffff', '#c89a5a'], 220, true);
     this.shake = 6;
     const msg: Record<BuildingKind, string> = {
-      trade: 'Pell has set up a Trading Post! Sell ore and buy supplies (E to talk).',
-      forge: "Brannoc's Forge is open! He sharpens picks and hones blades.",
-      archive: 'Wren opens the Lantern Archive! Bring relics, take bounties.',
+      trade: 'Old Pell saw the light and came home. His Trading Post is open beside the Wick (E to talk).',
+      forge: 'Brannoc is back and his forge is roaring. He sharpens picks and hones blades.',
+      archive: 'Wren has reopened the Lantern Archive. Bring relics home, take bounties.',
     };
     this.toast(msg[kind], '#9af0a0');
-    this.onSave?.();
     return true;
+  }
+
+  // ------------------------------------------------------------------ the Wick
+  get flame(): number {
+    return flameLevel(this.p.wick);
+  }
+
+  /** how far the Wick's light (and its protection) reaches, in tiles */
+  wickRadius(): number {
+    return FLAME[this.flame].radius;
+  }
+
+  /** is this point (px) inside the Wick's light? */
+  inWickLight(x: number, y: number): boolean {
+    const r = this.wickRadius();
+    if (r <= 0) return false;
+    const dx = x / TILE - WICK_GLOW.x;
+    const dy = y / TILE - WICK_GLOW.y;
+    // the light pools wide along the ground and less far up into the sky
+    return (dx * dx) / (r * r) + (dy * dy) / (r * r * 0.5) < 1;
+  }
+
+  /** saves from before the Wick: the settlers you already had tell how bright it would be */
+  private migrateWick(): void {
+    const p = this.p as Progress & { wick?: Progress['wick'] };
+    if (!p.wick) {
+      const has = (k: BuildingKind): boolean => p.buildings.some((b) => b.kind === k);
+      p.wick = { kindled: p.buildings.length > 0, lumen: has('archive') ? FLAME[3].need : has('forge') ? FLAME[2].need : 0 };
+    }
+    // settler deeds are gone: hand back what they were made of
+    const refund: Record<string, Record<string, number>> = {
+      deed_trade: { wood: 30, stone: 15, copperbar: 2 },
+      deed_forge: { stone: 30, wood: 10, ironbar: 6 },
+      deed_archive: { wood: 25, silverbar: 4, sporecap: 6 },
+    };
+    const back: Record<string, number> = {};
+    const scrub = (arr: Slot[]): void => {
+      for (let i = 0; i < arr.length; i++) {
+        const s = arr[i];
+        if (!s || ITEMS[s.id]) continue;
+        for (const [id, n] of Object.entries(refund[s.id] ?? {})) back[id] = (back[id] ?? 0) + n * s.n;
+        arr[i] = null;
+      }
+    };
+    scrub(p.inv);
+    for (const c of Object.values(p.chests)) scrub(c);
+    if (p.satchel) p.satchel.items = p.satchel.items.filter((s) => !!ITEMS[s.id]);
+    for (const [id, n] of Object.entries(back)) {
+      const left = give(p.inv, id, n);
+      if (left > 0) this.drops.push(new Drop(id, left, p.px, p.py - 20));
+    }
+  }
+
+  /** the Wick always stands on its plinth, with clear air around the lantern */
+  private ensureWick(): void {
+    const w = this.world;
+    for (let x = WICK_X - 2; x <= WICK_X + 2; x++) {
+      for (let y = WICK_Y - 6; y < WICK_Y; y++) {
+        if (x < WICK_X - 1 || x > WICK_X + 1) continue;
+        const i = w.idx(x, y);
+        if (w.fg[i] !== B.AIR) w.set(x, y, B.AIR);
+        w.obj[i] = Obj.NONE;
+        w.decor[i] = 0;
+      }
+      for (let y = WICK_Y; y < WICK_Y + 3; y++) {
+        if (w.rock(x, y)) continue;
+        w.obj[w.idx(x, y)] = Obj.NONE;
+        w.set(x, y, y === WICK_Y ? B.GRASS : B.DIRT);
+      }
+    }
+  }
+
+  /** the dark creature spawn rule: nothing comes to life inside the Wick's light */
+  private nearWick(tx: number, ty: number, pad: number): boolean {
+    const r = this.wickRadius();
+    return r > 0 && Math.abs(tx - WICK_X) < r + pad && ty < WICK_Y + 4 && ty > WICK_Y - r - pad;
+  }
+
+  kindleWick(): boolean {
+    if (this.p.wick.kindled) return false;
+    if (!hasAll(this.p, KINDLING)) {
+      this.toast(`The Wick needs ${KINDLING.wood} Wood and ${KINDLING.coal} Coal to catch.`, '#ffb08a');
+      return false;
+    }
+    for (const [id, n] of Object.entries(KINDLING)) takeItems(this.p, id, n);
+    this.p.wick.kindled = true;
+    this.flameUp(1);
+    return true;
+  }
+
+  /** offer one stack kind (or every glowing thing you carry) to the flame */
+  offerLumen(only?: string): number {
+    if (!this.p.wick.kindled) return 0;
+    const before = this.flame;
+    let gained = 0;
+    for (let i = 0; i < this.p.inv.length; i++) {
+      const s = this.p.inv[i];
+      if (!s) continue;
+      const v = LUMEN[s.id];
+      if (!v || (only && s.id !== only)) continue;
+      // anything a bounty still asks for stays in your pack when offering everything
+      if (!only && this.p.bounties.some((b) => b.kind === 'deliver' && b.target === s.id && b.have < b.need)) continue;
+      gained += v * s.n;
+      this.p.inv[i] = null;
+    }
+    if (gained <= 0) return 0;
+    this.p.wick.lumen += gained;
+    const pl = this.player;
+    this.text(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE - 30, `+${gained} Lumen`, '#ffe08a', true);
+    this.burst(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE, Math.min(60, 12 + gained / 4), ['#ffe08a', '#ffb84a', '#fff6d0'], 160, true);
+    audio.play('relic', { vol: 0.55, pitch: 1.2, vary: 0 });
+    void pl;
+    if (this.flame > before) this.flameUp(this.flame);
+    this.refresh();
+    return gained;
+  }
+
+  private flameUp(level: number): void {
+    const f = FLAME[level];
+    this.shake = Math.max(this.shake, 8);
+    this.burst(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE, 90, ['#ffe08a', '#ffb84a', '#ffffff', '#ff8a2a'], 280, true);
+    audio.play('upgrade', { vary: 0 });
+    this.toast(level === 1 ? 'The Wick catches! Light spills across the meadow.' : `The Wick burns ${f.name.toLowerCase()}!`, '#ffe08a');
+    this.toast(f.perk, '#ffe9a8');
+    this.settleMissing(true);
+    this.refresh();
+    this.onSave?.();
+    if (level === 1) this.hint('lumen', 'Anything that glows feeds the Wick: glowcaps, jade, amethyst, glowfin and finer things from deeper down. Bring them home and offer them (E at the Wick).');
+  }
+
+  /** every Wickpost in the world, shallowest first */
+  wickposts(): { x: number; y: number }[] {
+    const w = this.world;
+    const out: { x: number; y: number }[] = [];
+    for (let i = 0; i < w.obj.length; i++) if (w.obj[i] === Obj.WICKPOST) out.push({ x: i % w.w, y: Math.floor(i / w.w) });
+    return out.sort((a, b) => a.y - b.y);
+  }
+
+  /** follow the light: to the Wick (no target) or to a Wickpost */
+  travelTo(dest: { x: number; y: number } | null): void {
+    if (this.player.dead || this.flame < 1) return;
+    if (dest && this.world.getObj(dest.x, dest.y) !== Obj.WICKPOST) return;
+    this.ui.close();
+    audio.play('relic', { vol: 0.4, pitch: 0.8, vary: 0 });
+    this.fadeTo(() => {
+      if (dest) this.placePlayer(dest.x * TILE + TILE / 2 - 10, (dest.y + 1) * TILE);
+      else this.placePlayer((WICK_X - 2) * TILE + TILE / 2, WICK_Y * TILE);
+      this.ride = null;
+      if (this.hook) this.releaseHook(true);
+      if (this.fishing) this.fishing = null;
+      this.burst(this.player.cx, this.player.cy, 24, ['#ffe08a', '#fff6d0'], 120, true);
+    });
   }
 
   // ------------------------------------------------------------------ eating, items, bows
@@ -2226,7 +2431,7 @@ export class Game {
     // nothing to interact with: right click places or uses what you hold (Minecraft style)
     const hd = heldDef(this.p);
     if (!hd || this.player.useT > 0) return;
-    if (hd.kind === 'block' || hd.kind === 'wall' || hd.kind === 'place' || hd.kind === 'deed') this.placeHeld(hd, true);
+    if (hd.kind === 'block' || hd.kind === 'wall' || hd.kind === 'place') this.placeHeld(hd);
     else if (hd.kind === 'food') this.eat(hd);
     else if (hd.kind === 'use') this.useItem(hd.id);
   }
@@ -2234,6 +2439,10 @@ export class Game {
   private useObj(tx: number, ty: number, o: number): boolean {
     const w = this.world;
     switch (o) {
+      case Obj.WICKPOST:
+        this.wickFrom = { x: tx, y: ty };
+        this.ui.open('wick');
+        return true;
       case Obj.STORAGE:
         this.openChest = w.idx(tx, ty);
         if (!this.p.chests[String(this.openChest)]) this.p.chests[String(this.openChest)] = new Array<Slot>(CHEST_SLOTS).fill(null);
@@ -2480,7 +2689,7 @@ export class Game {
   }
 
   canCraft(r: Recipe, stations: Set<Station>): boolean {
-    return stations.has(r.at) && hasAll(this.p, r.need);
+    return stations.has(r.at) && (r.flame ?? 0) <= this.flame && hasAll(this.p, r.need);
   }
 
   craft(r: Recipe, times: number): number {
@@ -2501,7 +2710,7 @@ export class Game {
   }
 
   recipesFor(stations: Set<Station>): Recipe[] {
-    return RECIPES.filter((r) => stations.has(r.at));
+    return RECIPES.filter((r) => stations.has(r.at) && (r.flame ?? 0) <= this.flame);
   }
 
   // ------------------------------------------------------------------ inventory actions from the UI
@@ -2565,12 +2774,13 @@ export class Game {
           if (Math.random() < 0.6) e.provoked = false;
         }
       }
-      // Hollows crumble in daylight
-      if (e.def.nocturnal && !night) {
+      // Hollows crumble in daylight; nothing hostile (bar a boar) survives in the Wick's light
+      const wickBurn = !e.def.passive && e.def.behavior !== 'charger' && this.inWickLight(e.cx, e.cy);
+      if (wickBurn || (e.def.nocturnal && !night)) {
         const tx = Math.floor(e.cx / TILE);
         const ty = Math.floor(e.y / TILE);
-        if (ty < this.world.skyline[Math.max(0, Math.min(WORLD_W - 1, tx))]) {
-          e.hp -= dt * 12;
+        if (wickBurn || ty < this.world.skyline[Math.max(0, Math.min(WORLD_W - 1, tx))]) {
+          e.hp -= dt * (wickBurn ? 30 : 12);
           if (Math.random() < dt * 20) this.parts.push({ x: e.cx + (Math.random() - 0.5) * 16, y: e.y + Math.random() * e.h, vx: 0, vy: -40, life: 0.6, max: 0.6, color: Math.random() < 0.5 ? '#ff8a2a' : '#5a5050', size: 2, grav: -20, glow: false });
           if (e.hp <= 0) this.killEnemy(e);
         }
@@ -2608,6 +2818,7 @@ export class Game {
       const ty = gy - 1;
       if (w.solid(tx, ty) || w.solid(tx, ty - 1)) continue;
       if (this.p.buildings.some((b) => Math.abs(b.x - tx) < 6)) continue;
+      if (night && this.nearWick(tx, ty, 6)) continue;
       const lit = this.torchLightNear(tx, ty);
       if (night && lit) continue;
       const id = this.rng.pick(night ? NIGHT_SURFACE : DAY_SURFACE);
@@ -2625,7 +2836,7 @@ export class Game {
     for (let dy = -5; dy <= 5; dy++) {
       for (let dx = -6; dx <= 6; dx++) {
         const o = w.getObj(tx + dx, ty + dy);
-        if (o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.FURNACE || o === Obj.LAMP) return true;
+        if (o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.FURNACE || o === Obj.LAMP || o === Obj.WICKPOST) return true;
       }
     }
     return false;
@@ -2886,6 +3097,12 @@ export class Game {
     this.near = null;
     if (!pl.dead) {
       let best = 2.6 * TILE;
+      const wd = Math.abs((WICK_X + 0.5) * TILE - pl.cx);
+      if (wd < 2.4 * TILE && Math.abs(WICK_Y * TILE - (pl.y + pl.h)) < 70) {
+        best = wd;
+        this.wickFrom = null;
+        this.near = { id: 'wick', x: (WICK_X + 0.5) * TILE, y: WICK_Y * TILE - 150, label: this.p.wick.kindled ? 'Tend the Wick' : 'Kindle the Wick' };
+      }
       for (const b of this.p.buildings) {
         const d = Math.abs(b.x * TILE - pl.cx);
         if (d < best && Math.abs(b.y * TILE - (pl.y + pl.h)) < 60) {
@@ -2937,18 +3154,24 @@ export class Game {
       }
       this.hint('starve', 'You are starving! Eat berries, mushrooms or cooked meat (hold food and click).');
     } else if (p.food < 20) this.hint('hungry', 'You are getting hungry. Pick berries, hunt rabbits and boars, cook at a campfire.');
+    // the Wick nudges you along
+    if (!p.wick.kindled) {
+      if (hasAll(p, KINDLING)) this.hint('kindle', 'You have enough to kindle the Wick. Go to the great lantern in the meadow and press E.');
+      else if (p.clock > 0.42 && p.clock < 0.6) this.hint('cold', `Night is coming and the Wick is cold. Kindle it with ${KINDLING.wood} Wood and ${KINDLING.coal} Coal (dig down for coal) and the dark will keep its distance.`);
+    } else if (this.flame < MAX_FLAME && p.inv.some((s) => s && LUMEN[s.id])) this.hint('offer', 'You are carrying something that glows. Offer it to the Wick to grow the flame.');
     // healing
     if (pl.regenT > 0) pl.regenT -= dt;
     else if (p.food > 30 && pl.hp < this.st.maxHp) {
       let rate = p.food > 75 ? 0.9 : 0.4;
       if (this.nearObj(Obj.CAMPFIRE, 3)) rate += 1.6;
+      if (this.inWickLight(pl.cx, pl.cy)) rate += 0.8 + this.flame * 0.25;
       pl.hp = Math.min(this.st.maxHp, pl.hp + rate * dt);
       p.food = Math.max(0, p.food - rate * dt * 0.08);
     }
 
     // lantern oil burns underground
     if (underground && this.st.oilMax > 0 && pl.oil > 0) {
-      pl.oil = Math.max(0, pl.oil - dt / (1 + (p.skills.delving.lvl - 1) * 0.01));
+      pl.oil = Math.max(0, pl.oil - (dt * (this.flame >= MAX_FLAME ? 0.5 : 1)) / (1 + (p.skills.delving.lvl - 1) * 0.01));
       if (pl.oil < this.st.oilMax * 0.2 && !this.lowOilWarned) {
         this.lowOilWarned = true;
         this.toast('Your lantern is running low on oil!', '#ffc85a');
@@ -3065,6 +3288,11 @@ export class Game {
     if (this.boss) lights.push({ x: this.boss.x / TILE, y: this.boss.y / TILE, r: 0.9, g: 0.15, b: 0.3, radius: 9, cast: false });
     for (const b of this.bombs) lights.push({ x: b.x / TILE, y: b.y / TILE, r: 0.6, g: 0.45, b: 0.1, radius: 2, cast: false });
     for (const b of this.p.buildings) lights.push({ x: b.x, y: b.y - 1.5, r: 0.7, g: 0.5, b: 0.25, radius: 5, cast: false });
+    const wr = this.wickRadius();
+    if (wr > 0) {
+      const wf = 1 + Math.sin(this.time * 5.3) * 0.02 + Math.sin(this.time * 8.9) * 0.015;
+      lights.push({ x: WICK_GLOW.x, y: WICK_GLOW.y, r: 1.25, g: 0.92, b: 0.52, radius: wr * wf, cast: false });
+    }
     const sat = this.p.satchel;
     if (sat) lights.push({ x: sat.x / TILE, y: sat.y / TILE, r: 0.3, g: 0.6, b: 0.3, radius: 3, cast: false });
     this.light.compute(this.world, tx0, ty0, tw, th, lights, this.time, this.skyColor());
@@ -3287,6 +3515,8 @@ export function treeKind(x: number, seed: number): number {
 
 function objLabel(o: number, clock: number): string | null {
   switch (o) {
+    case Obj.WICKPOST:
+      return 'Travel by Wickpost';
     case Obj.STORAGE:
       return 'Open chest';
     case Obj.MINECART:

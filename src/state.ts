@@ -1,5 +1,6 @@
 import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
 import { TILE, INV_SIZE, DAY_LENGTH } from './constants';
+import { WickState, flameLevel } from './data/wick';
 
 export type SkillId = 'mining' | 'combat' | 'delving' | 'fishing';
 export interface Skill {
@@ -52,6 +53,8 @@ export interface Progress {
   /** storage chest contents keyed by tile index */
   chests: Record<string, Slot[]>;
   buildings: Building[];
+  /** the town lantern: kindled or cold, and all the Lumen it has been fed */
+  wick: WickState;
   skills: Record<SkillId, Skill>;
   catalogued: string[];
   relicsDropped: string[];
@@ -89,6 +92,7 @@ export function newProgress(seed: number, spawnX: number, spawnY: number): Progr
     equip: { armor: null, lantern: null, boots: null, charm1: null, charm2: null },
     chests: {},
     buildings: [],
+    wick: { kindled: false, lumen: 0 },
     skills: { mining: { lvl: 1, xp: 0 }, combat: { lvl: 1, xp: 0 }, delving: { lvl: 1, xp: 0 }, fishing: { lvl: 1, xp: 0 } },
     catalogued: [],
     relicsDropped: [],
@@ -263,7 +267,7 @@ export function computeStats(p: Progress): Stats {
   else if (pick) attack = pickPower * 2.2;
   attack *= (1 + (c - 1) * 0.03) * (has(p, 'r_skull') ? 1.1 : 1);
   return {
-    maxHp: 50 + p.hearts * 10 + (arm?.hp ?? 0) + (c - 1) * 2 + (has(p, 'r_rootheart') ? 15 : 0) + fx('hp'),
+    maxHp: 50 + p.hearts * 10 + (arm?.hp ?? 0) + (c - 1) * 2 + (has(p, 'r_rootheart') ? 15 : 0) + fx('hp') + (flameLevel(p.wick) >= 4 ? 20 : 0),
     reduce: Math.min(0.7, (arm?.reduce ?? 0) + fx('reduce')),
     pickTier: pick?.tier ?? 0,
     pickPower,

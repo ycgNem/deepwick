@@ -126,7 +126,7 @@ function startGame(fresh: boolean): void {
   input.blocked = false;
   if (fresh) {
     setTimeout(() => {
-      g.toast('You wake in a meadow with nothing but the clothes on your back.', '#ffe9a8');
+      g.toast('You wake beside the Wick, the great lantern of Deepwick. It has gone cold.', '#ffe9a8');
       g.toast('Hold the left mouse button on a tree trunk to punch out some wood. Esc shows all controls.', '#ffe9a8');
     }, 600);
   } else g.toast('Welcome back, delver.', '#ffe9a8');

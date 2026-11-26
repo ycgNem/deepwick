@@ -35,6 +35,8 @@ export enum Obj {
   MINECART,
   /** an oil lamp hanging in the old mine */
   LAMP,
+  /** a lantern post lit from the Wick: a light and a travel point */
+  WICKPOST,
 }
 
 /** objects that block movement */

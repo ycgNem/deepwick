@@ -11,6 +11,7 @@ import { Obj } from './world/world';
 import { BOSS_CENTER } from './world/gen';
 import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
 import { heldDef } from './state';
+import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME } from './data/wick';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -190,6 +191,7 @@ export class Renderer {
     this.drawBackdrop(g, ctx, camX, camY, vw, vh);
     this.terrain.drawBack(ctx, camX, camY, vw, vh);
     this.drawTrees(g, ctx, camX, camY, vw);
+    this.drawWick(g, ctx, camX, camY);
     this.drawBuildings(g, ctx, camX, camY);
     this.drawLiquids(g, ctx, camX, camY, vw, vh);
     this.terrain.drawFore(ctx, camX, camY, vw, vh);
@@ -545,6 +547,24 @@ export class Renderer {
     }
   }
 
+  /** the great lantern: cold iron until kindled, then the lit sprite burns brighter with every level */
+  private drawWick(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const cold = A.camp.wick;
+    const x = Math.round((WICK_X + 0.5) * TILE - cold.width / 2 - camX);
+    if (x > this.scene.width + 10 || x + cold.width < -10) return;
+    const y = Math.round(WICK_Y * TILE - (cold.height - (A.padBottom.wick ?? 0)) + 2 - camY);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(x + 10, Math.round(WICK_Y * TILE - camY) - 1, cold.width - 20, 3);
+    ctx.drawImage(cold, x, y);
+    const lvl = g.flame;
+    if (lvl > 0) {
+      const flick = 0.92 + Math.sin(g.time * 9.1) * 0.04 + Math.sin(g.time * 14.7) * 0.04;
+      ctx.globalAlpha = Math.min(1, (0.62 + lvl * 0.08) * flick);
+      ctx.drawImage(A.camp.wick_lit, x, y);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   private drawBuildings(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
     for (const b of g.p.buildings) {
       const info = BUILDING_INFO[b.kind];
@@ -720,6 +740,18 @@ export class Renderer {
         case Obj.LAMP:
           drawLampAt(ctx, sx, sy, Math.floor(g.time * 9 + tx * 3) % 3);
           break;
+        case Obj.WICKPOST: {
+          const img = A.camp.wickpost;
+          const top = sy + TILE - img.height + (A.padBottom.wickpost ?? 0) + 1;
+          ctx.drawImage(img, sx, top);
+          // the flame in the little lantern
+          const f = Math.floor(g.time * 10 + tx * 3) % 3;
+          ctx.fillStyle = ['#ffd75a', '#ffb02a', '#fff0a0'][f];
+          ctx.fillRect(sx + 22, top + 34 + (f === 1 ? 1 : 0), 3, 4);
+          ctx.fillStyle = '#fff6d0';
+          ctx.fillRect(sx + 23, top + 36, 1, 2);
+          break;
+        }
         case Obj.TORCH: {
           const s = iconSrc({ sheet: 'i16', idx: 21 });
           ctx.drawImage(s.img, s.sx, s.sy, 16, 16, sx + 8, sy + 10, 16, 16);
@@ -776,13 +808,6 @@ export class Renderer {
     } else if (hd.kind === 'place' && hd.obj !== undefined) {
       if (hd.obj === Obj.DOOR) this.drawObj(g, ctx, Obj.DOOR_TOP, sx, sy - TILE, h.x, 0.45);
       else this.drawObj(g, ctx, hd.obj, sx, sy, h.x, 0.45);
-    } else if (hd.kind === 'deed' && hd.deed) {
-      const info = BUILDING_INFO[hd.deed];
-      const img = A.camp[info.sprite];
-      const gy = groundRow(g, h.x);
-      ctx.globalAlpha = 0.35;
-      ctx.drawImage(img, Math.round(h.x * TILE - img.width / 2 - camX), Math.round(gy * TILE - (img.height - (A.padBottom[info.sprite] ?? 0)) - camY));
-      ctx.globalAlpha = 1;
     }
   }
 
@@ -1121,6 +1146,10 @@ export class Renderer {
           this.glowAt(ctx, sx + 16, sy + 20, 40 + Math.sin(g.time * 9 + tx) * 4, 'rgba(255,140,40,0.55)');
           if (Math.random() < 0.3) g.parts.push({ x: sx + camX + 10 + Math.random() * 12, y: sy + camY + 14, vx: (Math.random() - 0.5) * 10, vy: -30 - Math.random() * 30, life: 0.8, max: 0.8, color: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', size: 1, grav: 0, glow: true });
         } else if (o === Obj.FURNACE) this.glowAt(ctx, sx + 16, sy + 24, 22 + Math.sin(g.time * 7 + tx) * 2, 'rgba(255,120,30,0.45)');
+        else if (o === Obj.WICKPOST) {
+          const top = sy + TILE - A.camp.wickpost.height + (A.padBottom.wickpost ?? 0) + 1;
+          this.glowAt(ctx, sx + 23, top + 36, 26 + Math.sin(g.time * 6 + tx) * 2, 'rgba(255,205,120,0.55)');
+        }
         else if (o === Obj.HEART_CRYSTAL) this.glowAt(ctx, sx + 16, sy + 14, 22 + Math.sin(g.time * 3) * 3, 'rgba(255,90,160,0.5)');
         const fg = w.fg[i];
         if (fg === B.LUMENITE || fg === B.DIAMOND || fg === B.AMETHYST || fg === B.RUBY || fg === B.JADE || fg === B.RELIC_STONE || fg === B.GOLD || fg === B.SILVER) {
@@ -1135,6 +1164,25 @@ export class Renderer {
         }
         if (fg === B.LAVA && w.get(tx, ty - 1) !== B.LAVA) this.glowAt(ctx, sx + 16, sy + 8, 30, 'rgba(255,110,20,0.35)');
       }
+    }
+    // the Wick: a warm heart that swells with every level, shedding embers
+    const lvl = g.flame;
+    if (lvl > 0) {
+      const gx = WICK_GLOW.x * TILE - camX;
+      const gy = WICK_GLOW.y * TILE - camY;
+      const pulse = Math.sin(g.time * 2.2) * 3 + Math.sin(g.time * 9.3) * 1.5;
+      this.glowAt(ctx, gx, gy, 34 + lvl * 7 + pulse, 'rgba(255,190,90,0.55)');
+      this.glowAt(ctx, gx, gy, 16 + lvl * 2 + pulse * 0.5, 'rgba(255,240,190,0.7)');
+      if (lvl >= MAX_FLAME) this.glowAt(ctx, gx, gy, 90 + pulse * 2, 'rgba(255,220,140,0.18)');
+      // after dark, a warm pool on the ground marks how far the flame keeps you safe
+      const dark = 1 - daylight(g.p.clock);
+      if (dark > 0.2) {
+        const R = g.wickRadius() * TILE;
+        const pool = this.tinted(`rgba(255,170,80,${(0.1 + 0.16 * dark).toFixed(2)})`);
+        ctx.drawImage(pool, Math.round(gx - R), Math.round(WICK_Y * TILE - camY - R * 0.55), Math.round(R * 2), Math.round(R * 1.1));
+      }
+      if (Math.random() < 0.15 + lvl * 0.08)
+        g.parts.push({ x: WICK_GLOW.x * TILE + (Math.random() - 0.5) * 18, y: (WICK_GLOW.y - 1.3) * TILE, vx: (Math.random() - 0.5) * 16, vy: -35 - Math.random() * 40, life: 1.4, max: 1.4, color: Math.random() < 0.5 ? '#ffd070' : '#ff9a3a', size: 1, grav: -4, glow: true });
     }
     // building windows glow at night
     if (daylight(g.p.clock) < 0.6) {
@@ -1207,7 +1255,7 @@ export class Renderer {
     const h = g.hoverTile;
     if (!h.inReach) return;
     const hd = heldDef(g.p);
-    const placing = hd && (hd.kind === 'block' || hd.kind === 'wall' || hd.kind === 'place' || hd.kind === 'deed');
+    const placing = hd && (hd.kind === 'block' || hd.kind === 'wall' || hd.kind === 'place');
     let color: string | null = null;
     let ty = h.y;
     if (placing) color = 'rgba(255,215,90,0.55)';
@@ -1318,11 +1366,6 @@ function mirrored(img: HTMLImageElement): HTMLCanvasElement {
   g.scale(-1, 1);
   g.drawImage(img, 0, 0);
   return c;
-}
-
-function groundRow(g: Game, x: number): number {
-  for (let y = 0; y < g.world.h; y++) if (g.world.rock(x, y)) return y;
-  return g.world.h - 1;
 }
 
 function drawLadder(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {

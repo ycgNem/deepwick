@@ -34,7 +34,7 @@ export interface Assets {
 export const A = {} as Assets;
 
 const ENEMY_FILES = ['bat', 'slime', 'beetle', 'toad', 'spider', 'wisp', 'imp', 'slug', 'wraith', 'sentinel', 'boss', 'rabbit', 'boar', 'hollow'];
-const CAMP_FILES = ['npc_merchant', 'npc_smith', 'npc_archivist', 'shop', 'forge', 'archive', 'pine1', 'pine2', 'oak', 'birch', 'bed', 'rocks', 'minecart'];
+const CAMP_FILES = ['npc_merchant', 'npc_smith', 'npc_archivist', 'shop', 'forge', 'archive', 'pine1', 'pine2', 'oak', 'birch', 'bed', 'rocks', 'minecart', 'wick', 'wick_lit', 'wickpost'];
 const BG_FILES = ['surface', 'day'];
 
 function loadImg(src: string): Promise<HTMLImageElement> {
@@ -200,6 +200,12 @@ function buildCvIcons(): void {
   const [l, lc] = makeCanvas(32, 32);
   drawLampAt(lc, 0, 2, 1);
   A.cvIcons.push(l);
+  // the wickpost, shrunk from its 32x64 sprite to fit the slot
+  const [w, wc] = makeCanvas(32, 32);
+  wc.imageSmoothingEnabled = false;
+  // its pixels sit in x 5..29, y 17..61; scale that 24x44 box to 17x31
+  wc.drawImage(A.camp.wickpost, 5, 17, 24, 44, 8, 0, 17, 31);
+  A.cvIcons.push(w);
 }
 
 function measurePads(): void {

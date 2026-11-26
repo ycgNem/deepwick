@@ -26,9 +26,11 @@ export interface Recipe {
   n: number;
   need: Record<string, number>;
   at: Station;
+  /** the Wick's flame level this recipe needs (Wickposts are lit from it) */
+  flame?: number;
 }
 
-const r = (out: string, n: number, at: Station, need: Record<string, number>): Recipe => ({ out, n, at, need });
+const r = (out: string, n: number, at: Station, need: Record<string, number>, flame?: number): Recipe => ({ out, n, at, need, flame });
 
 export const RECIPES: Recipe[] = [
   // by hand
@@ -57,9 +59,7 @@ export const RECIPES: Recipe[] = [
   r('fishingrod', 1, 'workbench', { wood: 8, hide: 1 }),
   r('arrows', 10, 'workbench', { wood: 1, stone: 1 }),
   r('leathercoat', 1, 'workbench', { hide: 8, batwing: 4 }),
-  r('deed_trade', 1, 'workbench', { wood: 30, stone: 15, copperbar: 2 }),
-  r('deed_forge', 1, 'workbench', { stone: 30, wood: 10, ironbar: 6 }),
-  r('deed_archive', 1, 'workbench', { wood: 25, silverbar: 4, sporecap: 6 }),
+  r('wickpost', 2, 'workbench', { wood: 4, copperbar: 1, sporecap: 2 }, 2),
 
   // furnace
   r('copperbar', 1, 'furnace', { copper: 2 }),

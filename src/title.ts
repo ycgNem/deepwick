@@ -12,6 +12,7 @@ import { BLOCKS, B } from './data/blocks';
 import { propOf } from './data/props';
 import { World, Obj } from './world/world';
 import { TILE } from './constants';
+import { WICK_X } from './data/wick';
 import { applyGravity, moveBody } from './entities';
 import { Rng } from './rng';
 
@@ -57,6 +58,8 @@ export class TitleScene {
     const world = generateWorld(seed);
     const p = newProgress(seed, SPAWN_X, 20);
     p.clock = 0.585;
+    // the title shows Deepwick as it should be: the Wick burning bright, the town come home
+    p.wick = { kindled: true, lumen: 300 };
     p.equip.lantern = { id: 'ironlantern', n: 1 };
     p.inv[0] = { id: 'ironpick', n: 1 };
     p.inv[1] = { id: 'torch', n: 1 };
@@ -156,6 +159,10 @@ function walkRoom(w: World, x: number, y: number, dir: number, max: number): num
 function findShots(w: World, seed: number): Shot[] {
   const rng = new Rng(seed ^ 0x7a11);
   const shots: Shot[] = [];
+  // the heart of it all: the Wick burning over the town at dusk
+  const wx = WICK_X - 3;
+  const wy = groundAt(w, wx) - 1;
+  if (standable(w, wx, wy)) shots.push({ label: 'The Wick', sub: 'Deepwick, as the light comes home', biome: 0, x: wx, y: wy, face: 1, fx: WICK_X + 1, walk: walkRoom(w, wx, wy, 1, 4), torch: false });
   const entrance = findEntrance(w) ?? findMeadow(w);
   if (entrance) shots.push(entrance);
   const pond = findPond(w);

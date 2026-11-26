@@ -15,7 +15,6 @@ export type ItemKind =
   | 'ammo'
   | 'food'
   | 'use'
-  | 'deed'
   | 'armor'
   | 'lantern'
   | 'boots'
@@ -63,7 +62,6 @@ export interface ItemDef {
   jumps?: number;
   fallSafe?: number;
   fx?: CharmFx;
-  deed?: 'trade' | 'forge' | 'archive';
   /** fishing rods: how much quicker the bites, how wide the catch zone, how good the odds */
   rod?: number;
 }
@@ -74,7 +72,7 @@ const n32 = (idx: number): IconRef => ({ sheet: 'n32', idx });
 /** fishing icons (tools/gen_fish.py) */
 const f32 = (idx: number): IconRef => ({ sheet: 'f32', idx });
 const blk = (b: B): IconRef => ({ sheet: 'blk', idx: b });
-/** icons drawn at load time: 0 rail, 1 minecart, 2 mine lamp */
+/** icons drawn at load time: 0 rail, 1 minecart, 2 mine lamp, 3 wickpost */
 const cv = (idx: number): IconRef => ({ sheet: 'cv', idx });
 
 type Partial2 = Omit<ItemDef, 'id' | 'stack'> & { stack?: number };
@@ -197,10 +195,7 @@ const LIST: Record<string, Partial2> = {
   sapling: { name: 'Sapling', icon: n32(20), kind: 'place', obj: Obj.SAPLING, value: 1, desc: 'Plant on grass or dirt. Grows into a tree.' },
   seeds: { name: 'Wheat Seeds', icon: n32(52), kind: 'place', obj: Obj.CROP0, value: 1, desc: 'Plant on dirt or grass. Grows into wheat.' },
 
-  // ---- settler deeds
-  deed_trade: { name: 'Trading Post Deed', icon: n32(32), kind: 'deed', deed: 'trade', value: 0, desc: 'Place on open ground. Pell the merchant will build a trading post and move in.', stack: 1 },
-  deed_forge: { name: 'Forge Deed', icon: n32(33), kind: 'deed', deed: 'forge', value: 0, desc: 'Place on open ground. Brannoc the smith will set up his forge.', stack: 1 },
-  deed_archive: { name: 'Archive Deed', icon: n32(34), kind: 'deed', deed: 'archive', value: 0, desc: 'Place on open ground. Wren will open the Lantern Archive: relics and bounties.', stack: 1 },
+  wickpost: { name: 'Wickpost', icon: cv(3), kind: 'place', obj: Obj.WICKPOST, value: 6, desc: 'A little lantern on a post, lit from the Wick. Nothing spawns in its glow, and from any Wickpost you can travel home to the Wick and back down to the others.', stack: 20 },
 
   // ---- equipment
   leathercoat: { name: 'Leather Coat', icon: i32(17), kind: 'armor', hp: 15, reduce: 0.06, value: 20, desc: '+15 health, 6% less damage.' },
@@ -263,7 +258,7 @@ export function equipSlotOf(def: ItemDef): EquipSlot | null {
 
 /** what Pell will pay attention to */
 export function sellable(def: ItemDef): boolean {
-  return def.value > 0 && def.kind !== 'relic' && def.kind !== 'deed' && def.kind !== 'ammo';
+  return def.value > 0 && def.kind !== 'relic' && def.kind !== 'ammo';
 }
 
 export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
