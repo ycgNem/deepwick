@@ -15,6 +15,7 @@ import { MODES, MODE_IDS, ModeId, NERVE_FRAYED, NERVE_SHAKEN } from './data/nerv
 import { CHAPTERS, GOALS, ROMAN, goalDone } from './data/journal';
 import { prefs, HUD_SIZES } from './prefs';
 import { LOST } from './data/lost';
+import { MINERS } from './data/lampless';
 import { BREWS } from './data/brews';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
@@ -383,7 +384,7 @@ export class UI implements UIHooks {
     const fl = g.flame;
     const nextNeed = fl > 0 && fl < MAX_FLAME ? FLAME[fl + 1].need : 0;
     const prog = fl === 0 ? 'cold' : nextNeed ? `${fmt(g.p.wick.lumen)}/${fmt(nextNeed)}` : 'radiant';
-    h.wickChip.innerHTML = `<i class="fl l${fl}"></i>Wick ${fl > 0 ? `<b>${FLAME[fl].name}</b>` : ''}<small>${prog}</small>`;
+    h.wickChip.innerHTML = `<i class="fl l${fl}"></i>Wick ${fl > 0 ? `<b>${g.flameName()}</b>` : ''}<small>${g.dawnLit ? 'the heart is stilled' : prog}</small>`;
     h.wickChip.classList.toggle('cold', fl === 0);
     const pt = g.playerTile();
     const surf = g.world.surface[Math.max(0, Math.min(WORLD_W - 1, pt.x))];
@@ -718,10 +719,12 @@ export class UI implements UIHooks {
     const atPost = !!g.wickFrom;
     const lines = lvl === 0
       ? 'Iron and dusty glass. Once, the whole valley lived in its light.'
-      : lvl >= MAX_FLAME
+      : g.dawnLit
+        ? 'It burns with all the light the Gloamheart ever drank. There is no dark left in the valley that it cannot reach.'
+        : lvl >= MAX_FLAME
         ? 'The Wick burns as it did in the old days. The dark keeps well away.'
         : 'It drinks whatever glows. Bring the mountain’s light home.';
-    let html = `<div class="hd"><img class="portrait wickport" src="./assets/camp/${atPost ? 'wickpost' : lvl > 0 ? 'wick_lit' : 'wick'}.png" alt=""><div><h2>${atPost ? 'Wickpost' : 'The Wick'}</h2><div class="who">${lvl > 0 ? `${FLAME[lvl].name} · flame ${lvl} of ${MAX_FLAME}` : 'Cold'}</div><p class="line">${atPost ? 'A little of the Wick’s flame, carried down into the dark.' : lines}</p></div></div>`;
+    let html = `<div class="hd"><img class="portrait wickport" src="./assets/camp/${atPost ? 'wickpost' : lvl > 0 ? 'wick_lit' : 'wick'}.png" alt=""><div><h2>${atPost ? 'Wickpost' : 'The Wick'}</h2><div class="who">${g.dawnLit ? 'Dawn · the heart is stilled' : lvl > 0 ? `${FLAME[lvl].name} · flame ${lvl} of ${MAX_FLAME}` : 'Cold'}</div><p class="line">${atPost ? 'A little of the Wick’s flame, carried down into the dark.' : lines}</p></div></div>`;
     if (!atPost) {
       // the ladder of flame levels
       html += '<div class="flames">';
@@ -1033,12 +1036,31 @@ export class UI implements UIHooks {
     return order.join('');
   }
 
+  /** the epilogue: the town at dawn, who came home, whose lamps were carried up, and what it took */
   private victoryHtml(): string {
     const p = this.game.p;
     const mins = Math.floor(p.stats.time / 60);
-    return `<div class="victory-inner"><h1>The Gloamheart is stilled</h1><p>Light pours back up through the caves. Every torch you ever placed flares at once, and for the first time in a hundred years the mountain is quiet.</p>
-    <div class="log"><div><span>Time</span><b>${Math.floor(mins / 60)}h ${mins % 60}m</b></div><div><span>Days survived</span><b>${p.stats.days}</b></div><div><span>Blocks mined</span><b>${fmt(p.stats.mined)}</b></div><div><span>Creatures defeated</span><b>${fmt(p.stats.kills)}</b></div><div><span>Relics catalogued</span><b>${p.catalogued.length}/${RELICS.length}</b></div><div><span>Blackouts</span><b>${p.stats.deaths}</b></div></div>
-    <p class="dim">Pick up the Heart of Deepwick and bring it to Wren. The world is yours: keep building, keep delving.</p>
+    const home = (k: string): boolean => p.buildings.some((b) => b.kind === k);
+    const folk: [string, string, string, string][] = [
+      ['trade', 'Old Pell', 'keeps the Trading Post open late now, just to sit on the step and watch the square in the light.', 'never came back to the square. Perhaps now he will.'],
+      ['forge', LOST.forge.name, 'has his hammer going from first light. He says he can finally see his own work.', 'is still down there, by a fire burning low. The way up is lit now.'],
+      ['archive', LOST.archive.name, 'is writing all of it down: every relic, every lamp, every name.', 'is still waiting in the Grotto with her lantern. The way up is lit now.'],
+      ['stillroom', LOST.stillroom.name, 'still brews Steady Draughts, though nobody needs them now. She says the habit steadies her.', 'is still singing to herself in the Crystal Hollows. The way up is lit now.'],
+    ];
+    const rows = folk.map(([k, name, there, away]) => `<li class="${home(k) ? '' : 'away'}"><b>${name}</b> ${home(k) ? there : away}</li>`).join('');
+    const n = p.lampsHome ?? 0;
+    const names = MINERS.slice(0, Math.min(n, MINERS.length));
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] ?? '';
+    const lamps = n > 0
+      ? `<p>${n === 1 ? 'One lamp' : `${n} lamps`} came home with you, and the Wick said their names: <span class="names">${esc(list)}</span>${n > MINERS.length ? `, and ${n - MINERS.length} more nobody remembers` : ''}. Rest now.</p>`
+      : '<p class="away">The lamps of the lost miners still lie cold in the deep. Carry them home and the Wick will say their names.</p>';
+    return `<div class="victory-inner epilogue"><img class="dawnart" src="./assets/bg/dawn.png" alt="Deepwick at dawn, the Wick blazing in the square">
+    <h1>Dawn over Deepwick</h1>
+    <p class="lede">The Gloamheart is stilled. The light it drank for a hundred years ran back up through the mountain and into the Wick, and the sun came up over a town with its heart burning again.</p>
+    <h3>Who came home</h3><ul class="folk">${rows}</ul>
+    <h3>The lost miners</h3>${lamps}
+    <div class="log"><div><span>Time</span><b>${Math.floor(mins / 60)}h ${mins % 60}m</b></div><div><span>Days survived</span><b>${p.stats.days}</b></div><div><span>Deepest point</span><b>${p.maxDepth}m</b></div><div><span>Blocks mined</span><b>${fmt(p.stats.mined)}</b></div><div><span>Creatures defeated</span><b>${fmt(p.stats.kills)}</b></div><div><span>Relics catalogued</span><b>${p.catalogued.length}/${RELICS.length}</b></div><div><span>Blackouts</span><b>${p.stats.deaths}</b></div></div>
+    <p class="dim">The Gloam Tides are over. Nothing of the Gloam rises from the dark now, the Lampless are at rest, and the dark below frays your nerve half as fast. The mountain still holds its ore, relics and fish. The Heart of Deepwick came home with you: take it to the Lantern Archive.</p>
     <div class="row-actions"><button class="big" data-a="close">Keep playing</button></div></div>`;
   }
 

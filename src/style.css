@@ -1212,6 +1212,87 @@ kbd {
 .victory .row-actions {
   justify-content: center;
 }
+/* the epilogue */
+.win.victory {
+  width: min(720px, 94vw);
+}
+.epilogue .dawnart {
+  display: block;
+  width: 100%;
+  aspect-ratio: 344 / 192;
+  image-rendering: pixelated;
+  border: 3px solid #000;
+  box-shadow: 0 0 0 2px var(--edge);
+  margin: 0 0 12px;
+}
+.epilogue h1 {
+  margin: 4px 0 6px;
+}
+.epilogue .lede {
+  margin: 0 auto 10px;
+  max-width: 600px;
+}
+.epilogue h3 {
+  font-family: 'Silkscreen', monospace;
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: 12px 0 6px;
+}
+.epilogue .folk {
+  list-style: none;
+  padding: 0;
+  margin: 0 auto;
+  max-width: 600px;
+  text-align: left;
+}
+.epilogue .folk li {
+  margin: 4px 0;
+  padding-left: 14px;
+  position: relative;
+}
+.epilogue .folk li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.55em;
+  width: 5px;
+  height: 5px;
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(255, 215, 90, 0.8);
+}
+.epilogue .folk li.away,
+.epilogue p.away {
+  opacity: 0.62;
+}
+.epilogue .folk li.away::before {
+  background: #6a5a7a;
+  box-shadow: none;
+}
+.epilogue .names {
+  color: #ffe9a8;
+}
+.epilogue p {
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (max-height: 560px) {
+  .epilogue .dawnart {
+    width: auto;
+    height: 44vh;
+    margin: 0 auto 8px;
+  }
+}
+/* while the light climbs home, the HUD steps out of the way (all but the title card) */
+body.cine #hud > :not(#banner),
+body.cine #touch {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.8s;
+}
 
 /* ---------------- title / intro / loading ---------------- */
 #title,

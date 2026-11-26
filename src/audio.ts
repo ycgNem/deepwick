@@ -29,6 +29,7 @@ const SFX = [
   'heartdrink',
   'tendril',
   'ignite',
+  'lightrise',
   'fireball',
   'roar',
   'teleport',
@@ -57,7 +58,7 @@ const SFX = [
 ] as const;
 export type SfxId = (typeof SFX)[number];
 
-export type MusicId = 'camp' | 'cave' | 'cave2' | 'deep' | 'boss' | 'tide' | 'none';
+export type MusicId = 'camp' | 'cave' | 'cave2' | 'deep' | 'boss' | 'tide' | 'dawn' | 'none';
 const MUSIC_FILES: Record<Exclude<MusicId, 'none'>, string> = {
   camp: 'music_camp.mp3',
   cave: 'music_cave.mp3',
@@ -65,6 +66,7 @@ const MUSIC_FILES: Record<Exclude<MusicId, 'none'>, string> = {
   deep: 'music_deep.mp3',
   boss: 'music_boss.mp3',
   tide: 'music_tide.mp3',
+  dawn: 'music_dawn.mp3',
 };
 
 class AudioSystem {

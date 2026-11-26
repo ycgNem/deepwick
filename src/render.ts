@@ -11,13 +11,14 @@ import { Obj } from './world/world';
 import { BOSS_CENTER } from './world/gen';
 import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
 import { heldDef } from './state';
-import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME, FLAME } from './data/wick';
+import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME } from './data/wick';
 import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 import { prefs } from './prefs';
 import { LOST } from './data/lost';
 import { propRoof, PROP_REACH } from './world/cavein';
 import { dampAt, BREATH_MAX } from './world/flood';
 import { Mode as HeartMode } from './boss';
+import { POUR } from './ending';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -1407,7 +1408,11 @@ export class Renderer {
       if (tide) this.glowAt(ctx, gx, gy, 46 + pulse, 'rgba(150,70,220,0.3)');
       this.glowAt(ctx, gx, gy, (34 + lvl * 7) * gut + pulse, 'rgba(255,190,90,0.55)');
       this.glowAt(ctx, gx, gy, 16 + lvl * 2 + pulse * 0.5, 'rgba(255,240,190,0.7)');
-      if (lvl >= MAX_FLAME) this.glowAt(ctx, gx, gy, 90 + pulse * 2, 'rgba(255,220,140,0.18)');
+      if (lvl >= MAX_FLAME || g.dawnLit) this.glowAt(ctx, gx, gy, 90 + pulse * 2, 'rgba(255,220,140,0.18)');
+      if (g.dawnLit) {
+        this.glowAt(ctx, gx, gy, 140 + pulse * 3, 'rgba(255,240,200,0.12)');
+        this.glowAt(ctx, gx, gy, 24 + pulse * 0.6, 'rgba(255,255,240,0.6)');
+      }
       // after dark, a warm pool on the ground marks how far the flame keeps you safe
       const dark = 1 - daylight(g.p.clock);
       if (dark > 0.2) {
@@ -1445,6 +1450,7 @@ export class Renderer {
       }
     }
     if (g.boss) this.drawHeartGlow(g, ctx, camX, camY);
+    if (g.ending) this.drawEnding(g, ctx, camX, camY);
     const sat = g.p.satchel;
     if (sat) this.glowAt(ctx, sat.x - camX, sat.y - camY, 24, 'rgba(120,255,140,0.45)');
     for (const q of g.parts) {
@@ -1472,7 +1478,7 @@ export class Renderer {
     const t = f.t;
     const gx = WICK_GLOW.x * TILE - camX;
     const gy = WICK_GLOW.y * TILE - camY;
-    const big = f.level === 1 ? 1.25 : 1;
+    const big = f.level === 1 || g.dawnLit ? 1.25 : 1;
     // rays turning slowly about the glass
     const ra = (t < 0.35 ? t / 0.35 : Math.max(0, 1 - (t - 0.35) / 2.8)) * big;
     if (ra > 0) {
@@ -1491,7 +1497,7 @@ export class Renderer {
       }
     }
     // two rings racing out to the new edge of the light
-    const reach = FLAME[f.level].radius * TILE * 1.1;
+    const reach = g.wickRadius() * TILE * 1.1;
     for (const lag of [0, 0.22]) {
       const k = (t - lag) / 1.5;
       if (k <= 0 || k >= 1) continue;
@@ -1510,6 +1516,48 @@ export class Renderer {
       this.glowAt(ctx, gx, gy, (70 + 90 * Math.min(1, t / 0.5)) * big, 'rgba(255,225,160,0.85)');
     }
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * The ending: the Gloamheart's light gathering, then climbing up through the mountain as a
+   * bright mote with a long wake, and every placed light it passes flaring.
+   */
+  private drawEnding(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const en = g.ending;
+    if (!en) return;
+    const t = g.time;
+    for (const f of g.flaring) {
+      const fx = (f.x + 0.5) * TILE - camX;
+      const fy = (f.y + 0.35) * TILE - camY;
+      this.glowAt(ctx, fx, fy, 16 + 34 * f.k + Math.sin(t * 12 + f.x) * 2, `rgba(255,200,110,${(0.2 + 0.5 * f.k).toFixed(2)})`);
+      if (f.k > 0.6) this.glowAt(ctx, fx, fy, 8 + 10 * f.k, 'rgba(255,250,220,0.7)');
+    }
+    const x = en.x - camX;
+    const y = en.y - camY;
+    if (en.stage === 'pour') {
+      // its light gathering into one bright point
+      const k = Math.min(1, en.t / POUR);
+      this.glowAt(ctx, x, y, 30 + 110 * k * k, `rgba(255,236,190,${(0.25 + 0.5 * k).toFixed(2)})`);
+      this.glowAt(ctx, x, y, 10 + 26 * k, 'rgba(255,255,245,0.85)');
+      return;
+    }
+    if (en.stage !== 'climb') return;
+    // the wake: a column of light falling away below it
+    const len = 520;
+    for (let i = 0; i < 26; i++) {
+      const u = i / 26;
+      const a = (1 - u) * (1 - u);
+      const wd = Math.round(18 * (1 - u * 0.7));
+      ctx.fillStyle = `rgba(255,226,150,${(0.22 * a).toFixed(3)})`;
+      ctx.fillRect(Math.round(x - wd / 2), Math.round(y + u * len), wd, Math.ceil(len / 26) + 1);
+      ctx.fillStyle = `rgba(255,252,230,${(0.35 * a).toFixed(3)})`;
+      ctx.fillRect(Math.round(x - 2), Math.round(y + u * len), 4, Math.ceil(len / 26) + 1);
+    }
+    // the mote itself
+    const pulse = Math.sin(t * 14) * 4;
+    this.glowAt(ctx, x, y, 120 + pulse * 2, 'rgba(255,214,140,0.35)');
+    this.glowAt(ctx, x, y, 48 + pulse, 'rgba(255,240,200,0.8)');
+    this.glowAt(ctx, x, y, 16, 'rgba(255,255,255,0.95)');
   }
 
   /** Gloamlings: living shadow with a violet rim, and eyes that open before the body has formed */
@@ -1977,6 +2025,37 @@ export class Renderer {
   // ------------------------------------------------------------------ crisp text on the full-res canvas
   private drawOverlayText(g: Game, out: CanvasRenderingContext2D, camX: number, camY: number): void {
     const s = this.scale;
+    const en = g.ending;
+    if (en && en.stage === 'climb') {
+      const W = out.canvas.width;
+      const H = out.canvas.height;
+      const cx = Math.round(W / 2);
+      const cy = Math.round(H * 0.74);
+      const tx = Math.max(0, Math.min(g.world.surface.length - 1, Math.floor(en.x / TILE)));
+      const depth = Math.max(0, Math.floor(en.y / TILE) - g.world.surface[tx]);
+      out.textAlign = 'center';
+      out.textBaseline = 'middle';
+      const a = en.caption ? Math.min(1, en.captionT * 3) * Math.min(1, Math.max(0, 2.2 - en.captionT) * 1.5) : 0;
+      const big = Math.round(13 * s);
+      const small = Math.round(8 * s);
+      if (a > 0.01) {
+        out.globalAlpha = a;
+        out.font = `${big}px "Silkscreen", monospace`;
+        out.fillStyle = 'rgba(20,10,0,0.8)';
+        out.fillText(en.caption, cx + s, cy + s);
+        out.fillStyle = '#ffe9a8';
+        out.fillText(en.caption, cx, cy);
+      }
+      out.globalAlpha = 0.85;
+      out.font = `${small}px "DW Digits", "Pixelify Sans", monospace`;
+      const dl = depth > 0 ? `${depth}m` : 'Surface';
+      out.fillStyle = 'rgba(0,0,0,0.75)';
+      out.fillText(dl, cx + s, cy + big + s);
+      out.fillStyle = '#f4ead6';
+      out.fillText(dl, cx, cy + big);
+      out.globalAlpha = 1;
+      this.mark(0, cy - big, W, cy + big + small + s * 2);
+    }
     out.textAlign = 'center';
     out.textBaseline = 'middle';
     for (const t of g.texts) {

@@ -19,6 +19,7 @@ import { supported, propRoof, PROP_MAX, rockDamage } from './world/cavein';
 import { BREATH_MAX } from './world/flood';
 import { GUTTER_NEAR, GUTTER_WARN, GUTTER_LEN, GUTTER_DIM, LAMPLESS_CAP, MINERS, gutterGap } from './data/lampless';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
+import { Ending, DAWN_RADIUS, DAWN_FROM, DAWN_TO } from './ending';
 import {
   Progress,
   Stats,
@@ -368,6 +369,12 @@ export class Game {
   private tideT = 0;
   /** the Wick flaring up a level: a light wave, rays and a title card */
   flare: { t: number; level: number; from: number } | null = null;
+  /** the Gloamheart stilled: its light climbing home to the Wick (a cutscene; the delver waits) */
+  ending: Ending | null = null;
+  /** placed lights flaring as the climbing light goes by (tile, 0..1) */
+  flaring: { x: number; y: number; k: number }[] = [];
+  /** seconds left of the dawn theme */
+  private dawnMusicT = 0;
   /** the lost townsfolk in the world (rebuilt from the save) */
   souls: Soul[] = [];
   /** seconds left on Hesper's brews */
@@ -401,7 +408,11 @@ export class Game {
     this.ensureWick();
     this.settleMissing(false);
     this.syncSouls();
-    if (this.p.bossRewardPending) setTimeout(() => this.grantBossReward(this.player.cx, this.player.cy), 800);
+    if (this.p.bossRewardPending)
+      setTimeout(() => {
+        this.carryHome();
+        this.grantBossReward(this.player.cx, this.player.cy);
+      }, 800);
     this.snapCamera();
     // settle any water a migrated save left hanging
     for (let i = 0; i < this.world.fg.length; i++) if (this.world.fg[i] === B.WATER) this.waterQ.add(i);
@@ -521,7 +532,8 @@ export class Game {
     const menu = this.ui.isOpen();
     this.st = computeStats(this.p);
     this.player.hp = Math.min(this.player.hp, this.st.maxHp);
-    if (!menu) {
+    if (!menu && this.ending) this.updateEnding(dt);
+    else if (!menu) {
       this.updateClock(dt);
       this.updatePlayer(dt);
       this.updateFishing(dt);
@@ -537,7 +549,8 @@ export class Game {
     this.updateDrops(dt);
     if (this.flare && (this.flare.t += dt) > 3.6) this.flare = null;
     this.journalT -= dt;
-    if (this.journalT <= 0) {
+    if (this.dawnMusicT > 0) this.dawnMusicT -= dt;
+    if (this.journalT <= 0 && !this.ending) {
       this.journalT = 0.4;
       this.advanceJournal(true);
     }
@@ -613,6 +626,7 @@ export class Game {
    * The Wick gutters to half its reach, and Gloamlings come over the hills for its flame.
    */
   tideTonight(): boolean {
+    if (this.p.bossDefeated) return false;
     const d = this.p.stats.days;
     return this.flame >= 2 && d >= 3 && (d - 3) % 4 === 0;
   }
@@ -2572,7 +2586,7 @@ export class Game {
   }
 
   /** tick off every goal that is already met, in order; rewards only when it happens in play */
-  advanceJournal(reward: boolean): void {
+  advanceJournal(reward: boolean, banners = true): void {
     const p = this.p;
     while (p.journal < GOALS.length && goalDone(this, GOALS[p.journal].goal)) {
       const { goal, chapter } = GOALS[p.journal];
@@ -2586,6 +2600,7 @@ export class Game {
       this.text(this.player.cx, this.player.y - 22, `+${goal.coins} coins`, '#ffd75a');
       audio.play('upgrade', { pitch: 1.25, vol: 0.6, vary: 0 });
       const next = GOALS[p.journal];
+      if (!banners) continue;
       if (!next) this.ui.banner?.('The Journal is full', 'Every page is filled. The Wick burns, and Deepwick is yours.');
       else if (next.chapter !== chapter) this.ui.banner?.(`Chapter ${ROMAN[next.chapter]}`, CHAPTERS[next.chapter].title);
     }
@@ -2605,7 +2620,17 @@ export class Game {
 
   /** how far the Wick's light (and its protection) reaches, in tiles */
   wickRadius(): number {
-    return FLAME[this.flame].radius;
+    return this.dawnLit ? Math.max(DAWN_RADIUS, FLAME[this.flame].radius) : FLAME[this.flame].radius;
+  }
+
+  /** the heart is stilled and its light is home: the Wick burns at dawn (from the moment the light reaches it) */
+  get dawnLit(): boolean {
+    return this.p.bossDefeated && (!this.ending || this.ending.stage === 'dawn' || this.ending.stage === 'home');
+  }
+
+  /** the Wick's flame by name (for the HUD and its panel) */
+  flameName(): string {
+    return this.dawnLit ? 'Dawn' : FLAME[this.flame].name;
   }
 
   /** is this point (px) inside the Wick's light? */
@@ -3368,7 +3393,8 @@ export class Game {
 
   hurtPlayer(dmg: number, fromX: number, ignoreArmor = false): void {
     const pl = this.player;
-    if (pl.dead || pl.invuln > 0) return;
+    // nothing touches you while the light carries you home
+    if (pl.dead || pl.invuln > 0 || this.ending) return;
     const real = Math.max(1, Math.round(dmg * this.mode.dmg * (ignoreArmor ? 1 : 1 - this.st.reduce)));
     pl.hp -= real;
     this.p.nerve = Math.max(0, this.p.nerve - 4);
@@ -3388,7 +3414,7 @@ export class Game {
 
   private sap(dmg: number, label: string, color: string): void {
     const pl = this.player;
-    if (pl.dead) return;
+    if (pl.dead || this.ending) return;
     pl.hp -= dmg;
     pl.hurtT = 0.12;
     pl.regenT = 3;
@@ -3685,7 +3711,7 @@ export class Game {
   /** the Lampless walk from the Crystal Hollows down, coming out of the dark well away from your light */
   private trySpawnLampless(): void {
     const pl = this.player;
-    if (this.boss || pl.dead || this.onSurface()) return;
+    if (this.boss || this.p.bossDefeated || pl.dead || this.onSurface()) return;
     const pt = this.playerTile();
     const cap = LAMPLESS_CAP[biomeAt(pt.y).id] ?? 0;
     if (!cap) return;
@@ -3737,7 +3763,7 @@ export class Game {
   private trySpawnGloam(): void {
     const p = this.p;
     const pl = this.player;
-    if (this.boss || pl.dead || p.nerve >= NERVE_FRAYED || this.buffs.ward > 0) return;
+    if (this.boss || p.bossDefeated || pl.dead || p.nerve >= NERVE_FRAYED || this.buffs.ward > 0) return;
     const underground = !this.onSurface();
     if (!underground && !isNight(p.clock)) return;
     const base = p.nerve < 12 ? 4 : p.nerve < NERVE_SHAKEN ? 2 : 1;
@@ -3836,12 +3862,90 @@ export class Game {
     b.update(this, dt);
     if (b.dead && b.deathT > 3.2) {
       this.boss = null;
-      this.grantBossReward(b.x, b.y);
+      if (!this.ending) this.grantBossReward(b.x, b.y);
     }
+  }
+
+  // ------------------------------------------------------------------ the ending
+  private updateEnding(dt: number): void {
+    const en = this.ending;
+    if (!en) return;
+    const pl = this.player;
+    pl.vx = 0;
+    pl.vy = 0;
+    if (this.boss) this.updateBoss(dt);
+    this.flowWater(dt);
+    this.updateSouls(dt);
+    if (en.update(this, dt)) this.endEnding();
+  }
+
+  /** its light leaves it and climbs for the town (the sun is not up yet when it gets there) */
+  beginClimb(): void {
+    this.boss = null;
+    this.p.tide = null;
+    this.p.clock = DAWN_FROM;
+    this.dawnMusicT = 118;
+    this.shake = Math.max(this.shake, 6);
+  }
+
+  /** the light reaches the Wick: it takes it, the sun comes up, and the light carries you home */
+  beginDawn(): void {
+    const p = this.p;
+    const cold = !p.wick.kindled;
+    p.wick.kindled = true;
+    this.flare = { t: 0, level: MAX_FLAME, from: cold ? 0 : FLAME[this.flame].radius };
+    if (cold) this.settleMissing(true);
+    this.ui.banner?.('Dawn over Deepwick', 'The Gloamheart is stilled, and the light it drank has come home.');
+    audio.play('kindle', { vol: 1, vary: 0 });
+    audio.play('upgrade', { vary: 0 });
+    this.shake = Math.max(this.shake, 10);
+    this.burst(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE, 140, ['#ffe08a', '#ffb84a', '#ffffff', '#ff8a2a'], 340, true);
+    // carrying you home must not yank the camera off the Wick
+    const cx = this.camX;
+    const cy = this.camY;
+    this.carryHome();
+    this.camX = cx;
+    this.camY = cy;
+  }
+
+  /** the sky through the sunrise: step is the share of the dawn just gone by */
+  dawnClock(step: number): void {
+    const p = this.p;
+    const span = 1 - DAWN_FROM + DAWN_TO;
+    let c = p.clock + span * step;
+    if (c >= 1) {
+      c -= 1;
+      p.stats.days++;
+    }
+    p.clock = c < 0.5 ? Math.min(c, DAWN_TO) : c;
+  }
+
+  /** put the delver down beside the Wick, whole */
+  private carryHome(): void {
+    const pl = this.player;
+    this.placePlayer((WICK_X - 3) * TILE + TILE / 2, WICK_Y * TILE);
+    pl.facing = 1;
+    pl.hp = this.st.maxHp;
+    if (this.st.oilMax > 0) pl.oil = this.st.oilMax;
+    this.p.nerve = NERVE_MAX;
+    this.enemies = [];
+    this.shots = [];
+  }
+
+  private endEnding(): void {
+    this.ending = null;
+    this.flaring.length = 0;
+    document.body.classList.remove('cine');
+    this.advanceJournal(true, false);
+    this.grantBossReward(this.player.cx, this.player.cy);
   }
 
   /** the Gloamheart is stilled (it calls this as it dies) */
   onBossStilled(): void {
+    if (this.boss) {
+      this.ending = new Ending(this.boss.x, this.boss.y);
+      document.body.classList.add('cine');
+    }
     this.p.bossDefeated = true;
     this.p.bossRewardPending = true;
     this.shots = [];
@@ -4770,6 +4874,8 @@ export class Game {
       // company in the dark steadies you, and so does a Nightglass Tonic
       if (this.souls.some((s) => this.soulFollowing(s.kind))) drain *= 0.5;
       if (this.buffs.nightglass > 0) drain *= 0.5;
+      // with the heart stilled the dark below is only dark
+      if (p.bossDefeated) drain *= 0.5;
       rate = -drain * this.mode.nerve;
     }
     p.nerve = Math.max(0, Math.min(NERVE_MAX, p.nerve + rate * dt));
@@ -4831,6 +4937,15 @@ export class Game {
   }
 
   private updateCamera(dt: number): void {
+    const en = this.ending;
+    if (en) {
+      // the climb is already eased, so the camera rides it exactly; elsewhere it drifts after
+      const k = en.stage === 'climb' ? 1 : 1 - Math.exp(-dt * 2.6);
+      this.camX += (en.lookX - this.viewW / 2 - this.camX) * k;
+      this.camY += (en.lookY - this.viewH / 2 - this.camY) * k;
+      this.clampCamera();
+      return;
+    }
     const pl = this.player;
     const b = this.boss;
     const fight = !!b && !b.dead;
@@ -4909,6 +5024,24 @@ export class Game {
       const b = this.burning[k];
       lights.push({ x: b.x + 0.5, y: b.y + 0.5, r: 1.3, g: 0.75, b: 0.3, radius: 3.6 * Math.min(1, b.t * 3), cast: false });
     }
+    const en = this.ending;
+    this.flaring.length = 0;
+    if (en && (en.stage === 'pour' || en.stage === 'climb')) {
+      const gather = en.stage === 'pour' ? Math.min(1, en.t / 3.4) : 1;
+      lights.push({ x: en.x / TILE, y: en.y / TILE, r: 1.5, g: 1.3, b: 0.95, radius: 4 + 8 * gather, cast: false });
+      // every light you left on the way down flares as it goes by
+      const ly0 = en.y / TILE;
+      for (let y = ty0; y < ty0 + th; y++) {
+        const k = en.stage === 'climb' ? Math.max(0, 1 - Math.abs(y - ly0) / 16) : 0.5 * gather;
+        if (k <= 0.05) continue;
+        for (let x = tx0; x < tx0 + tw; x++) {
+          const o = this.world.getObj(x, y);
+          if (o !== Obj.TORCH && o !== Obj.LAMP && o !== Obj.WICKPOST && o !== Obj.CAMPFIRE) continue;
+          this.flaring.push({ x, y, k });
+          lights.push({ x: x + 0.5, y: y + 0.4, r: 1.2, g: 0.86, b: 0.5, radius: 3 + 6 * k, cast: false });
+        }
+      }
+    }
     this.light.compute(this.world, tx0, ty0, tw, th, lights, this.time, this.skyColor());
     this.light.finish(this.world);
   }
@@ -4917,6 +5050,9 @@ export class Game {
     if (this.player.dead) return;
     let m: MusicId;
     if (this.boss && !this.boss.dead) m = 'boss';
+    // a held breath while the heart pours out its light, then the dawn theme as it climbs
+    else if (this.ending?.stage === 'pour') m = 'none';
+    else if (this.dawnMusicT > 0) m = 'dawn';
     else if (this.p.tide && this.onSurface()) m = 'tide';
     else if (this.biome === 0 && this.onSurface()) m = isNight(this.p.clock) ? 'cave' : 'camp';
     else if (this.biome >= 3) m = 'deep';
