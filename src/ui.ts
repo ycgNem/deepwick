@@ -399,7 +399,8 @@ export class UI implements UIHooks {
       sk += `<div class="sk${up ? ' up' : ''}" title="${SKILL_INFO[id].perk(s.lvl)}"><b style="color:${SKILL_INFO[id].color}">${SKILL_INFO[id].name} ${s.lvl}${up ? ' <em>\u25b2</em>' : ''}</b><i><u style="width:${frac * 100}%;background:${SKILL_INFO[id].color}"></u></i></div>`;
     }
     h.skills.innerHTML = sk;
-    const bossOn = !!g.boss && !g.boss.dead;
+    // its bar comes in once the title card has cleared, so the two never sit on top of each other
+    const bossOn = !!g.boss && !g.boss.dead && g.boss.intro <= 0 && g.boss.t > 1.4;
     const tide = g.p.tide;
     h.bossBar.classList.toggle('show', bossOn || !!tide);
     h.bossBar.classList.toggle('tide', !bossOn && !!tide);
