@@ -333,6 +333,8 @@ export class Game {
   gloom = 0;
   fade = 0;
   fadeAction: (() => void) | null = null;
+  /** set once this world has been left for the title: its timers stand down */
+  retired = false;
   spawnT = 1;
   saveT = 30;
   tickT = 0;
@@ -416,11 +418,22 @@ export class Game {
     this.ensureWick();
     this.settleMissing(false);
     this.syncSouls();
-    if (this.p.bossRewardPending)
+    if (this.p.bossRewardPending) {
+      // a save taken mid-ending wakes to the dawn it was heading for
+      const cold = !p.wick.kindled;
+      p.wick.kindled = true;
+      p.tide = null;
+      if (p.clock > DAWN_TO) p.stats.days++;
+      p.clock = DAWN_TO;
+      this.wasNight = false;
+      this.weather.clear();
+      if (cold) this.settleMissing(true);
       setTimeout(() => {
+        if (this.retired) return;
         this.carryHome();
         this.grantBossReward(this.player.cx, this.player.cy);
       }, 800);
+    }
     this.snapCamera();
     // settle any water a migrated save left hanging
     for (let i = 0; i < this.world.fg.length; i++) if (this.world.fg[i] === B.WATER) this.waterQ.add(i);
@@ -556,6 +569,7 @@ export class Game {
       this.randomTicks(dt);
     }
     this.updateDrops(dt);
+    this.weather.fade(dt);
     if (this.flare && (this.flare.t += dt) > 3.6) this.flare = null;
     this.journalT -= dt;
     if (this.dawnMusicT > 0) this.dawnMusicT -= dt;
@@ -3996,6 +4010,15 @@ export class Game {
 
   /** the Gloamheart is stilled (it calls this as it dies) */
   onBossStilled(): void {
+    const pl = this.player;
+    if (pl.dead) {
+      pl.dead = false;
+      pl.deadT = 0;
+      pl.hp = Math.max(1, pl.hp);
+    }
+    this.fadeAction = null;
+    this.fade = 0;
+    this.p.tide = null;
     if (this.boss) {
       this.ending = new Ending(this.boss.x, this.boss.y);
       document.body.classList.add('cine');

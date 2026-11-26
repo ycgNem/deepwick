@@ -962,12 +962,14 @@ export class UI implements UIHooks {
     // while the Wick is cold, the day is a clock: how long until dark, or until dawn
     if (!flash && !g.p.wick.kindled && !g.ending) {
       const c = g.p.clock;
-      const left = c < 0.6 ? (0.6 - c) * DAY_LENGTH : c < 0.96 ? (0.96 - c) * DAY_LENGTH : 0;
+      // night runs 0.6 to 0.96; from dawn the next sundown is the following day's
+      const night = c >= 0.6 && c < 0.96;
+      const left = night ? (0.96 - c) * DAY_LENGTH : ((c < 0.6 ? 0.6 : 1.6) - c) * DAY_LENGTH;
       if (left > 0) {
         const m = Math.floor(left / 60);
         const s = Math.floor(left % 60);
         const t = `${m}:${String(s).padStart(2, '0')}`;
-        html += c < 0.6 ? `<div class="sundown${left < 75 ? ' urgent' : ''}"><i class="sun"></i>Sundown in ${t}</div>` : `<div class="sundown night"><i class="moon"></i>Hold out: dawn in ${t}</div>`;
+        html += !night ? `<div class="sundown${left < 75 ? ' urgent' : ''}"><i class="sun"></i>Sundown in ${t}</div>` : `<div class="sundown night"><i class="moon"></i>Hold out: dawn in ${t}</div>`;
       }
     }
     if (html !== this.lastGoal) {

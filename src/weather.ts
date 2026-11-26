@@ -78,6 +78,12 @@ export class Weather {
     this.k = 0;
   }
 
+  /** the flash and the bolt die away every frame, menus open or not */
+  fade(dt: number): void {
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 4);
+    if (this.bolt && (this.bolt.t += dt) > 0.35) this.bolt = null;
+  }
+
   update(g: Game, dt: number): void {
     this.k = Math.min(1, this.k + dt / 20);
     this.left -= dt;
@@ -90,8 +96,6 @@ export class Weather {
       this.set(g, 'fog', 110 + Math.random() * 80);
     }
     this.lastClock = c;
-    if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 4);
-    if (this.bolt && (this.bolt.t += dt) > 0.35) this.bolt = null;
     // lightning, now and then, once a storm has properly come in
     if (this.kind === 'storm' && this.k > 0.6) {
       this.boltT -= dt;

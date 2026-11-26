@@ -64,7 +64,9 @@ async function boot(): Promise<void> {
   };
   ui.onQuit = () => {
     if (game && ui) saveGame(game.saveSnapshot(ui.cursorStack()), game.world, metaOf(game));
+    if (game) game.retired = true;
     game = null;
+    document.body.classList.remove('cine');
     hud.classList.remove('show');
     audio.music('none');
     audio.rain(0);
@@ -186,7 +188,8 @@ function showSlots(): void {
       const mins = Math.floor(m.time / 60);
       const when = ago(m.at);
       html += `<div class="wcard"><div class="wcard-map">${m.map ? `<img src="${m.map}" alt="">` : ''}</div><div class="wcard-info"><b>World ${n}</b><span>Day ${m.day} \u00b7 Wick <em>${m.flame}</em></span><span>Deepest ${m.deepest}m \u00b7 ${Math.floor(mins / 60)}h ${mins % 60}m played</span><span class="chips"><i>${MODES[m.mode as ModeId]?.name ?? 'Delver'}</i>${m.stilled ? '<i class="dawn">Heart stilled</i>' : ''}${when ? `<small>${when}</small>` : ''}</span></div><div class="wcard-btns"><button class="big" data-play="${n}">Play</button><button class="ghost" data-del="${n}">Delete</button></div></div>`;
-    } else html += `<div class="wcard empty"><div class="wcard-map"></div><div class="wcard-info"><b>World ${n}</b><span>An untouched valley, the Wick cold.</span></div><div class="wcard-btns"><button class="big" data-new="${n}">New World</button></div></div>`;
+    } else if (hasSave(n)) html += `<div class="wcard"><div class="wcard-map"></div><div class="wcard-info"><b>World ${n}</b><span>A world in progress (its card could not be read).</span></div><div class="wcard-btns"><button class="big" data-play="${n}">Play</button><button class="ghost" data-del="${n}">Delete</button></div></div>`;
+    else html += `<div class="wcard empty"><div class="wcard-map"></div><div class="wcard-info"><b>World ${n}</b><span>An untouched valley, the Wick cold.</span></div><div class="wcard-btns"><button class="big" data-new="${n}">New World</button></div></div>`;
   }
   list.innerHTML = html;
   title.classList.add('picking');
@@ -247,6 +250,7 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
     p.mode = mode;
     loaded = { p, world };
   }
+  document.body.classList.remove('cine');
   const g = new Game(input, ui, loaded.p, loaded.world);
   game = g;
   input.touchUse = (x, y): boolean => g.touchWantsUse(x, y);
@@ -254,7 +258,7 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   ui.attach(g);
   renderer.resize(g);
   g.onSave = () => {
-    if ((window as { __noSave?: boolean }).__noSave || !ui) return;
+    if ((window as { __noSave?: boolean }).__noSave || !ui || g.retired) return;
     saveGame(g.saveSnapshot(ui.cursorStack()), g.world, metaOf(g));
   };
   if (fresh) g.onSave();

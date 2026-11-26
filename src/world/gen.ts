@@ -23,6 +23,7 @@ function inBand(y: number, offs: Int8Array, x: number): boolean {
 }
 
 export function generateWorld(seed: number): World {
+  undig = new Map();
   const w = new World();
   w.seed = seed;
   const rng = new Rng(seed);
@@ -264,6 +265,9 @@ export function generateWorld(seed: number): World {
   w.updateAllSky();
   // ---- bad ground: loose rock in patches, around rich ore, over the old drifts --------------
   seedLoose(w, seed);
+  // the drifts that came up too close under the grass are filled back in
+  restoreUndug(w);
+  w.updateAllSky();
   w.dirty.clear();
   return w;
 }
@@ -646,15 +650,52 @@ function buildMines(w: World, rng: Rng): void {
   }
 }
 
+/**
+ * Cells an old drift dug that should never have been opened, as they were before, put back once
+ * the world is finished. A drift is dug from its own shaft's hilltop, so where it runs in under
+ * lower ground it would break out through the grass (once it opened right under the spawn). It is
+ * still dug in full while the world is made, so every random call and every later step sees
+ * exactly what it always did: the rest of each world (ponds, relics, the surface heights and
+ * water pockets old saves rebuild from the seed) comes out the same as before this was fixed.
+ */
+let undig: Map<number, [number, number, number, number, number]> | null = null;
+
+function keepCell(w: World, x: number, y: number): void {
+  if (!undig || !w.inside(x, y)) return;
+  const i = w.idx(x, y);
+  if (!undig.has(i)) undig.set(i, [w.fg[i], w.wall[i], w.decor[i], w.obj[i], w.rail[i]]);
+}
+
+function restoreUndug(w: World): void {
+  if (!undig) return;
+  for (const [i, [fg, wall, decor, obj, rail]] of undig) {
+    w.fg[i] = fg;
+    w.wall[i] = wall;
+    w.decor[i] = decor;
+    w.obj[i] = obj;
+    w.rail[i] = rail;
+    w.gas[i] = 0;
+    w.loose[i] = 0;
+  }
+  undig = null;
+}
+
 function buildDrift(w: World, rng: Rng, x0: number, floorY: number, dir: number): void {
   const len = rng.int(16, 34);
+  // how far in it can go before it comes up too close under the grass
+  let dug = -1;
+  for (let k = 0, x = x0; k < len; k++, x += dir) {
+    if (x < 5 || x > w.w - 6) break;
+    if (floorY - 3 <= w.surface[x] + 3) {
+      dug = k;
+      break;
+    }
+  }
   const xs: number[] = [];
   let x = x0;
   for (let k = 0; k < len; k++) {
     if (x < 5 || x > w.w - 6) break;
-    // a drift is dug from its own shaft's hilltop: where it runs in under lower ground it stops
-    // short rather than break out through the grass (once it broke out under the spawn itself)
-    if (floorY - 3 <= w.surface[x] + 3) break;
+    if (dug >= 0 && k >= dug) for (let yy = floorY - 3; yy <= floorY + 1; yy++) keepCell(w, x, yy);
     for (let yy = floorY - 2; yy <= floorY; yy++) carveMine(w, x, yy);
     // keep a floor under the rails: plank bridges over gaps
     const fi = w.idx(x, floorY + 1);
@@ -684,13 +725,12 @@ function buildDrift(w: World, rng: Rng, x0: number, floorY: number, dir: number)
   // a store room at the far end
   if (rng.chance(0.55)) {
     const rw = rng.int(5, 7);
-    // (the random calls stay in the same order, so worlds that never hit this are unchanged)
-    let room = true;
+    let room = dug < 0;
     for (let k = 1; k <= rw; k++) {
       const rx = end + dir * k;
       if (rx < 5 || rx > w.w - 6 || floorY - 4 <= w.surface[rx] + 3) room = false;
     }
-    if (!room) return;
+    if (!room) for (let k = 1; k <= rw; k++) for (let yy = floorY - 3; yy <= floorY + 1; yy++) keepCell(w, end + dir * k, yy);
     for (let k = 1; k <= rw; k++) {
       const rx = end + dir * k;
       for (let yy = floorY - 3; yy <= floorY; yy++) carveMine(w, rx, yy);
