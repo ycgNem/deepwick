@@ -170,6 +170,7 @@ export class Weather {
     if (near) {
       this.bolt = { pts, t: 0 };
       this.flash = 1;
+      g.tally('bolt');
     } else this.flash = Math.max(this.flash, 0.35);
     // the sound comes after the light, later the further off it is
     const d = Math.abs(x - pl.cx) / TILE;

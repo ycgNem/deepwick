@@ -16,6 +16,7 @@ import { CHAPTERS, GOALS, ROMAN, goalDone } from './data/journal';
 import { prefs, HUD_SIZES } from './prefs';
 import { LOST } from './data/lost';
 import { MINERS } from './data/lampless';
+import { FEATS } from './data/feats';
 import { BREWS } from './data/brews';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
@@ -206,13 +207,19 @@ export class UI implements UIHooks {
     };
   }
 
-  private goalQ: { text: string; coins: number }[] = [];
+  private goalQ: { text: string; coins: number; feat?: boolean }[] = [];
   private goalFlashUntil = 0;
-  private goalFlash: { text: string; coins: number } | null = null;
+  private goalFlash: { text: string; coins: number; feat?: boolean } | null = null;
+  private journalTab = 'story';
 
   /** a Journal page ticked off: the tracker shows it done for a moment before turning the page */
   goalDone(text: string, coins: number): void {
     this.goalQ.push({ text, coins });
+  }
+
+  /** a Feat earned: the tracker shows it the same way, in gold */
+  feat(name: string, coins: number): void {
+    this.goalQ.push({ text: name, coins, feat: true });
   }
 
   /** skills that just levelled, and when */
@@ -999,7 +1006,8 @@ export class UI implements UIHooks {
     }
     const flash = now < this.goalFlashUntil ? this.goalFlash : null;
     h.goal.classList.toggle('done', !!flash);
-    if (flash) html = `<small>Journal \u00b7 done</small><b>\u2713 ${flash.text}</b><span>+${flash.coins} coins</span>`;
+    h.goal.classList.toggle('feat', !!flash?.feat);
+    if (flash) html = `<small>${flash.feat ? 'Feat earned' : 'Journal \u00b7 done'}</small><b>${flash.feat ? '\u2605' : '\u2713'} ${flash.text}</b><span>+${flash.coins} coins</span>`;
     else if (cur) {
       const [have, need] = cur.goal.progress(g);
       html = `<small>Journal \u00b7 ${ROMAN[cur.chapter]}</small><b>${cur.goal.text}</b>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><span>${fmt(have)} / ${fmt(need)}</span>` : ''}`;
@@ -1042,7 +1050,11 @@ export class UI implements UIHooks {
     const g = this.game;
     const at = g.p.journal;
     const cur = GOALS[at];
-    let html = `<div class="hd"><div><h2>Journal</h2><p class="line">${cur ? `Chapter ${ROMAN[cur.chapter]}: ${CHAPTERS[cur.chapter].title}` : 'Every page filled. The Wick burns, and Deepwick is yours.'}</p></div></div><div class="journal">`;
+    const got = g.p.feats ?? [];
+    let html = `<div class="hd"><div><h2>Journal</h2><p class="line">${cur ? `Chapter ${ROMAN[cur.chapter]}: ${CHAPTERS[cur.chapter].title}` : 'Every page filled. The Wick burns, and Deepwick is yours.'}</p></div></div>`;
+    html += `<div class="tabs"><button class="${this.journalTab === 'story' ? 'on' : ''}" data-a="jtab" data-v="story">The story</button><button class="${this.journalTab === 'feats' ? 'on' : ''}" data-a="jtab" data-v="feats">Feats (${got.length}/${FEATS.length})</button></div>`;
+    if (this.journalTab === 'feats') return html + this.featsHtml();
+    html += '<div class="journal">';
     let k = 0;
     CHAPTERS.forEach((c, ci) => {
       const open = !cur || ci <= cur.chapter;
@@ -1061,6 +1073,19 @@ export class UI implements UIHooks {
       html += '</div>';
     });
     return html + '</div>';
+  }
+
+  /** every Feat: the earned ones in gold, the rest with how far along you are */
+  private featsHtml(): string {
+    const g = this.game;
+    const got = g.p.feats ?? [];
+    const rows = FEATS.map((f) => {
+      const done = got.includes(f.id);
+      const [have, need] = done ? [1, 1] : f.progress(g);
+      const bar = !done && need > 1 ? `<div class="gbar"><em style="width:${Math.round((Math.min(have, need) / need) * 100)}%"></em></div><small>${fmt(Math.min(have, need))} / ${fmt(need)}</small>` : '';
+      return `<div class="fcard${done ? ' done' : ''}"><i>${done ? '\u2605' : '\u2606'}</i><div class="ft"><b>${f.name}</b><p>${f.desc}</p>${bar}</div><small class="rw">+${fmt(f.coins)}</small></div>`;
+    });
+    return `<div class="feats">${rows.join('')}</div><p class="hint">Feats are yours to chase whenever you like: none of them are needed to finish the story.</p>`;
   }
 
   private pauseHtml(): string {
@@ -1434,6 +1459,9 @@ export class UI implements UIHooks {
         break;
       case 'atab':
         this.archiveTab = t.dataset.v ?? 'relics';
+        break;
+      case 'jtab':
+        this.journalTab = t.dataset.v ?? 'story';
         break;
       case 'sell':
         g.sellSlot(Number(t.dataset.i), Number(t.dataset.n));

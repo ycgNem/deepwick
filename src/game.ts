@@ -22,6 +22,7 @@ import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, Mo
 import { Ending, DAWN_RADIUS, DAWN_FROM, DAWN_TO } from './ending';
 import { Weather } from './weather';
 import { CAPTIONS } from './captions';
+import { FEATS, FISH } from './data/feats';
 import type { SfxId } from './audio';
 import {
   Progress,
@@ -108,6 +109,8 @@ export interface UIHooks {
   victory(): void;
   /** a big centred title card */
   banner?(title: string, sub: string): void;
+  /** a Feat earned */
+  feat?(name: string, coins: number): void;
   /** a sound written out on screen; dir is where it comes from ('l', 'r', 'u', 'd' or '') */
   caption?(key: string, text: string, warn: boolean, dir: string): void;
 }
@@ -582,6 +585,7 @@ export class Game {
     if (this.journalT <= 0 && !this.ending) {
       this.journalT = 0.4;
       this.advanceJournal(true);
+      this.checkFeats();
     }
     this.updateShots(dt);
     this.updateBombs(dt);
@@ -1378,6 +1382,10 @@ export class Game {
       this.text(pl.cx, pl.y - 26, `A sunken purse! +${n}`, '#ffd75a', true);
     } else {
       this.giveOrDrop(f.catchId, 1);
+      if (FISH.includes(f.catchId)) {
+        this.tally('fish');
+        this.tally('fish_' + f.catchId);
+      }
       const def = ITEMS[f.catchId];
       const col = f.tier >= 2 ? '#ffd75a' : f.tier === 1 ? '#8af0d0' : f.tier < 0 ? '#b0a090' : '#e8f0ff';
       this.text(pl.cx, pl.y - 26, `${def?.name ?? f.catchId}!`, col, f.tier >= 1);
@@ -2409,6 +2417,7 @@ export class Game {
     }
     if (!ok) return;
     takeItems(this.p, hd.id, 1);
+    if (hd.id === 'torch' || hd.id === 'prop' || hd.id === 'wickpost') this.tally('placed_' + hd.id);
     audio.play(hd.id === 'torch' ? 'torch' : 'place', { vol: 0.7 });
     pl.swinging = true;
     pl.swingT = 0.4;
@@ -4628,6 +4637,7 @@ export class Game {
     done.push(key);
     const n = 1 + Math.min(2, Math.floor(body.size / 20));
     for (let k = 0; k < n; k++) this.drops.push(new Drop('pearl', 1, cx + (Math.random() - 0.5) * 16, cy + (Math.random() - 0.5) * 10));
+    this.tally('pearls', n);
     this.burst(cx, cy, 10, ['#e8f4ff', '#cfe8ff', '#ffffff'], 90, true);
     this.hint('pearl', 'Cave pearls! They grow in water sealed in the rock and hold a soft light: the Wick takes them as Lumen. Weeping rock is worth breaking into, if you are ready for the flood.');
   }
@@ -4647,6 +4657,7 @@ export class Game {
       if (this.gaspReady) {
         this.gaspReady = false;
         audio.play('gasp', { vol: 0.75 });
+        this.tally('gasp');
       }
       this.breath = Math.min(BREATH_MAX, this.breath + dt * 5);
       this.drownT = 0;
@@ -5172,6 +5183,35 @@ export class Game {
     const wx = this.weather;
     audio.bed('meadow_day', out * day * (1 - 0.9 * wx.rain) * (1 - 0.5 * wx.fog), 0.34);
     audio.bed('meadow_night', out * (1 - day) * (1 - 0.8 * wx.rain) * (this.p.tide ? 0.15 : 1), 0.32);
+  }
+
+  /** a running count toward a Feat */
+  tally(key: string, n = 1): void {
+    const t = (this.p.tally ??= {});
+    t[key] = (t[key] ?? 0) + n;
+  }
+
+  /** Feats newly earned pay out and are announced; a save from before Feats settles quietly */
+  private checkFeats(): void {
+    const p = this.p;
+    const quiet = !p.feats;
+    const got = (p.feats ??= []);
+    if (this.wet >= 0.99 && !p.tally?.soaked) this.tally('soaked');
+    if (p.nerve < NERVE_SHAKEN && !p.tally?.shaken) this.tally('shaken');
+    let n = 0;
+    for (const f of FEATS) {
+      if (got.includes(f.id)) continue;
+      const [have, need] = f.progress(this);
+      if (have < need) continue;
+      got.push(f.id);
+      n++;
+      if (quiet) continue;
+      p.coins += f.coins;
+      p.stats.earned += f.coins;
+      this.ui.feat?.(f.name, f.coins);
+      audio.play('levelup', { vol: 0.5, pitch: 1.25, vary: 0 });
+    }
+    if (quiet && n > 0) this.toast(`Your Journal keeps Feats now: ${n} already earned.`, '#ffd75a');
   }
 
   /** a sound as it plays: if it means something, write it out on screen, pointing where it came from */

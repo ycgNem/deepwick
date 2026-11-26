@@ -93,6 +93,10 @@ export interface Progress {
   lost?: LostSoul[];
   /** a Gloam Tide in progress: the Wick's ward (0..100) and what you have cut down */
   tide?: { day: number; ward: number; kills: number } | null;
+  /** running counts toward Feats (torches placed, fish caught, ...) */
+  tally?: Record<string, number>;
+  /** Feats earned, by id (missing in saves from before Feats, which are settled quietly) */
+  feats?: string[];
   /** the weather over the valley, and how long it has left */
   weather?: { kind: 'clear' | 'rain' | 'storm' | 'fog'; left: number };
   /** Gloam Tides the Wick has held through */
@@ -118,6 +122,7 @@ export function newProgress(seed: number, spawnX: number, spawnY: number): Progr
     nerve: 100,
     mode: 'delver',
     journal: 0,
+    feats: [],
     skills: { mining: { lvl: 1, xp: 0 }, combat: { lvl: 1, xp: 0 }, delving: { lvl: 1, xp: 0 }, fishing: { lvl: 1, xp: 0 } },
     catalogued: [],
     relicsDropped: [],

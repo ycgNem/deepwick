@@ -452,6 +452,66 @@ button.ghost {
   background: #e0b860;
   opacity: 0.6;
 }
+/* a Feat earned, in the tracker */
+.goal.done.feat {
+  border-color: #ffd75a;
+  box-shadow: 0 0 12px rgba(255, 215, 90, 0.45);
+}
+/* the Feats page */
+.feats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.fcard {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.fcard > i {
+  font-style: normal;
+  font-size: 18px;
+  line-height: 1;
+  color: #6a6070;
+}
+.fcard .ft {
+  flex: 1;
+  min-width: 0;
+}
+.fcard .ft b {
+  display: block;
+}
+.fcard .ft p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.fcard .ft small {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.fcard .ft .gbar {
+  margin-top: 4px;
+}
+.fcard .rw {
+  color: var(--gold);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.fcard.done {
+  border-color: rgba(255, 215, 90, 0.5);
+  background: rgba(255, 215, 90, 0.08);
+}
+.fcard.done > i,
+.fcard.done .ft b {
+  color: var(--gold);
+}
 .goal.done {
   box-shadow: 0 0 0 2px #6aa84a, 0 0 16px rgba(120, 220, 110, 0.45);
 }
