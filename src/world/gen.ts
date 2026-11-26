@@ -652,6 +652,9 @@ function buildDrift(w: World, rng: Rng, x0: number, floorY: number, dir: number)
   let x = x0;
   for (let k = 0; k < len; k++) {
     if (x < 5 || x > w.w - 6) break;
+    // a drift is dug from its own shaft's hilltop: where it runs in under lower ground it stops
+    // short rather than break out through the grass (once it broke out under the spawn itself)
+    if (floorY - 3 <= w.surface[x] + 3) break;
     for (let yy = floorY - 2; yy <= floorY; yy++) carveMine(w, x, yy);
     // keep a floor under the rails: plank bridges over gaps
     const fi = w.idx(x, floorY + 1);
@@ -681,6 +684,13 @@ function buildDrift(w: World, rng: Rng, x0: number, floorY: number, dir: number)
   // a store room at the far end
   if (rng.chance(0.55)) {
     const rw = rng.int(5, 7);
+    // (the random calls stay in the same order, so worlds that never hit this are unchanged)
+    let room = true;
+    for (let k = 1; k <= rw; k++) {
+      const rx = end + dir * k;
+      if (rx < 5 || rx > w.w - 6 || floorY - 4 <= w.surface[rx] + 3) room = false;
+    }
+    if (!room) return;
     for (let k = 1; k <= rw; k++) {
       const rx = end + dir * k;
       for (let yy = floorY - 3; yy <= floorY; yy++) carveMine(w, rx, yy);

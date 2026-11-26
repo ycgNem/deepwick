@@ -606,6 +606,8 @@ export class Game {
       this.toast(`Day ${p.stats.days}`, '#ffe9a8');
       this.tideWarning();
     }
+    const bell = 0.6 - 60 / DAY_LENGTH;
+    if (p.clock >= bell && p.clock - dt / DAY_LENGTH < bell) this.duskBell();
     const night = isNight(p.clock);
     if (night && !this.wasNight && !p.tide && this.tideTonight()) this.startTide();
     else if (night && !this.wasNight) {
@@ -618,6 +620,16 @@ export class Game {
       else this.toast('Dawn breaks.', '#ffd79a');
     }
     this.wasNight = night;
+  }
+
+  /** a minute before dark the old town bell tolls (somebody still rings it) */
+  private duskBell(): void {
+    const p = this.p;
+    const under = !this.onSurface();
+    audio.play('duskbell', { vol: under ? 0.35 : p.wick.kindled ? 0.55 : 0.85, vary: 0 });
+    if (!p.wick.kindled) {
+      this.toast('The bell tolls: the sun is going down. Kindle the Wick, or get behind a door before dark.', '#ffb070');
+    } else if (this.tideTonight()) this.toast('The bell tolls. The tide comes in at dark: be at the Wick.', '#d0a0ff');
   }
 
   // ------------------------------------------------------------------ Gloam Tides
@@ -4788,7 +4800,7 @@ export class Game {
     // the Wick nudges you along
     if (!p.wick.kindled) {
       if (hasAll(p, KINDLING)) this.hint('kindle', 'You have enough to kindle the Wick. Go to the great lantern in the meadow and press E.');
-      else if (p.clock > 0.42 && p.clock < 0.6) this.hint('cold', `Night is coming and the Wick is cold. Kindle it with ${KINDLING.wood} Wood and ${KINDLING.coal} Coal (dig down for coal) and the dark will keep its distance.`);
+      else if (p.clock > 0.42 && p.clock < 0.6) this.hint('cold', `Night is coming and the Wick is cold (the countdown under your Journal). Kindle it with ${KINDLING.wood} Wood and ${KINDLING.coal} Coal (dig down for coal) and the dark keeps its distance. If you cannot make it, a campfire (6 Wood, 4 Stone) and a door between you and the night will see you through.`);
     } else if (this.flame < MAX_FLAME && p.inv.some((s) => s && LUMEN[s.id])) this.hint('offer', 'You are carrying something that glows. Offer it to the Wick to grow the flame.');
     // healing
     if (pl.regenT > 0) pl.regenT -= dt;

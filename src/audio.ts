@@ -30,6 +30,7 @@ const SFX = [
   'tendril',
   'ignite',
   'lightrise',
+  'duskbell',
   'fireball',
   'roar',
   'teleport',

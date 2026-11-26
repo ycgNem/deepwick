@@ -6,7 +6,7 @@ import { BLOCKS, B } from './data/blocks';
 import { ENEMIES } from './data/enemies';
 import { Recipe, STATION_NAME, RECIPES } from './data/recipes';
 import { SkillId, xpToNext, count, itemValue, MAX_LEVEL, Slot, Stack, EquipKey, give } from './state';
-import { TILE, WORLD_W, WORLD_H, HOTBAR, INV_SIZE } from './constants';
+import { TILE, WORLD_W, WORLD_H, HOTBAR, INV_SIZE, DAY_LENGTH } from './constants';
 import { Obj } from './world/world';
 import { WICK_X, WICK_Y } from './data/wick';
 import { audio } from './audio';
@@ -956,6 +956,17 @@ export class UI implements UIHooks {
     else if (cur) {
       const [have, need] = cur.goal.progress(g);
       html = `<small>Journal \u00b7 ${ROMAN[cur.chapter]}</small><b>${cur.goal.text}</b>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><span>${fmt(have)} / ${fmt(need)}</span>` : ''}`;
+    }
+    // while the Wick is cold, the day is a clock: how long until dark, or until dawn
+    if (!flash && !g.p.wick.kindled && !g.ending) {
+      const c = g.p.clock;
+      const left = c < 0.6 ? (0.6 - c) * DAY_LENGTH : c < 0.96 ? (0.96 - c) * DAY_LENGTH : 0;
+      if (left > 0) {
+        const m = Math.floor(left / 60);
+        const s = Math.floor(left % 60);
+        const t = `${m}:${String(s).padStart(2, '0')}`;
+        html += c < 0.6 ? `<div class="sundown${left < 75 ? ' urgent' : ''}"><i class="sun"></i>Sundown in ${t}</div>` : `<div class="sundown night"><i class="moon"></i>Hold out: dawn in ${t}</div>`;
+      }
     }
     if (html !== this.lastGoal) {
       h.goal.innerHTML = html;
