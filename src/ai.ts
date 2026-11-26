@@ -267,7 +267,18 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
       let ty = 0;
       const d = dist || 1;
       e.stateT -= dt;
-      if (e.tide) {
+      if (e.raid >= 0 && g.boss) {
+        // sent off the Gloamheart for a sconce: it goes straight for the flame, whatever burns it
+        const s = g.boss.sconces[e.raid];
+        if (!s?.lit) e.raid = g.boss.litIndex();
+        const t = e.raid >= 0 ? g.boss.flameAt(g.boss.sconces[e.raid]) : { x: pl.cx, y: pl.cy };
+        const ox = t.x - e.cx;
+        const oy = t.y - e.cy;
+        const od = Math.hypot(ox, oy) || 1;
+        tx = (ox / od) * sp * 1.15;
+        ty = (oy / od) * sp * 1.15 + Math.sin(e.t * 3.4) * 26;
+        e.mode = 1;
+      } else if (e.tide) {
         // tide-born: it pushes through the light to gnaw at the Wick's roots, and only turns on you up close
         const near = !pl.dead && dist < 3 * TILE && g.buffs.ward <= 0;
         const gx = near ? pl.cx : WICK_GLOW.x * TILE + Math.cos(e.t * 1.7) * 34;

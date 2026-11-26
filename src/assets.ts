@@ -33,8 +33,8 @@ export interface Assets {
 
 export const A = {} as Assets;
 
-const ENEMY_FILES = ['bat', 'slime', 'beetle', 'toad', 'spider', 'wisp', 'imp', 'slug', 'wraith', 'sentinel', 'boss', 'rabbit', 'boar', 'hollow', 'lampless'];
-const CAMP_FILES = ['npc_merchant', 'npc_smith', 'npc_archivist', 'shop', 'forge', 'archive', 'pine1', 'pine2', 'oak', 'birch', 'bed', 'rocks', 'minecart', 'wick', 'wick_lit', 'wickpost', 'walk_smith', 'walk_archivist', 'stillroom', 'npc_herbalist', 'walk_herbalist'];
+const ENEMY_FILES = ['bat', 'slime', 'beetle', 'toad', 'spider', 'wisp', 'imp', 'slug', 'wraith', 'sentinel', 'gloamheart', 'rabbit', 'boar', 'hollow', 'lampless'];
+const CAMP_FILES = ['npc_merchant', 'npc_smith', 'npc_archivist', 'shop', 'forge', 'archive', 'pine1', 'pine2', 'oak', 'birch', 'bed', 'rocks', 'minecart', 'wick', 'wick_lit', 'wickpost', 'walk_smith', 'walk_archivist', 'stillroom', 'npc_herbalist', 'walk_herbalist', 'sconce'];
 const BG_FILES = ['surface', 'day'];
 
 function loadImg(src: string): Promise<HTMLImageElement> {

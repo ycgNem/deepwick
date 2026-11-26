@@ -404,7 +404,7 @@ export class UI implements UIHooks {
     h.bossBar.classList.toggle('show', bossOn || !!tide);
     h.bossBar.classList.toggle('tide', !bossOn && !!tide);
     if (bossOn) {
-      h.bossName.textContent = 'THE GLOAMHEART';
+      h.bossName.textContent = g.boss?.label() ?? 'THE GLOAMHEART';
       h.bossFill.style.width = `${g.bossHpFrac() * 100}%`;
     } else if (tide) {
       h.bossName.textContent = `GLOAM TIDE \u00b7 THE WICK'S WARD${tide.kills ? ` \u00b7 ${tide.kills} DRIVEN OFF` : ''}`;

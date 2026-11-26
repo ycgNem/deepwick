@@ -204,6 +204,8 @@ export class Enemy implements Body {
   lost = 0;
   /** a Lampless still held while your flame was at its lowest: another light has it pinned */
   pinned = false;
+  /** a Gloamling sent off the Gloamheart to snuff this sconce (-1: none) */
+  raid = -1;
 
   constructor(
     public def: EnemyDef,

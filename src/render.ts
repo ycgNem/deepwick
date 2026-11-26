@@ -17,6 +17,7 @@ import { prefs } from './prefs';
 import { LOST } from './data/lost';
 import { propRoof, PROP_REACH } from './world/cavein';
 import { dampAt, BREATH_MAX } from './world/flood';
+import { Mode as HeartMode } from './boss';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -1087,22 +1088,7 @@ export class Renderer {
       } else ctx.drawImage(img, f * fs, 0, fs, fs, x, y, fs, fs);
       ctx.restore();
     }
-    if (g.boss) {
-      const b = g.boss;
-      const img = A.enemies.boss;
-      const f = 1 + (Math.floor(b.animT * 7) % 8);
-      ctx.save();
-      if (b.flash > 0) ctx.filter = 'brightness(3)';
-      if (b.intro > 0) ctx.globalAlpha = 1 - b.intro / 2.2;
-      if (b.dead) ctx.globalAlpha = Math.max(0, 1 - b.deathT / 3.2);
-      ctx.drawImage(img, f * 128, 0, 128, 128, Math.round(b.x - 64 - camX), Math.round(b.y - 64 - camY), 128, 128);
-      ctx.restore();
-      if (b.winding) {
-        const fy = (BOSS_CENTER.y + 6) * TILE - camY;
-        ctx.fillStyle = Math.floor(g.time * 12) % 2 ? 'rgba(255,60,90,0.8)' : 'rgba(255,200,90,0.8)';
-        ctx.fillRect(Math.round(b.targetX - 60 - camX), fy - 3, 120, 3);
-      }
-    }
+    if (g.boss) this.drawHeart(g, ctx, camX, camY);
     this.drawHook(g, ctx, camX, camY);
     this.drawPlayer(g, ctx, camX, camY);
     for (const q of g.parts) {
@@ -1458,7 +1444,7 @@ export class Renderer {
         this.glowAt(ctx, ex, e.y + 10 - camY, 6, 'rgba(255,60,220,0.8)');
       }
     }
-    if (g.boss) this.glowAt(ctx, g.boss.x - camX, g.boss.y - camY, 90 + Math.sin(g.time * 4) * 8, 'rgba(255,40,90,0.25)');
+    if (g.boss) this.drawHeartGlow(g, ctx, camX, camY);
     const sat = g.p.satchel;
     if (sat) this.glowAt(ctx, sat.x - camX, sat.y - camY, 24, 'rgba(120,255,140,0.45)');
     for (const q of g.parts) {
@@ -1527,6 +1513,161 @@ export class Renderer {
   }
 
   /** Gloamlings: living shadow with a violet rim, and eyes that open before the body has formed */
+  /**
+   * The Gloamheart: black roots from the chamber roof, the heart itself (beating), its shroud of
+   * living dark, the reaching tendrils, and the old sconces round the walls.
+   */
+  private drawHeart(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const b = g.boss;
+    if (!b) return;
+    const t = g.time;
+    // the sconces
+    const sc = A.camp.sconce;
+    for (const s of b.sconces) {
+      const sx = Math.round((s.tx + 0.5) * TILE - 24 - camX);
+      const sy = Math.round((s.ty + 1) * TILE - 44 - camY);
+      ctx.drawImage(sc, sx, sy);
+    }
+    const fade = b.intro > 0 ? 1 - b.intro / 2.2 : b.dead ? Math.max(0, 1 - b.deathT / 3.2) : 1;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    // the roots it hangs by, swaying, pixel by pixel down from the roof
+    const roof = (BOSS_CENTER.y - 9) * TILE;
+    ctx.fillStyle = '#0b0712';
+    for (let k = 0; k < 6; k++) {
+      const x0 = b.x + (k - 2.5) * 26 + Math.sin(t * 0.5 + k * 1.7) * 6;
+      const x1 = b.x + (k - 2.5) * 9;
+      const y1 = b.y - b.r * 0.7;
+      const mx = (x0 + x1) / 2 + Math.sin(t * 0.8 + k) * 16;
+      const my = (roof + y1) / 2;
+      const steps = Math.max(8, Math.ceil((y1 - roof) / 3));
+      const w = k === 2 || k === 3 ? 4 : 3;
+      for (let i = 0; i <= steps; i++) {
+        const u = i / steps;
+        const px = (1 - u) * (1 - u) * x0 + 2 * (1 - u) * u * mx + u * u * x1;
+        const py = (1 - u) * (1 - u) * roof + 2 * (1 - u) * u * my + u * u * y1;
+        ctx.fillRect(Math.round(px - camX - w / 2), Math.round(py - camY), w, 4);
+      }
+    }
+    // reaching tendrils: a pool of dark gathers on the floor, then the strike comes down
+    for (const td of b.tendrils) {
+      const fx = td.x - camX;
+      const fy = td.y - camY;
+      if (td.t < 0.9) {
+        const k = Math.max(0, td.t) / 0.9;
+        const half = Math.round(6 + k * 22);
+        ctx.fillStyle = `rgba(20,6,34,${(0.35 + k * 0.45).toFixed(2)})`;
+        ctx.fillRect(Math.round(fx - half), Math.round(fy - 2), half * 2, 3);
+        ctx.fillRect(Math.round(fx - half * 0.6), Math.round(fy - 4), Math.round(half * 1.2), 2);
+        if (Math.floor(t * 14) % 2 && k > 0.5) {
+          ctx.fillStyle = 'rgba(170,110,255,0.7)';
+          ctx.fillRect(Math.round(fx - half), Math.round(fy - 1), half * 2, 1);
+        }
+      } else {
+        const k = 1 - (td.t - 0.9) / 0.4;
+        const sx0 = b.x;
+        const sy0 = b.y + b.r * 0.5;
+        const steps = 30;
+        ctx.fillStyle = `rgba(8,4,14,${Math.max(0, k).toFixed(2)})`;
+        for (let i = 0; i <= steps; i++) {
+          const u = i / steps;
+          const px = sx0 + (td.x - sx0) * u + Math.sin(u * Math.PI) * 30 * Math.sign(td.x - sx0 || 1);
+          const py = sy0 + (td.y - sy0) * u;
+          const wd = Math.round(10 - u * 6);
+          ctx.fillRect(Math.round(px - camX - wd / 2), Math.round(py - camY - 3), wd, 6);
+        }
+      }
+    }
+    // the heart, beating
+    const img = A.enemies.gloamheart;
+    const sc2 = 1 + b.beat * 0.06;
+    const dw = Math.round(128 * sc2);
+    if (b.flash > 0) ctx.filter = 'brightness(2.4)';
+    else if (b.shroud > 0) ctx.filter = `brightness(${(1 - b.shroud * 0.45).toFixed(2)})`;
+    ctx.drawImage(img, Math.round(b.x - dw / 2 - camX), Math.round(b.y - dw / 2 - camY), dw, dw);
+    ctx.filter = 'none';
+    // its shroud: living dark roiling round it, the same stuff as the Gloamlings
+    if (b.shroud > 0.02) {
+      const x = b.x - camX;
+      const y = b.y - camY;
+      ctx.globalAlpha = fade * Math.min(1, b.shroud * 1.1);
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.fillStyle = pass === 0 ? '#2a1450' : '#06030b';
+        for (let k = 0; k < 22; k++) {
+          const a = t * (k % 2 ? 0.55 : -0.42) + k * 1.13;
+          const rr = b.r * (0.25 + ((k * 37) % 10) / 14) + Math.sin(t * 1.4 + k) * 8;
+          const size = 10 + ((k * 13) % 9) + b.beat * 3;
+          pixDisc(ctx, x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.9, pass === 0 ? size + 2 : size);
+        }
+      }
+      // two pale eyes in the dark, watching you
+      const blink = (t * 0.6) % 5 < 0.15;
+      ctx.fillStyle = '#f0dcff';
+      const ex = Math.round(x + Math.sign(g.player.cx - b.x) * 4);
+      const ey = Math.round(y - 6);
+      ctx.fillRect(ex - 9, ey, 4, blink ? 1 : 3);
+      ctx.fillRect(ex + 5, ey, 4, blink ? 1 : 3);
+    }
+    ctx.restore();
+  }
+
+  /** after the lighting: the sconce flames, the light they burn into its dark, and its stolen light showing */
+  private drawHeartGlow(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const b = g.boss;
+    if (!b) return;
+    const t = g.time;
+    for (const s of b.sconces) {
+      const f = b.flameAt(s);
+      const fx = f.x - camX;
+      const fy = f.y - camY;
+      if (!s.lit) {
+        // a thread of smoke where one was just snuffed
+        if (s.t < 1.4) {
+          ctx.fillStyle = `rgba(120,110,130,${(0.5 * (1 - s.t / 1.4)).toFixed(2)})`;
+          for (let k = 0; k < 4; k++) ctx.fillRect(Math.round(fx + Math.sin(t * 4 + k) * 2), Math.round(fy - 4 - k * 5 - s.t * 10), 2, 3);
+        }
+        continue;
+      }
+      const flare = s.t < 0.4 ? 1 + (0.4 - s.t) * 4 : 1;
+      this.glowAt(ctx, fx, fy - 4, (36 + Math.sin(t * 9 + s.tx) * 3) * flare, 'rgba(255,170,70,0.55)');
+      for (let k = 0; k < 4; k++) {
+        const h = Math.round(10 + Math.random() * 10 + (k === 1 || k === 2 ? 6 : 0));
+        const x = Math.round(fx - 9 + k * 5 + (Math.random() - 0.5) * 2);
+        ctx.fillStyle = 'rgba(255,90,30,0.8)';
+        ctx.fillRect(x - 1, Math.round(fy - 3), 5, 4);
+        ctx.fillStyle = 'rgba(255,190,60,0.85)';
+        ctx.fillRect(x, Math.round(fy - h * 0.7), 3, Math.round(h * 0.7));
+        ctx.fillStyle = 'rgba(255,245,200,0.9)';
+        ctx.fillRect(x + 1, Math.round(fy - h), 1, Math.round(h * 0.35));
+      }
+      // while it hangs in its dark, each burning sconce sends a thread of light into it
+      if (b.mode === HeartMode.SHROUD && !b.dead) {
+        const dx = b.x - f.x;
+        const dy = b.y - f.y;
+        const d = Math.hypot(dx, dy);
+        const n = Math.floor(d / 6);
+        const off = (t * 40) % 6;
+        ctx.fillStyle = 'rgba(255,214,140,0.22)';
+        for (let i = 0; i < n; i++) {
+          const u = (i * 6 + off) / d;
+          if (u > 1) break;
+          ctx.fillRect(Math.round(fx + dx * u), Math.round(fy - 8 + (dy + 8) * u), 2, 2);
+        }
+      }
+    }
+    // its stolen light shows through as the dark comes off it
+    const open = (1 - b.shroud) * (b.intro > 0 ? 0 : 1);
+    const x = b.x - camX;
+    const y = b.y - camY;
+    if (open > 0.02) {
+      this.glowAt(ctx, x, y, 70 + b.beat * 14, `rgba(255,190,90,${(0.32 * open).toFixed(2)})`);
+      ctx.globalAlpha = Math.min(1, (0.45 + b.beat * 0.4) * open);
+      const dw = Math.round(128 * (1 + b.beat * 0.06));
+      ctx.drawImage(A.enemies.gloamheart, Math.round(x - dw / 2), Math.round(y - dw / 2), dw, dw);
+      ctx.globalAlpha = 1;
+    } else this.glowAt(ctx, x, y, 64 + b.beat * 10, 'rgba(120,40,200,0.16)');
+  }
+
   private drawShades(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
     for (const e of g.enemies) {
       if (!e.def.shade) continue;

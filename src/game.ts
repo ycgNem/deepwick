@@ -1847,7 +1847,7 @@ export class Game {
     if (this.boss && !this.boss.dead && this.boss.intro <= 0 && Math.hypot(this.boss.x - hx, this.boss.y - hy) < this.boss.r + R) {
       hitAny = true;
       const crit = Math.random() < 0.08;
-      const dmg = Math.round(this.st.attack * (0.9 + Math.random() * 0.2) * (crit ? 1.8 : 1) * this.boss.damageMult());
+      const dmg = Math.round(this.st.attack * (0.9 + Math.random() * 0.2) * (crit ? 1.8 : 1));
       this.damageBoss(dmg, hx, hy, crit);
     }
     if (hitAny) this.shake = Math.max(this.shake, 2);
@@ -1856,13 +1856,12 @@ export class Game {
   private damageBoss(dmg: number, hx: number, hy: number, crit: boolean): void {
     const b = this.boss;
     if (!b) return;
-    b.hp -= dmg;
-    b.flash = 0.12;
-    this.text(hx, hy - 10, String(dmg), crit ? '#ffd75a' : '#ffffff', crit);
-    this.burst(hx, hy, 8, ['#ff4a7a', '#a05aff'], 140, true);
+    const real = b.hurt(this, dmg, hx, hy);
+    if (real <= 0) return;
+    this.text(hx, hy - 10, String(real), crit ? '#ffd75a' : '#ffffff', crit);
+    this.burst(hx, hy, 8, ['#ffe08a', '#ffb84a', '#5a2030'], 140, true);
     audio.play('enemy_hit', { pitch: 0.7 });
     this.shake = Math.max(this.shake, 2);
-    if (b.hp <= 0) this.killBoss();
   }
 
   damageEnemy(e: Enemy, ang: number, dmgOverride?: number): void {
@@ -3307,6 +3306,10 @@ export class Game {
     const n = this.near;
     if (!n) return;
     audio.play('click');
+    if (n.id.startsWith('sconce:')) {
+      this.boss?.kindle(this, Number(n.id.slice(7)));
+      return;
+    }
     if (n.id.startsWith('soul:')) {
       this.findSoul(n.id.slice(5) as LostKind);
       return;
@@ -3639,7 +3642,8 @@ export class Game {
       !pl.dead &&
       !this.onSurface() &&
       !this.inWickLight(pl.cx, pl.cy) &&
-      this.enemies.some(
+      (!!this.boss?.presses ||
+        this.enemies.some(
         (e) =>
           e.def.behavior === 'still' &&
           !e.dead &&
@@ -3647,7 +3651,7 @@ export class Game {
           (e.mode === 0 || los(this, e.cx, e.y + 12, pl.cx, pl.cy)) &&
           // one pinned by another light (a torch on the wall) leans on your flame no more
           !e.pinned,
-      );
+      ));
     if (!near) {
       this.gutterT = Math.max(this.gutterT, 2.5);
       this.gutterWarned = false;
@@ -3719,11 +3723,11 @@ export class Game {
     const sheltered = e.tide && this.inWickLight(e.cx, e.cy, true);
     e.burn = lit > LIT && !sheltered ? lit : 0;
     if (e.burn > 0) {
-      e.hp -= dt * 16 * lit * (e.tide ? 0.5 : 1);
+      e.hp -= dt * 16 * lit * (e.tide ? 0.5 : e.raid >= 0 ? 0.3 : 1);
       if (Math.random() < dt * 25) this.parts.push({ x: e.cx + (Math.random() - 0.5) * 14, y: e.cy + (Math.random() - 0.5) * 14, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, life: 0.5, max: 0.5, color: Math.random() < 0.5 ? '#c08aff' : '#ff9a4a', size: 1, grav: -10, glow: true });
       if (Math.random() < dt * 2) audio.play('sizzle', { vol: 0.2, pitch: 1.6 });
       if (e.hp <= 0) this.killEnemy(e);
-    } else if (!e.tide && this.p.nerve > 75 && e.age > 3 && Math.random() < dt * 0.6) {
+    } else if (!e.tide && e.raid < 0 && this.p.nerve > 75 && e.age > 3 && Math.random() < dt * 0.6) {
       e.dead = true;
       this.burst(e.cx, e.cy, 10, ['#2a1446', '#5a2e8f'], 60);
     }
@@ -3836,11 +3840,8 @@ export class Game {
     }
   }
 
-  private killBoss(): void {
-    const b = this.boss;
-    if (!b || b.dead) return;
-    b.dead = true;
-    b.hp = 0;
+  /** the Gloamheart is stilled (it calls this as it dies) */
+  onBossStilled(): void {
     this.p.bossDefeated = true;
     this.p.bossRewardPending = true;
     this.shots = [];
@@ -3978,7 +3979,7 @@ export class Game {
         const b = this.boss;
         if (s.life > 0 && b && !b.dead && b.intro <= 0 && Math.hypot(b.x - s.x, b.y - s.y) < b.r) {
           s.life = 0;
-          this.damageBoss(Math.round(s.dmg * b.damageMult()), s.x, s.y, false);
+          this.damageBoss(Math.round(s.dmg), s.x, s.y, false);
         }
       }
     }
@@ -4023,7 +4024,7 @@ export class Game {
     }
     const boss = this.boss;
     if (boss && !boss.dead && boss.intro <= 0 && Math.hypot(boss.x - x, boss.y - y) < 3 * TILE + boss.r) {
-      this.damageBoss(Math.round((60 + this.st.attack * 2) * boss.damageMult()), boss.x, boss.y - boss.r * 0.5, false);
+      this.damageBoss(Math.round(60 + this.st.attack * 2), boss.x, boss.y - boss.r * 0.5, false);
     }
     const pl = this.player;
     if (Math.hypot(pl.cx - x, pl.cy - y) < 2.2 * TILE) this.hurtPlayer(14, x);
@@ -4626,6 +4627,17 @@ export class Game {
           this.near = { id: `soul:${s.kind}`, x: s.x, y: s.y - 48, label: `Talk to ${LOST[s.kind].name}` };
         }
       }
+      const bs = this.boss;
+      if (bs && !bs.dead && bs.intro <= 0) {
+        bs.sconces.forEach((s, i) => {
+          if (s.lit) return;
+          const d = Math.abs((s.tx + 0.5) * TILE - pl.cx);
+          if (d < best && Math.abs((s.ty + 1) * TILE - (pl.y + pl.h)) < 52) {
+            best = d;
+            this.near = { id: `sconce:${i}`, x: (s.tx + 0.5) * TILE, y: s.ty * TILE - 20, label: 'Light the sconce' };
+          }
+        });
+      }
       if (!this.near) {
         let bd = 99;
         for (let dy = -1; dy <= 1; dy++) {
@@ -4724,8 +4736,11 @@ export class Game {
     if (!p.bossDefeated && !this.boss && pt.y > BOSS_CENTER.y - 10 && Math.abs(pt.x - BOSS_CENTER.x) < 24) {
       this.boss = new Boss();
       this.enemies = [];
+      this.boss.wake(this);
       audio.play('roar', { vary: 0 });
-      this.toast('THE GLOAMHEART AWAKENS', '#ff4a7a');
+      audio.play('heartdrink', { vary: 0 });
+      this.ui.banner?.('The Gloamheart', 'It drinks the light. Kindle the old sconces to tear its dark away.');
+      this.hint('gloamheart', 'The Gloamheart hides in its own dark, and nothing can touch it there. Light the old sconces round the chamber (press E beside one): enough of them burning at once tears its shroud away and brings it down where you can strike it.');
     }
     if (this.boss && !this.boss.dead && pt.y < BOSS_CENTER.y - 14) {
       this.boss = null;
@@ -4861,7 +4876,16 @@ export class Game {
     for (const d of this.drops) {
       if (ITEMS[d.item]?.glow) lights.push({ x: d.x / TILE, y: d.y / TILE, r: 0.3, g: 0.3, b: 0.3, radius: 1.6, cast: false });
     }
-    if (this.boss) lights.push({ x: this.boss.x / TILE, y: this.boss.y / TILE, r: 0.9, g: 0.15, b: 0.3, radius: 9, cast: false });
+    const bs = this.boss;
+    if (bs) {
+      for (const s of bs.sconces) {
+        if (!s.lit) continue;
+        const k = Math.min(1, s.t * 2.5) * (1 + Math.sin(this.time * 9 + s.tx) * 0.04);
+        lights.push({ x: s.tx + 0.5, y: s.ty + 0.15, r: 1.3, g: 0.92, b: 0.52, radius: 7.5 * k, cast: false });
+      }
+      const open = 1 - bs.shroud;
+      lights.push({ x: bs.x / TILE, y: bs.y / TILE, r: 0.32 + open * 0.95, g: 0.06 + open * 0.66, b: 0.38 - open * 0.12, radius: 3.4 + open * 6 + bs.beat * 0.8, cast: false });
+    }
     for (const b of this.bombs) lights.push({ x: b.x / TILE, y: b.y / TILE, r: 0.6, g: 0.45, b: 0.1, radius: 2, cast: false });
     for (const b of this.p.buildings) lights.push({ x: b.x, y: b.y - 1.5, r: 0.7, g: 0.5, b: 0.25, radius: 5, cast: false });
     let wr = this.wickRadius();

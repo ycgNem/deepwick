@@ -778,18 +778,7 @@ function buildHeartChamber(w: World): void {
   }
   // flat floor + side ledges
   for (let x = cx - 22; x <= cx + 22; x++) w.fg[w.idx(x, cy + 6)] = B.OBSIDIAN;
-  // braziers along the walls so the fight can be read
-  for (const [tx, ty] of [
-    [cx - 21, cy + 3],
-    [cx + 21, cy + 3],
-    [cx - 14, cy - 4],
-    [cx + 14, cy - 4],
-    [cx - 7, cy + 4],
-    [cx + 7, cy + 4],
-    [cx, cy - 7],
-  ]) {
-    if (w.fg[w.idx(tx, ty)] === B.AIR) w.obj[w.idx(tx, ty)] = Obj.TORCH;
-  }
+  // no torches: its only light is what you kindle in the old sconces (see Boss)
   for (const [lx, ly] of [
     [cx - 15, cy + 2],
     [cx + 12, cy + 2],
