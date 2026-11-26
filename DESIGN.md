@@ -78,4 +78,5 @@ the flame) decides how far the light reaches tomorrow.
       the ward break and the Gloam eats some of the Lumen toward the next flame
       (never a whole level). No sleeping through a tide; a dawn warning and a
       "Tide tonight" chip; its own siege music (PixelLab). Journal goal added.
-- [ ] Cycle 6+: review cycles: balance, polish, audio, performance, content.
+- [x] Cycle 6: the Wick catches. Kindling (and every later flame level) is now an event: the light spreads out from the glass over 1.5s instead of snapping on, rings of light race to the new edge, slow rays turn about the lamp, a flash and a centred title card ("THE WICK BURNS / Deepwick has a heart again."), plus a new kindle sound. The two old flame-up toasts are gone. Accessibility & options in the pause menu: screen shake & flashes on/off (also softens the hurt flash), tutorial hints on/off (the Journal still reads the hint flags), HUD size 85-130%, fullscreen; saved with the volume settings. Measured the opening: bare hands fell a tree in ~3.7s, five trees within 30 tiles, coal ~11m down, so kindling takes ~3 minutes, well before the first night (~6 minutes); no pacing change needed.
+- [ ] Cycle 7+: review cycles: balance, polish, audio, performance, content.

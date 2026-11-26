@@ -10,6 +10,7 @@ import { ENEMIES, DAY_SURFACE, NIGHT_SURFACE } from './data/enemies';
 import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, WICK_GLOW, WICK_X, WICK_Y, flameLevel } from './data/wick';
 import { GOALS, CHAPTERS, ROMAN, goalDone } from './data/journal';
+import { prefs } from './prefs';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
@@ -61,6 +62,8 @@ export interface UIHooks {
   close(): void;
   levelUp(skill: SkillId, lvl: number): void;
   victory(): void;
+  /** a big centred title card */
+  banner?(title: string, sub: string): void;
 }
 
 export type HoverKind = 'none' | 'block' | 'tree' | 'obj' | 'decor' | 'wall' | 'rail';
@@ -253,6 +256,8 @@ export class Game {
   private journalT = 0;
   /** seconds to the next Gloam Tide spawn */
   private tideT = 0;
+  /** the Wick flaring up a level: a light wave, rays and a title card */
+  flare: { t: number; level: number; from: number } | null = null;
 
   constructor(
     public input: Input,
@@ -323,8 +328,9 @@ export class Game {
 
   hint(key: string, msg: string): void {
     if (this.p.seen[key]) return;
+    // remembered even with hints off: the Journal reads some of them
     this.p.seen[key] = true;
-    this.ui.toast(msg, '#ffe9a8');
+    if (prefs.hints) this.ui.toast(msg, '#ffe9a8');
   }
 
   text(x: number, y: number, text: string, color: string, big = false): void {
@@ -404,6 +410,7 @@ export class Game {
       this.randomTicks(dt);
     }
     this.updateDrops(dt);
+    if (this.flare && (this.flare.t += dt) > 3.6) this.flare = null;
     this.journalT -= dt;
     if (this.journalT <= 0) {
       this.journalT = 0.4;
@@ -2480,11 +2487,12 @@ export class Game {
 
   private flameUp(level: number): void {
     const f = FLAME[level];
+    this.flare = { t: 0, level, from: level > 1 ? FLAME[level - 1].radius : 0 };
+    this.ui.banner?.(level === 1 ? 'The Wick burns' : `The Wick burns ${f.name.toLowerCase()}`, level === 1 ? 'Deepwick has a heart again.' : f.perk);
+    audio.play('kindle', { vol: 0.9, vary: 0 });
     this.shake = Math.max(this.shake, 8);
     this.burst(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE, 90, ['#ffe08a', '#ffb84a', '#ffffff', '#ff8a2a'], 280, true);
     audio.play('upgrade', { vary: 0 });
-    this.toast(level === 1 ? 'The Wick catches! Light spills across the meadow.' : `The Wick burns ${f.name.toLowerCase()}!`, '#ffe08a');
-    this.toast(f.perk, '#ffe9a8');
     this.settleMissing(true);
     this.refresh();
     this.onSave?.();
@@ -3623,7 +3631,11 @@ export class Game {
     if (this.boss) lights.push({ x: this.boss.x / TILE, y: this.boss.y / TILE, r: 0.9, g: 0.15, b: 0.3, radius: 9, cast: false });
     for (const b of this.bombs) lights.push({ x: b.x / TILE, y: b.y / TILE, r: 0.6, g: 0.45, b: 0.1, radius: 2, cast: false });
     for (const b of this.p.buildings) lights.push({ x: b.x, y: b.y - 1.5, r: 0.7, g: 0.5, b: 0.25, radius: 5, cast: false });
-    const wr = this.wickRadius();
+    let wr = this.wickRadius();
+    if (this.flare && wr > 0) {
+      const k = Math.min(1, this.flare.t / 1.5);
+      wr = this.flare.from + (wr - this.flare.from) * (1 - Math.pow(1 - k, 3));
+    }
     if (wr > 0) {
       const wf = 1 + Math.sin(this.time * 5.3) * 0.02 + Math.sin(this.time * 8.9) * 0.015;
       lights.push({ x: WICK_GLOW.x, y: WICK_GLOW.y, r: 1.25, g: 0.92, b: 0.52, radius: wr * wf, cast: false });

@@ -322,6 +322,57 @@ button.ghost {
     opacity: 0;
   }
 }
+#banner {
+  position: absolute;
+  left: 50%;
+  top: 57%;
+  transform: translateX(-50%);
+  width: min(900px, 92vw);
+  padding: 14px 0 16px;
+  text-align: center;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(12, 7, 2, 0.62), rgba(12, 7, 2, 0) 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+#banner.show {
+  animation: bannerIn 4.2s ease-out forwards;
+}
+#banner b {
+  display: block;
+  font-family: 'Silkscreen', monospace;
+  font-weight: 400;
+  font-size: clamp(28px, 5vw, 54px);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #ffe08a;
+  text-shadow:
+    3px 3px 0 #3a2410,
+    0 0 24px rgba(255, 200, 90, 0.75);
+}
+#banner span {
+  display: block;
+  margin-top: 6px;
+  font-size: clamp(15px, 1.8vw, 20px);
+  color: #f4ead6;
+  text-shadow: 2px 2px 0 #000;
+}
+@keyframes bannerIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px) scale(0.96);
+  }
+  14% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+  }
+}
 #bossBar {
   position: absolute;
   left: 50%;

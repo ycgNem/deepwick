@@ -105,11 +105,14 @@ export function deleteSave(): void {
 export interface Settings {
   music: number;
   sfx: number;
+  shake?: boolean;
+  hints?: boolean;
+  hud?: number;
 }
 export function loadSettings(): Settings {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
-    return { music: s.music ?? 0.45, sfx: s.sfx ?? 0.7 };
+    return { music: s.music ?? 0.45, sfx: s.sfx ?? 0.7, shake: s.shake ?? true, hints: s.hints ?? true, hud: s.hud ?? 1 };
   } catch {
     return { music: 0.45, sfx: 0.7 };
   }

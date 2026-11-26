@@ -40,6 +40,7 @@ const SFX = [
   'heartbeat',
   'whisper',
   'gloam_hiss',
+  'kindle',
 ] as const;
 export type SfxId = (typeof SFX)[number];
 

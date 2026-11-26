@@ -11,8 +11,9 @@ import { Obj } from './world/world';
 import { BOSS_CENTER } from './world/gen';
 import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
 import { heldDef } from './state';
-import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME } from './data/wick';
+import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME, FLAME } from './data/wick';
 import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
+import { prefs } from './prefs';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -188,7 +189,7 @@ export class Renderer {
     this.lastT = g.time;
     let camX = Math.round(g.camX);
     let camY = Math.round(g.camY);
-    if (g.shake > 0) {
+    if (g.shake > 0 && prefs.shake) {
       camX += Math.round((Math.random() - 0.5) * g.shake);
       camY += Math.round((Math.random() - 0.5) * g.shake);
     }
@@ -237,13 +238,17 @@ export class Renderer {
     this.drawDread(g, ctx, vw, vh);
     this.drawHover(g, ctx, camX, camY);
 
+    if (g.flare && g.flare.t < 0.7 && prefs.shake) {
+      ctx.fillStyle = `rgba(255,236,190,${(0.5 * (1 - g.flare.t / 0.7) * (g.flare.level === 1 ? 1 : 0.6)).toFixed(3)})`;
+      ctx.fillRect(0, 0, vw, vh);
+    }
     if (g.gloom > 0) {
       ctx.fillStyle = `rgba(20,0,30,${Math.min(0.5, g.gloom * 0.25)})`;
       ctx.fillRect(0, 0, vw, vh);
     }
     const pl = g.player;
     if (pl.hurtT > 0) {
-      ctx.fillStyle = `rgba(160,0,0,${pl.hurtT * 0.8})`;
+      ctx.fillStyle = `rgba(160,0,0,${pl.hurtT * (prefs.shake ? 0.8 : 0.3)})`;
       ctx.fillRect(0, 0, vw, vh);
     }
     if (g.p.food <= 0) {
@@ -1210,6 +1215,7 @@ export class Renderer {
       if (Math.random() < 0.15 + lvl * 0.08)
         g.parts.push({ x: WICK_GLOW.x * TILE + (Math.random() - 0.5) * 18, y: (WICK_GLOW.y - 1.3) * TILE, vx: (Math.random() - 0.5) * 16, vy: -35 - Math.random() * 40, life: 1.4, max: 1.4, color: Math.random() < 0.5 ? '#ffd070' : '#ff9a3a', size: 1, grav: -4, glow: true });
     }
+    if (g.flare) this.drawFlare(g, ctx, camX, camY);
     // building windows glow at night
     if (daylight(g.p.clock) < 0.6) {
       for (const b of g.p.buildings) this.glowAt(ctx, b.x * TILE - camX, b.y * TILE - camY - 40, 46, 'rgba(255,190,90,0.3)');
@@ -1254,6 +1260,53 @@ export class Renderer {
       ctx.fillRect(Math.round(a.x - camX), Math.round(a.y - camY), a.size, a.drip ? 3 : a.size);
     }
     ctx.restore();
+  }
+
+  /** the Wick flaring up: a ring of light racing out over the meadow, slow rays and a bloom at the glass */
+  private drawFlare(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const f = g.flare;
+    if (!f) return;
+    const t = f.t;
+    const gx = WICK_GLOW.x * TILE - camX;
+    const gy = WICK_GLOW.y * TILE - camY;
+    const big = f.level === 1 ? 1.25 : 1;
+    // rays turning slowly about the glass
+    const ra = (t < 0.35 ? t / 0.35 : Math.max(0, 1 - (t - 0.35) / 2.8)) * big;
+    if (ra > 0) {
+      ctx.fillStyle = '#ffe3a0';
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + t * 0.22 + (i % 2) * 0.12;
+        const len = (150 + (i % 3) * 60) * (0.6 + 0.4 * Math.min(1, t / 0.6)) * big;
+        const w = 0.05 + (i % 2) * 0.03;
+        ctx.globalAlpha = ra * (i % 2 ? 0.1 : 0.16);
+        ctx.beginPath();
+        ctx.moveTo(gx, gy);
+        ctx.lineTo(gx + Math.cos(a - w) * len, gy + Math.sin(a - w) * len);
+        ctx.lineTo(gx + Math.cos(a + w) * len, gy + Math.sin(a + w) * len);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    // two rings racing out to the new edge of the light
+    const reach = FLAME[f.level].radius * TILE * 1.1;
+    for (const lag of [0, 0.22]) {
+      const k = (t - lag) / 1.5;
+      if (k <= 0 || k >= 1) continue;
+      const e = 1 - Math.pow(1 - k, 3);
+      ctx.globalAlpha = (1 - k) * (lag ? 0.45 : 0.8);
+      ctx.strokeStyle = lag ? '#ffb850' : '#fff0c0';
+      ctx.lineWidth = Math.max(1, (lag ? 3 : 5) * (1 - k) + 1);
+      ctx.beginPath();
+      ctx.ellipse(gx, gy + 40 * e, 30 + e * reach, (30 + e * reach) * 0.62, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // a bloom at the glass that blooms and settles
+    const b = t < 0.25 ? t / 0.25 : Math.max(0, 1 - (t - 0.25) / 1.8);
+    if (b > 0) {
+      ctx.globalAlpha = b;
+      this.glowAt(ctx, gx, gy, (70 + 90 * Math.min(1, t / 0.5)) * big, 'rgba(255,225,160,0.85)');
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** Gloamlings: living shadow with a violet rim, and eyes that open before the body has formed */

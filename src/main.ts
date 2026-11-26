@@ -13,6 +13,7 @@ import { generateWorld, worldSpawn } from './world/gen';
 import { saveGame, loadGame, hasSave, deleteSave, loadSettings, storeSettings } from './save';
 import { TitleScene } from './title';
 import { MODES, ModeId } from './data/nerve';
+import { prefs, applyPrefs } from './prefs';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const loading = document.getElementById('loading') as HTMLElement;
@@ -44,9 +45,17 @@ async function boot(): Promise<void> {
   if (import.meta.env.DEV) Object.assign(window as object, { __renderer: renderer, __titleSeed: makeScene, __scene: () => scene });
   const s = loadSettings();
   audio.setVolumes(s.music, s.sfx);
+  prefs.shake = s.shake ?? true;
+  prefs.hints = s.hints ?? true;
+  prefs.hud = s.hud ?? 1;
+  applyPrefs();
   ui.onSettings = (music, sfx) => {
     audio.setVolumes(music, sfx);
-    storeSettings({ music, sfx });
+    storeSettings({ music, sfx, ...prefs });
+  };
+  ui.onPrefs = () => {
+    applyPrefs();
+    storeSettings({ music: audio.musicVolume, sfx: audio.sfxVolume, ...prefs });
   };
   ui.onQuit = () => {
     if (game && ui) saveGame(game.saveSnapshot(ui.cursorStack()), game.world);

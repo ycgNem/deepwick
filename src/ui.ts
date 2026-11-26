@@ -13,6 +13,7 @@ import { audio } from './audio';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, lumenToNext } from './data/wick';
 import { MODES, MODE_IDS, ModeId, NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 import { CHAPTERS, GOALS, ROMAN } from './data/journal';
+import { prefs, HUD_SIZES } from './prefs';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -74,6 +75,7 @@ export class UI implements UIHooks {
   private lastHelp = '';
   onQuit: (() => void) | null = null;
   onSettings: ((music: number, sfx: number) => void) | null = null;
+  onPrefs: (() => void) | null = null;
 
   constructor() {
     this.toasts = $('#toasts');
@@ -132,6 +134,19 @@ export class UI implements UIHooks {
 
   isOpen(): boolean {
     return this.panel !== null;
+  }
+
+  /** a big title card across the middle of the screen */
+  banner(title: string, sub: string): void {
+    const el = document.getElementById('banner');
+    if (!el) return;
+    const b = el.querySelector('b');
+    const s = el.querySelector('span');
+    if (b) b.textContent = title;
+    if (s) s.textContent = sub;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
   }
 
   levelUp(skill: SkillId, lvl: number): void {
@@ -788,6 +803,7 @@ export class UI implements UIHooks {
     const s = Math.round(audio.sfxVolume * 100);
     return `<div class="hd"><div><h2>Paused</h2><p class="line">The mountain will wait.</p></div></div>
       <div class="settings"><label>Music <input type="range" min="0" max="100" value="${m}" data-set="music"></label><label>Sound <input type="range" min="0" max="100" value="${s}" data-set="sfx"></label></div>
+      <div class="settings diff"><span>Options</span><button class="${prefs.shake ? 'on' : ''}" data-a="pref" data-id="shake">Screen shake &amp; flashes: ${prefs.shake ? 'On' : 'Off'}</button><button class="${prefs.hints ? 'on' : ''}" data-a="pref" data-id="hints">Tutorial hints: ${prefs.hints ? 'On' : 'Off'}</button><button data-a="hudsize">HUD size: ${Math.round(prefs.hud * 100)}%</button><button data-a="fullscreen">${document.fullscreenElement ? 'Leave fullscreen' : 'Fullscreen'}</button></div>
       <div class="settings diff"><span>Difficulty</span>${MODE_IDS.map((id) => `<button class="${this.game.p.mode === id ? 'on' : ''}" data-a="mode" data-id="${id}">${MODES[id].name}</button>`).join('')}<small>${MODES[this.game.mode.id].blurb}</small></div>
       <div class="controls"><h3 class="sub">Controls</h3>
       <div><kbd>A</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>W</kbd><kbd>S</kbd> climb ladders, <kbd>S</kbd> drops through ladder tops</div>
@@ -1097,6 +1113,24 @@ export class UI implements UIHooks {
         g.travelTo(x === undefined ? null : { x: Number(x), y: Number(t.dataset.y) });
         return;
       }
+      case 'pref': {
+        const id = t.dataset.id;
+        if (id === 'shake') prefs.shake = !prefs.shake;
+        else if (id === 'hints') prefs.hints = !prefs.hints;
+        this.onPrefs?.();
+        break;
+      }
+      case 'hudsize': {
+        const i = HUD_SIZES.indexOf(prefs.hud);
+        prefs.hud = HUD_SIZES[(i + 1) % HUD_SIZES.length];
+        this.onPrefs?.();
+        break;
+      }
+      case 'fullscreen':
+        if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+        else void document.documentElement.requestFullscreen().catch(() => undefined);
+        setTimeout(() => this.panel === 'pause' && this.render(), 300);
+        break;
       case 'mode': {
         const id = (t.dataset.id ?? '') as ModeId;
         if (MODES[id] && g.p.mode !== id) {
