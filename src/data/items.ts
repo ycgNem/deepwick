@@ -185,6 +185,7 @@ const LIST: Record<string, Partial2> = {
 
   // ---- placeables
   torch: { name: 'Torch', icon: i16(21), kind: 'place', obj: Obj.TORCH, value: 1, desc: 'Lights the dark. Holding one lights your way. Creatures will not spawn in its glow.', stack: 250 },
+  prop: { name: 'Timber Prop', icon: { sheet: 'f32', idx: 14 }, kind: 'place', obj: Obj.BEAM, value: 2, desc: 'A pit prop and its cap board. Stand it on a floor under loose rock and it holds the roof up for two tiles either side. The old mine frames are props too: pull one down and whatever it held comes with it.', stack: 99 },
   ladder: { name: 'Ladder', icon: i16(22), kind: 'place', obj: Obj.LADDER, value: 1, desc: 'Climb with W / S.', stack: 250 },
   rail: { name: 'Rail', icon: cv(0), kind: 'place', value: 1, desc: 'Lay track along a floor. Minecarts ride it.', stack: 250 },
   minecart: { name: 'Minecart', icon: cv(1), kind: 'place', obj: Obj.MINECART, value: 14, desc: 'Set it on a rail, then press E to climb in. A / D to roll, Space to jump out.', stack: 5 },
@@ -271,6 +272,7 @@ export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
   { id: 'arrows', price: 1, n: 20 },
   { id: 'oil', price: 20, n: 1 },
   { id: 'tonic', price: 28, n: 1 },
+  { id: 'prop', price: 5, n: 2 },
   { id: 'bomb', price: 30, n: 1 },
   { id: 'canary', price: 60, n: 1 },
   { id: 'recall', price: 45, n: 1 },

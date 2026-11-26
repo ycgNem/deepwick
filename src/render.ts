@@ -15,6 +15,7 @@ import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME, FLAME } from './data/wick';
 import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 import { prefs } from './prefs';
 import { LOST } from './data/lost';
+import { propRoof, PROP_REACH } from './world/cavein';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -94,6 +95,9 @@ export class Renderer {
   private terrain: Terrain | null = null;
   private terrainWorld: World | null = null;
   private cracks: HTMLCanvasElement[] = [];
+  /** fault lines over loose rock, and the crumbling underside it shows when nothing is below */
+  private looseArt: HTMLCanvasElement[] = [];
+  private looseUnder: HTMLCanvasElement[] = [];
   private glowSprite: HTMLCanvasElement;
   private vignette: HTMLCanvasElement | null = null;
   /** the dark closing in as your nerve goes */
@@ -122,6 +126,7 @@ export class Renderer {
     this.glowSprite = this.makeGlow();
     this.backdrops = buildBackdrops();
     this.buildCracks();
+    this.buildLoose();
     this.skyDay = mirrored(A.bg.day);
     this.skyDusk = mirrored(A.bg.surface);
     this.skyDayTop = skyTop(this.skyDay, [0.62, 0.74, 0.9]);
@@ -138,6 +143,65 @@ export class Renderer {
     g.fillStyle = grad;
     g.fillRect(0, 0, 64, 64);
     return c;
+  }
+
+  /** loose rock: pixel fault lines running across the tile, and a crumbling lip under it */
+  private buildLoose(): void {
+    let seed = 91;
+    const rnd = (): number => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    for (let v = 0; v < 4; v++) {
+      const [c, g] = makeCanvas(32, 32);
+      // a faint darkening: bad ground looks tired
+      g.fillStyle = 'rgba(20,12,8,0.18)';
+      g.fillRect(0, 0, 32, 32);
+      for (let k = 0; k < 2; k++) {
+        // a crack from one edge to the other, wandering a pixel at a time
+        const horiz = (v + k) % 2 === 0;
+        let a = 5 + Math.floor(rnd() * 22);
+        for (let t = 0; t < 32; t++) {
+          if (rnd() < 0.45) a += rnd() < 0.5 ? -1 : 1;
+          a = Math.max(2, Math.min(29, a));
+          const x = horiz ? t : a;
+          const y = horiz ? a : t;
+          g.fillStyle = 'rgba(12,8,6,0.85)';
+          g.fillRect(x, y, 1, 1);
+          if (rnd() < 0.75) g.fillRect(horiz ? x : x + 1, horiz ? y + 1 : y, 1, 1);
+          g.fillStyle = 'rgba(255,236,210,0.3)';
+          g.fillRect(horiz ? x : x - 1, horiz ? y - 1 : y, 1, 1);
+          // short branches
+          if (rnd() < 0.08) {
+            let bx = x;
+            let by = y;
+            const dx = horiz ? (rnd() < 0.5 ? -1 : 1) : 1;
+            const dy = horiz ? 1 : rnd() < 0.5 ? -1 : 1;
+            for (let j = 0; j < 3 + Math.floor(rnd() * 3); j++) {
+              bx += rnd() < 0.6 ? dx : 0;
+              by += rnd() < 0.6 ? dy : 0;
+              g.fillStyle = 'rgba(12,8,6,0.7)';
+              g.fillRect(bx, by, 1, 1);
+            }
+          }
+        }
+      }
+      this.looseArt.push(c);
+    }
+    for (let v = 0; v < 2; v++) {
+      const [c, g] = makeCanvas(32, 36);
+      // gaps along the underside and a few chips about to drop
+      g.fillStyle = 'rgba(10,6,4,0.75)';
+      for (let x = 0; x < 32; x++) if (rnd() < 0.55) g.fillRect(x, 30 + Math.floor(rnd() * 2), 1, 2);
+      for (let k = 0; k < 3; k++) {
+        const x = 3 + Math.floor(rnd() * 25);
+        g.fillStyle = 'rgba(10,6,4,0.8)';
+        g.fillRect(x - 1, 31, 4, 3);
+        g.fillStyle = 'rgba(150,135,118,0.9)';
+        g.fillRect(x, 31, 2, 2);
+      }
+      this.looseUnder.push(c);
+    }
   }
 
   private buildCracks(): void {
@@ -748,6 +812,12 @@ export class Renderer {
           const set = def.topper === 'grass' ? A.grassTop : A.mossTop;
           ctx.drawImage(set[(tx * 7 + ty) & 3], sx, sy - 7);
         }
+        if (w.loose[i]) {
+          // rock that has started to give shudders
+          const j = g.working.has(i) ? Math.round((Math.random() - 0.5) * 2.4) : 0;
+          ctx.drawImage(this.looseArt[(tx * 3 + ty * 5) & 3], sx + j, sy);
+          if (!w.rock(tx, ty + 1)) ctx.drawImage(this.looseUnder[(tx + ty) & 1], sx + j, sy);
+        }
         const dmg = w.damage.get(i);
         if (dmg) {
           const frac = 1 - dmg.hp / def.hp;
@@ -811,12 +881,14 @@ export class Renderer {
         if (!o || o === Obj.TREE) continue;
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;
-        this.drawObj(g, ctx, o, sx, sy, tx, 1);
+        this.drawObj(g, ctx, o, sx, sy, tx, 1, ty);
       }
     }
+    // rock coming down
+    for (const r of g.rocks) ctx.drawImage(A.blockIcon[r.b], Math.round(r.x - TILE / 2 - camX), Math.round(r.y - camY));
   }
 
-  private drawObj(g: Game, ctx: CanvasRenderingContext2D, o: number, sx: number, sy: number, tx: number, alpha: number): void {
+  private drawObj(g: Game, ctx: CanvasRenderingContext2D, o: number, sx: number, sy: number, tx: number, alpha: number, ty = -1): void {
     ctx.globalAlpha = alpha;
     const icon = OBJ_ICON[o as Obj];
     if (icon) {
@@ -828,7 +900,7 @@ export class Renderer {
           drawLadder(ctx, sx, sy);
           break;
         case Obj.BEAM:
-          drawBeam(ctx, sx, sy);
+          drawBeam(ctx, sx, sy, g.world, tx, ty);
           break;
         case Obj.MINECART: {
           const c = A.camp.minecart;
@@ -905,7 +977,7 @@ export class Renderer {
       ctx.globalAlpha = 1;
     } else if (hd.kind === 'place' && hd.obj !== undefined) {
       if (hd.obj === Obj.DOOR) this.drawObj(g, ctx, Obj.DOOR_TOP, sx, sy - TILE, h.x, 0.45);
-      else this.drawObj(g, ctx, hd.obj, sx, sy, h.x, 0.45);
+      else this.drawObj(g, ctx, hd.obj, sx, sy, h.x, 0.45, h.y);
     }
   }
 
@@ -1647,8 +1719,12 @@ export class Renderer {
     if (placing) color = 'rgba(255,215,90,0.55)';
     else if (h.ok) {
       ty = h.ty;
-      const def = BLOCKS[g.world.get(h.x, h.y)];
+      const w = g.world;
+      const def = BLOCKS[w.get(h.x, h.y)];
       color = h.kind === 'block' && def.tier > g.st.pickTier ? 'rgba(255,110,80,0.9)' : 'rgba(255,255,255,0.85)';
+      // amber: taking this out frees the loose rock it holds up
+      const frees = (h.kind === 'block' && w.inside(h.x, h.y - 1) && w.loose[w.idx(h.x, h.y - 1)]) || (h.kind === 'obj' && w.getObj(h.x, h.y) === Obj.BEAM);
+      if (frees && color !== 'rgba(255,110,80,0.9)') color = 'rgba(255,176,64,0.95)';
     }
     if (!color) return;
     const sx = h.x * TILE - camX;
@@ -1861,16 +1937,64 @@ function drawLadder(ctx: CanvasRenderingContext2D, sx: number, sy: number): void
   }
 }
 
-function drawBeam(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
-  const top = sy - 2 * TILE;
-  ctx.fillStyle = '#3a2410';
-  ctx.fillRect(sx + 1, top, 6, 3 * TILE);
-  ctx.fillRect(sx + 25, top, 6, 3 * TILE);
-  ctx.fillRect(sx - 4, top, 40, 7);
+/**
+ * A timber prop: a post standing on the floor up to the roof, and a cap board along the roof
+ * as far as it holds it (two tiles either side, where the roof runs at the same height).
+ */
+function drawBeam(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: World, tx: number, ty: number): void {
+  let rows = 3;
+  let left = 0;
+  let right = 0;
+  if (ty >= 0) {
+    const roof = propRoof(w, tx, ty);
+    if (roof >= 0) {
+      rows = ty - roof;
+      const flat = (x: number): boolean => w.rock(x, roof) && !w.rock(x, roof + 1);
+      while (left < PROP_REACH && flat(tx - left - 1)) left++;
+      while (right < PROP_REACH && flat(tx + right + 1)) right++;
+    }
+  }
+  const top = sy + TILE - rows * TILE;
+  const x0 = sx - left * TILE + 2;
+  const x1 = sx + TILE + right * TILE - 2;
+  // the cap board under the roof
+  ctx.fillStyle = '#2a1608';
+  ctx.fillRect(x0, top, x1 - x0, 7);
   ctx.fillStyle = '#7a4e26';
-  ctx.fillRect(sx + 2, top, 3, 3 * TILE);
-  ctx.fillRect(sx + 26, top, 3, 3 * TILE);
-  ctx.fillRect(sx - 4, top, 40, 3);
+  ctx.fillRect(x0 + 1, top + 1, x1 - x0 - 2, 5);
+  ctx.fillStyle = '#c89a5a';
+  ctx.fillRect(x0 + 1, top + 1, x1 - x0 - 2, 1);
+  ctx.fillStyle = '#5a3818';
+  ctx.fillRect(x0 + 1, top + 5, x1 - x0 - 2, 1);
+  ctx.fillStyle = '#40260e';
+  for (let x = x0 + 7; x < x1 - 4; x += 13) ctx.fillRect(x, top + 3, 2, 1);
+  // wedges either side of the post
+  ctx.fillStyle = '#2a1608';
+  ctx.fillRect(sx + 8, top + 7, 4, 3);
+  ctx.fillRect(sx + 20, top + 7, 4, 3);
+  ctx.fillStyle = '#a8743e';
+  ctx.fillRect(sx + 9, top + 7, 2, 1);
+  ctx.fillRect(sx + 21, top + 7, 2, 1);
+  // the post
+  const py = top + 7;
+  const ph = sy + TILE - py;
+  ctx.fillStyle = '#2a1608';
+  ctx.fillRect(sx + 11, py, 10, ph);
+  ctx.fillStyle = '#7a4e26';
+  ctx.fillRect(sx + 12, py, 8, ph);
+  ctx.fillStyle = '#a8743e';
+  ctx.fillRect(sx + 12, py, 2, ph);
+  ctx.fillStyle = '#c89a5a';
+  ctx.fillRect(sx + 12, py, 1, ph);
+  ctx.fillStyle = '#5a3818';
+  ctx.fillRect(sx + 19, py, 1, ph);
+  ctx.fillStyle = '#40260e';
+  for (let y = py + 6; y < sy + TILE - 6; y += 11) ctx.fillRect(sx + 15 + ((y >> 3) & 1), y, 1, 3);
+  // a sill block on the floor
+  ctx.fillStyle = '#2a1608';
+  ctx.fillRect(sx + 8, sy + TILE - 4, 16, 4);
+  ctx.fillStyle = '#a8743e';
+  ctx.fillRect(sx + 9, sy + TILE - 3, 14, 1);
 }
 
 /** a two-tile wooden door, drawn from its top tile */

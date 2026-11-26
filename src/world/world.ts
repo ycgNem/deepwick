@@ -63,6 +63,8 @@ export class World {
   explored = new Uint8Array(WORLD_W * WORLD_H);
   /** firedamp in each open tile, 0-255 (see gas.ts) */
   gas = new Uint8Array(WORLD_W * WORLD_H);
+  /** cracked rock that falls once nothing holds it up (see cavein.ts) */
+  loose = new Uint8Array(WORLD_W * WORLD_H);
   /** surface row for every column (as generated) */
   surface = new Int16Array(WORLD_W);
   /** first solid row from the top of each column, kept up to date as blocks change */

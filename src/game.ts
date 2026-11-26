@@ -15,6 +15,7 @@ import { BREWS, BREW_TIME } from './data/brews';
 import { prefs } from './prefs';
 import { forTouch } from './touch';
 import { stepGas, sniff, gasOpen, isFlameObj, GAS_IGNITE, GAS_BURN, GAS_DENSE } from './world/gas';
+import { supported, propRoof, PROP_MAX, rockDamage } from './world/cavein';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
@@ -56,6 +57,18 @@ export const BUILDING_W = 4;
 export type CanaryMood = 'none' | 'calm' | 'uneasy' | 'frantic' | 'fainted';
 
 /** a flash fire racing through a cloud of firedamp */
+/** a piece of loose rock on its way down (a cave-in) */
+export interface FallingRock {
+  x: number;
+  y: number;
+  vy: number;
+  /** the block it was */
+  b: number;
+  hitPlayer: boolean;
+  hit: Set<Enemy>;
+  done: boolean;
+}
+
 interface Flash {
   front: number[];
   seen: Set<number>;
@@ -142,10 +155,15 @@ const OBJ_ITEM: Partial<Record<Obj, string>> = {
   [Obj.MINECART]: 'minecart',
   [Obj.LAMP]: 'lamp',
   [Obj.WICKPOST]: 'wickpost',
+  [Obj.BEAM]: 'prop',
 };
+
+/** small things a rockfall knocks flat and buries */
+const CRUSHABLE = new Set<number>([Obj.TORCH, Obj.LADDER, Obj.BEAM, Obj.SAPLING, Obj.BUSH, Obj.BUSH_BERRY, Obj.CROP0, Obj.CROP1, Obj.CROP2, Obj.CROP3]);
 
 /** objects that fall off when the block under them goes */
 const NEEDS_FLOOR = new Set<number>([
+  Obj.BEAM,
   Obj.WORKBENCH,
   Obj.FURNACE,
   Obj.ANVIL,
@@ -278,6 +296,11 @@ export class Game {
   private hissT = 0;
   /** the canary's nose: what it smells, how it feels, how long it has breathed thick gas, and when it next sings */
   canary = { smell: 0, mood: 'none' as CanaryMood, faint: 0, songT: 3 };
+  /** cave-ins: rock in the air, and loose tiles that have started to give (tile -> seconds until it drops) */
+  rocks: FallingRock[] = [];
+  working = new Map<number, number>();
+  private caveT = 0;
+  private creakT = 0;
   parts: Particle[] = [];
   texts: FloatText[] = [];
   boss: Boss | null = null;
@@ -504,6 +527,7 @@ export class Game {
     this.updateShots(dt);
     this.updateBombs(dt);
     this.updateGas(dt);
+    this.updateCaveIns(dt);
     this.updateParticles(dt);
     if (this.fishFly && (this.fishFly.t += dt) > 0.6) this.fishFly = null;
     this.updateEnvironment(dt, menu);
@@ -1907,36 +1931,14 @@ export class Game {
     const i = w.idx(tx, ty);
     const placedByYou = w.placed[i] === 1;
     w.placed[i] = 0;
+    w.loose[i] = 0;
     w.set(tx, ty, B.AIR);
     w.damage.delete(i);
     this.wakeWater(tx, ty);
     this.checkBreach(tx, ty);
+    this.loosenAround(tx, ty);
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
-    // decor resting on (or hanging from) this block goes with it; big formations break loose
-    if (ty > 0) {
-      const up = w.decor[w.idx(tx, ty - 1)];
-      if (propOf(up)?.anchor === 'floor') this.harvestDecor(tx, ty - 1);
-      else if (up && !propOf(up) && !w.rock(tx, ty - 2)) w.decor[w.idx(tx, ty - 1)] = 0;
-    }
-    if (ty + 1 < w.h) {
-      const dn = w.decor[w.idx(tx, ty + 1)];
-      if (propOf(dn)?.anchor === 'ceil') this.harvestDecor(tx, ty + 1);
-      else if (dn && !propOf(dn) && !w.rock(tx, ty + 2)) w.decor[w.idx(tx, ty + 1)] = 0;
-    }
-    // objects standing on it fall
-    const above = w.getObj(tx, ty - 1);
-    if (above && NEEDS_FLOOR.has(above)) {
-      if (above === Obj.TREE) this.fellTree(tx, ty - 1);
-      else this.breakObj(tx, ty - 1, true);
-    }
-    this.checkTorches(tx, ty);
-    // rails need their floor, lamps their ceiling
-    if (w.hasRail(tx, ty - 1)) {
-      w.setRail(tx, ty - 1, false);
-      this.drops.push(new Drop('rail', 1, cx, cy - TILE));
-    }
-    if (w.getObj(tx, ty + 1) === Obj.LAMP) this.breakObj(tx, ty + 1, true);
 
     this.p.stats.mined++;
     this.burst(cx, cy, 12, [def.color, '#3a3030', def.color], 140);
@@ -1967,6 +1969,37 @@ export class Game {
     }
     if (def.ore || def.light) audio.play('ore_break', { vol: 0.8 });
     else audio.play('block_break', { vol: 0.65 });
+  }
+
+  /** a block just came away from (tx,ty): what rested on it or hung from it goes too */
+  private loosenAround(tx: number, ty: number): void {
+    const w = this.world;
+    const cx = tx * TILE + TILE / 2;
+    const cy = ty * TILE + TILE / 2;
+    // decor resting on (or hanging from) this block goes with it; big formations break loose
+    if (ty > 0) {
+      const up = w.decor[w.idx(tx, ty - 1)];
+      if (propOf(up)?.anchor === 'floor') this.harvestDecor(tx, ty - 1);
+      else if (up && !propOf(up) && !w.rock(tx, ty - 2)) w.decor[w.idx(tx, ty - 1)] = 0;
+    }
+    if (ty + 1 < w.h) {
+      const dn = w.decor[w.idx(tx, ty + 1)];
+      if (propOf(dn)?.anchor === 'ceil') this.harvestDecor(tx, ty + 1);
+      else if (dn && !propOf(dn) && !w.rock(tx, ty + 2)) w.decor[w.idx(tx, ty + 1)] = 0;
+    }
+    // objects standing on it fall
+    const above = w.getObj(tx, ty - 1);
+    if (above && NEEDS_FLOOR.has(above)) {
+      if (above === Obj.TREE) this.fellTree(tx, ty - 1);
+      else this.breakObj(tx, ty - 1, true);
+    }
+    this.checkTorches(tx, ty);
+    // rails need their floor, lamps their ceiling
+    if (w.hasRail(tx, ty - 1)) {
+      w.setRail(tx, ty - 1, false);
+      this.drops.push(new Drop('rail', 1, cx, cy - TILE));
+    }
+    if (w.getObj(tx, ty + 1) === Obj.LAMP) this.breakObj(tx, ty + 1, true);
   }
 
   /** torches with nothing left to hold them drop */
@@ -2102,7 +2135,6 @@ export class Game {
     }
     if (dropItem) {
       let item = OBJ_ITEM[o as Obj];
-      if (o === Obj.BEAM) item = 'wood';
       if (o === Obj.CROP0 || o === Obj.CROP1 || o === Obj.CROP2) item = 'seeds';
       if (o === Obj.BUSH) {
         item = undefined;
@@ -2225,6 +2257,7 @@ export class Game {
       w.set(x, y, hd.block);
       w.decor[w.idx(x, y)] = 0;
       w.placed[w.idx(x, y)] = 1;
+      w.loose[w.idx(x, y)] = 0;
       ok = true;
       pl.useT = 0.14;
     } else if (hd.kind === 'wall' && hd.wall !== undefined) {
@@ -2317,6 +2350,22 @@ export class Game {
           return false;
         }
         w.setObj(x, y, o);
+        return true;
+      }
+      case Obj.BEAM: {
+        if (!floor) {
+          this.text(x * TILE + 16, y * TILE, 'Stand it on a floor', '#ff9a6a');
+          return false;
+        }
+        if (propRoof(w, x, y) < 0) {
+          this.text(x * TILE + 16, y * TILE, `Needs a roof within ${PROP_MAX} tiles`, '#ff9a6a');
+          return false;
+        }
+        w.setObj(x, y, Obj.BEAM);
+        w.decor[w.idx(x, y)] = 0;
+        audio.play('door', { pitch: 0.75, vol: 0.55 });
+        this.burst(x * TILE + 16, (propRoof(w, x, y) + 1) * TILE + 2, 8, ['#8a7f72', '#5a4a3a'], 50);
+        this.hint('prop', 'The prop holds the roof over it, two tiles either side: loose rock it holds stays put while it stands. Knock it out and the roof is free to fall.');
         return true;
       }
       case Obj.STORAGE: {
@@ -4090,6 +4139,169 @@ export class Game {
       c.songT = 0.4;
       audio.play('chirp', { vol: 0.55, pitch: 1.3 + Math.random() * 0.2 });
     } else c.songT = 1;
+  }
+
+  // ------------------------------------------------------------------ cave-ins
+  /** loose rock that has lost what held it up creaks, sheds dust, then drops */
+  private updateCaveIns(dt: number): void {
+    const w = this.world;
+    const W = w.w;
+    if (this.creakT > 0) this.creakT -= dt;
+    for (const [i, t] of this.working) {
+      const x = i % W;
+      const y = (i - x) / W;
+      if (!w.loose[i] || !w.rock(x, y) || supported(w, x, y)) {
+        this.working.delete(i);
+        continue;
+      }
+      const left = t - dt;
+      if (left <= 0) {
+        this.working.delete(i);
+        this.dropRock(x, y);
+        continue;
+      }
+      this.working.set(i, left);
+      // dust trickles from its underside
+      if (Math.random() < dt * 14) {
+        const life = 0.5 + Math.random() * 0.4;
+        this.parts.push({ x: x * TILE + 4 + Math.random() * 24, y: (y + 1) * TILE + 1, vx: (Math.random() - 0.5) * 12, vy: 10 + Math.random() * 30, life, max: life, color: Math.random() < 0.5 ? BLOCKS[w.fg[i]].color : '#8a7f72', size: Math.random() < 0.7 ? 1 : 2, grav: 260, glow: false });
+      }
+    }
+    this.updateRocks(dt);
+    // every so often, look around for rock that has nothing holding it any more
+    this.caveT -= dt;
+    if (this.caveT > 0) return;
+    this.caveT = 0.25;
+    const pl = this.player;
+    const tx = Math.floor(pl.cx / TILE);
+    const ty = Math.floor(pl.cy / TILE);
+    let nearest = 1e9;
+    for (let y = Math.max(1, ty - 26); y < Math.min(w.h - 1, ty + 26); y++) {
+      for (let x = Math.max(0, tx - 40); x < Math.min(W, tx + 40); x++) {
+        const i = y * W + x;
+        if (!w.loose[i]) continue;
+        if (!w.rock(x, y)) {
+          w.loose[i] = 0;
+          continue;
+        }
+        if (this.working.has(i)) continue;
+        if (!this.p.seen.loose && w.explored[i] && !w.rock(x, y + 1) && Math.abs(x - tx) <= 6 && Math.abs(y - ty) <= 5) {
+          this.hint('loose', 'Cracked rock overhead: loose ground. Dig out what holds it up and it comes down on you. A Timber Prop (3 wood makes 2, by hand) stood under it holds the roof two tiles either side.');
+        }
+        if (supported(w, x, y)) continue;
+        this.working.set(i, 0.9 + Math.random() * 0.7);
+        nearest = Math.min(nearest, Math.hypot(x - tx, y - ty));
+      }
+    }
+    if (nearest < 18 && this.creakT <= 0) {
+      audio.play('creak', { vol: Math.max(0.3, 0.9 - nearest * 0.035), pitch: 0.9 + Math.random() * 0.2 });
+      this.creakT = 1.4;
+      if (nearest < 10) this.shake = Math.max(this.shake, 1.5);
+    }
+  }
+
+  /** the loose rock at (x,y) lets go */
+  private dropRock(x: number, y: number): void {
+    const w = this.world;
+    const i = w.idx(x, y);
+    const b = w.fg[i];
+    w.loose[i] = 0;
+    if (!BLOCKS[b].solid || BLOCKS[b].unbreakable) return;
+    w.placed[i] = 0;
+    w.set(x, y, B.AIR);
+    w.damage.delete(i);
+    this.wakeWater(x, y);
+    this.checkBreach(x, y);
+    this.loosenAround(x, y);
+    this.rocks.push({ x: x * TILE + TILE / 2, y: y * TILE, vy: 40, b, hitPlayer: false, hit: new Set(), done: false });
+    // what rested on it follows hard behind; loose rock beside it soon after
+    for (const [j, t] of [
+      [i - w.w, 0.1 + Math.random() * 0.15],
+      [i - 1, 0.3 + Math.random() * 0.3],
+      [i + 1, 0.3 + Math.random() * 0.3],
+    ]) {
+      if (j < 0 || !w.loose[j] || this.working.has(j)) continue;
+      const jx = j % w.w;
+      if (!supported(w, jx, (j - jx) / w.w)) this.working.set(j, t);
+    }
+  }
+
+  private updateRocks(dt: number): void {
+    if (!this.rocks.length) return;
+    const w = this.world;
+    const pl = this.player;
+    for (const r of this.rocks) {
+      r.vy = Math.min(760, r.vy + 1500 * dt);
+      r.y += r.vy * dt;
+      const col = Math.floor(r.x / TILE);
+      const dmg = rockDamage(biomeAt(Math.floor(r.y / TILE)).id);
+      // anything underneath takes the blow
+      if (!r.hitPlayer && !pl.dead && Math.abs(pl.cx - r.x) < 20 && r.y + TILE - 4 > pl.y && r.y < pl.y + pl.h - 6) {
+        r.hitPlayer = true;
+        this.hurtPlayer(dmg, r.x + (pl.cx >= r.x ? -1 : 1));
+        this.p.nerve = Math.max(0, this.p.nerve - 6);
+      }
+      for (const e of this.enemies) {
+        if (e.dead || r.hit.has(e)) continue;
+        if (Math.abs(e.cx - r.x) < 16 + e.w / 2 && r.y + TILE > e.y && r.y < e.y + e.h) {
+          r.hit.add(e);
+          this.damageEnemy(e, Math.PI / 2, dmg * 2);
+        }
+      }
+      const below = Math.floor((r.y + TILE) / TILE);
+      if (below >= w.h || w.solid(col, below)) {
+        r.done = true;
+        this.landRock(r, col, below - 1);
+      }
+    }
+    this.rocks = this.rocks.filter((r) => !r.done);
+  }
+
+  /** a falling rock comes down at (x,y): it lies there as rubble, or shatters if there is no room */
+  private landRock(r: FallingRock, x: number, y: number): void {
+    const w = this.world;
+    const def = BLOCKS[r.b];
+    const cx = x * TILE + TILE / 2;
+    const cy = y * TILE + TILE / 2;
+    const pl = this.player;
+    if (!w.inside(x, y)) return;
+    const i = w.idx(x, y);
+    // a spark off the rock in firedamp
+    const gasHere = Math.max(w.gas[i], y > 0 ? w.gas[i - w.w] : 0);
+    if (gasHere >= GAS_IGNITE && !this.flash && Math.random() < 0.45) this.ignite(x, gasHere === w.gas[i] ? y : y - 1);
+    const onPlayer = !pl.dead && Math.abs(pl.cx - cx) < 24 && pl.y < (y + 1) * TILE && pl.y + pl.h > y * TILE;
+    const fg = w.fg[i];
+    // rubble buries rails and knocks small things flat; it will not land on anything bigger
+    const o = w.obj[i];
+    const crushable = !o || CRUSHABLE.has(o);
+    const room = !BLOCKS[fg].solid && fg !== B.LAVA && crushable && !onPlayer && !this.isProtected(x, y);
+    if (room && !def.ore && !def.light) {
+      if (o) this.breakObj(x, y, true);
+      if (w.rail[i]) {
+        w.setRail(x, y, false);
+        this.drops.push(new Drop('rail', 1, cx, cy - 8));
+      }
+    }
+    if (def.ore || def.light || !room) {
+      // it breaks apart: ore and anything that glows break into what you would have mined
+      if ((def.ore || def.light) && def.drop && !def.drop.startsWith('@')) this.drops.push(new Drop(def.drop, 1, cx, cy));
+      else if (Math.random() < 0.5) this.drops.push(new Drop('gravel', 1, cx, cy));
+    } else {
+      w.set(x, y, B.GRAVEL);
+      w.decor[i] = 0;
+      w.placed[i] = 0;
+      w.loose[i] = 0;
+      w.gas[i] = 0;
+    }
+    this.burst(cx, cy + 10, 14, [def.color, '#8a7f72', '#3a3030'], 120);
+    const d = Math.hypot(pl.cx - cx, pl.cy - cy) / TILE;
+    if (d < 26) {
+      audio.play('rockfall', { vol: Math.max(0.15, 1 - d * 0.04), pitch: 0.85 + Math.random() * 0.3 });
+      this.shake = Math.max(this.shake, Math.max(0, 6 - d * 0.4));
+    }
+    if (d < 12 && !this.p.seen.cavein) {
+      this.hint('cavein', 'Cave-in! What came down lies as gravel: dig through it with your hands. The old mine frames hold up bad roofs, so pull one down only if you mean to bring the roof with it.');
+    }
   }
 
   private updateParticles(dt: number): void {

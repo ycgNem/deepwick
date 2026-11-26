@@ -38,6 +38,7 @@ export const RECIPES: Recipe[] = [
   r('torch', 3, 'hand', { wood: 1, gel: 1 }),
   r('torch', 4, 'hand', { wood: 1, coal: 1 }),
   r('campfire', 1, 'hand', { wood: 6, stone: 4 }),
+  r('prop', 2, 'hand', { wood: 3 }),
 
   // workbench
   r('woodpick', 1, 'workbench', { wood: 8 }),
