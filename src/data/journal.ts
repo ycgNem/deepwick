@@ -7,6 +7,7 @@ import type { Game } from '../game';
 import { count } from '../state';
 import { BIOMES } from './biomes';
 import { FLAME, KINDLING } from './wick';
+import { LOST } from './lost';
 
 export interface Goal {
   id: string;
@@ -108,9 +109,16 @@ export const CHAPTERS: Chapter[] = [
       {
         id: 'glowing',
         text: 'Raise the Wick to Glowing',
-        how: `Offer ${FLAME[2].need} Lumen in all. Brannoc the smith comes home, and the Wick lets you build Wickposts.`,
+        how: `Offer ${FLAME[2].need} Lumen in all. Its light will be seen from deep below, and the Wick lets you build Wickposts.`,
         progress: (g) => flameTo(g, 2),
         coins: 60,
+      },
+      {
+        id: 'brannoc',
+        text: 'Bring Brannoc home',
+        how: `Brannoc the smith is holed up by a fire in the tunnels, ${LOST.forge.depth[0]}-${LOST.forge.depth[1]}m down (the marker under your Journal and on the map points the way). Talk to him, then lead him back into the Wick's light: he keeps to your heels, and Wickposts and recall bring him along.`,
+        progress: (g) => flag(g.p.buildings.some((b) => b.kind === 'forge')),
+        coins: 80,
       },
     ],
   },
@@ -148,9 +156,16 @@ export const CHAPTERS: Chapter[] = [
       {
         id: 'bright',
         text: 'Raise the Wick to Bright',
-        how: `Offer ${FLAME[3].need} Lumen in all. Wren the archivist comes home to read your relics.`,
+        how: `Offer ${FLAME[3].need} Lumen in all. The light will reach the Grotto, where someone is still waiting.`,
         progress: (g) => flameTo(g, 3),
         coins: 100,
+      },
+      {
+        id: 'wren',
+        text: 'Bring Wren home',
+        how: `Wren the archivist is waiting by a fire in the ${BIOMES[1].name}, ${LOST.archive.depth[0]}-${LOST.archive.depth[1]}m down. Find her and lead her home into the Wick's light to reopen the Lantern Archive.`,
+        progress: (g) => flag(g.p.buildings.some((b) => b.kind === 'archive')),
+        coins: 120,
       },
     ],
   },
@@ -209,6 +224,9 @@ export const CHAPTERS: Chapter[] = [
     ],
   },
 ];
+
+/** the goal order saves were written with before goals were tracked by id */
+export const OLD_GOAL_IDS = ['wood', 'bench', 'pick', 'coal', 'kindle', 'torches', 'depth30', 'offer', 'night', 'glowing', 'copper', 'lantern', 'wickpost', 'grotto', 'bright', 'hollows', 'blazing', 'ember', 'vault', 'radiant', 'tide', 'heart'];
 
 /** every goal in order, with the chapter it belongs to */
 export const GOALS: { goal: Goal; chapter: number }[] = CHAPTERS.flatMap((c, ci) => c.goals.map((goal) => ({ goal, chapter: ci })));

@@ -1,3 +1,4 @@
+import type { LostSoul } from './data/lost';
 import type { ModeId } from './data/nerve';
 import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
 import { TILE, INV_SIZE, DAY_LENGTH } from './constants';
@@ -82,6 +83,10 @@ export interface Progress {
   mode: ModeId;
   /** how far through the Journal's goals you are */
   journal: number;
+  /** the id of the Journal's current goal ('done' at the end), so new goals can be added without shifting saves */
+  journalAt?: string;
+  /** townsfolk the Wick has called who are still down in the dark */
+  lost?: LostSoul[];
   /** a Gloam Tide in progress: the Wick's ward (0..100) and what you have cut down */
   tide?: { day: number; ward: number; kills: number } | null;
   /** Gloam Tides the Wick has held through */

@@ -477,6 +477,64 @@ button.ghost {
   height: 100%;
   background: linear-gradient(#ffe08a, #d9a441);
 }
+#seek {
+  margin-top: 6px;
+  margin-left: auto;
+  width: 196px;
+}
+.seek {
+  position: relative;
+  padding: 5px 9px 6px 30px;
+  margin-top: 4px;
+  text-align: left;
+  background: rgba(24, 14, 6, 0.68);
+  border: 2px solid #000;
+  box-shadow: 0 0 0 2px #6a4518;
+  text-shadow: 1px 1px 0 #000;
+  animation: seekglow 1.8s ease-in-out infinite alternate;
+}
+.seek.with {
+  box-shadow: 0 0 0 2px #8a7a28;
+  animation: none;
+}
+.seek b {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: #ffd890;
+}
+.seek span {
+  display: block;
+  font-size: 12px;
+  color: var(--dim);
+}
+.seek .arr {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+}
+.seek .arr svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: -1px;
+  fill: #ffb84a;
+  stroke: #1a0e04;
+  stroke-width: 1.2px;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+@keyframes seekglow {
+  from {
+    box-shadow: 0 0 0 2px #6a4518;
+  }
+  to {
+    box-shadow: 0 0 0 2px #b0702a, 0 0 12px rgba(255, 150, 60, 0.45);
+  }
+}
 .goal.fresh {
   animation: goalin 1.6s ease-out;
 }

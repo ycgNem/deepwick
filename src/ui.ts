@@ -14,6 +14,7 @@ import { FLAME, KINDLING, LUMEN, MAX_FLAME, lumenToNext } from './data/wick';
 import { MODES, MODE_IDS, ModeId, NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 import { CHAPTERS, GOALS, ROMAN } from './data/journal';
 import { prefs, HUD_SIZES } from './prefs';
+import { LOST } from './data/lost';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -71,6 +72,7 @@ export class UI implements UIHooks {
   private cursor: Stack | null = null;
   private lastHotbar = '';
   private lastGoal = '';
+  private lastSeek = '';
   private lastGoalIdx = -1;
   private lastHelp = '';
   onQuit: (() => void) | null = null;
@@ -89,7 +91,7 @@ export class UI implements UIHooks {
     this.miniCtx = mc;
     [this.mapCanvas, this.mapCtx] = makeCanvas(WORLD_W, WORLD_H);
     this.mapImg = this.mapCtx.createImageData(WORLD_W, WORLD_H);
-    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill', 'bossName', 'tideChip']) {
+    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill', 'bossName', 'tideChip', 'seek']) {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -136,8 +138,22 @@ export class UI implements UIHooks {
     return this.panel !== null;
   }
 
-  /** a big title card across the middle of the screen */
+  private bannerAt = 0;
+
+  /** a big title card across the middle of the screen (a second one waits its turn) */
   banner(title: string, sub: string): void {
+    const now = performance.now();
+    const free = this.bannerAt + 2600;
+    if (now < free) {
+      this.bannerAt = free;
+      setTimeout(() => this.showBanner(title, sub), free - now);
+      return;
+    }
+    this.bannerAt = now;
+    this.showBanner(title, sub);
+  }
+
+  private showBanner(title: string, sub: string): void {
     const el = document.getElementById('banner');
     if (!el) return;
     const b = el.querySelector('b');
@@ -248,6 +264,7 @@ export class UI implements UIHooks {
     h.nerveBar.classList.toggle('frayed', nv < NERVE_FRAYED);
     h.nerveText.textContent = nv <= 0 ? 'BROKEN' : nv < NERVE_SHAKEN ? 'SHAKEN' : nv < NERVE_FRAYED ? 'FRAYED' : `${Math.ceil(nv)}`;
     this.updateGoal();
+    this.updateSeek();
     h.coins.textContent = fmt(g.p.coins);
     const c = g.p.clock;
     const hours = Math.floor(((c * 24 + 6) % 24) * 1);
@@ -403,6 +420,14 @@ export class UI implements UIHooks {
       for (let x = Math.max(0, pt.x - range); x < Math.min(w0.w, pt.x + range); x++) if (w0.obj[y * w0.w + x] === Obj.WICKPOST) ctx.fillRect(mx(x), my(y - 1), z * 2, z * 3);
     ctx.fillStyle = '#ff7a9a';
     ctx.fillRect(mx(p.spawn.x) - z, my(p.spawn.y) - z, z * 3, z * 2);
+    // the lost: a fire that blinks
+    const blink = Math.floor(performance.now() / 450) % 2 === 0;
+    for (const s of g.souls) {
+      ctx.fillStyle = blink ? '#ffe08a' : '#ff8a3a';
+      ctx.fillRect(mx(s.x / TILE) - z * 1.5, my(s.y / TILE - 1) - z * 1.5, z * 4, z * 4);
+      ctx.fillStyle = '#2a1408';
+      ctx.fillRect(mx(s.x / TILE) - z * 0.5, my(s.y / TILE - 1) - z * 0.5, z * 2, z * 2);
+    }
     if (p.satchel) {
       ctx.fillStyle = '#9af0a0';
       ctx.fillRect(mx(p.satchel.x / TILE) - z, my(p.satchel.y / TILE) - z, z * 3, z * 3);
@@ -742,6 +767,35 @@ export class UI implements UIHooks {
     this.drawMarkers(ctx, (x) => (x - vx) * z, (y) => (y - vy) * z, z, 30);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect((pt.x - vx) * z - 2, (pt.y - vy) * z - 4, 5, 8);
+  }
+
+  /** where the lost are, under the Journal goal: a pointer and how far */
+  private updateSeek(): void {
+    const g = this.game;
+    const pt = g.playerTile();
+    let html = '';
+    for (const s of g.souls) {
+      const def = LOST[s.kind];
+      const with_ = g.soulFollowing(s.kind);
+      const tx = with_ ? WICK_X : Math.floor(s.x / TILE);
+      const ty = with_ ? WICK_Y - 1 : Math.floor(s.y / TILE) - 1;
+      const dx = tx - pt.x;
+      const dy = ty - pt.y;
+      const parts: string[] = [];
+      if (dy > 1) parts.push(`${dy}m down`);
+      else if (dy < -1) parts.push(`${-dy}m up`);
+      if (dx > 1) parts.push(`${dx}m right`);
+      else if (dx < -1) parts.push(`${-dx}m left`);
+      const near = Math.hypot(dx, dy) < 3;
+      const ang = Math.round((Math.atan2(dy, dx) * 180) / Math.PI);
+      const where = near ? (with_ ? 'almost home' : 'right here') : parts.join(' \u00b7 ');
+      html += `<div class="seek${with_ ? ' with' : ''}"><i class="arr" style="transform:rotate(${near ? 90 : ang}deg)"><svg viewBox="-8 -8 16 16"><path d="M-7 -1.6H0.5V-5.5L7.5 0 0.5 5.5V1.6H-7Z"/></svg></i><b>${with_ ? `${def.name} is with you` : `${def.name}'s fire`}</b><span>${with_ ? `To the Wick: ${where}` : where}</span></div>`;
+    }
+    if (html !== this.lastSeek) {
+      this.hudEls.seek.innerHTML = html;
+      this.hudEls.seek.style.display = html ? '' : 'none';
+      this.lastSeek = html;
+    }
   }
 
   /** the Journal's current goal, under the minimap */

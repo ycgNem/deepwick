@@ -14,6 +14,7 @@ import { heldDef } from './state';
 import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME, FLAME } from './data/wick';
 import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 import { prefs } from './prefs';
+import { LOST } from './data/lost';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -608,6 +609,8 @@ export class Renderer {
 
   private drawNpcs(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
     for (const b of g.p.buildings) {
+      // still walking over from the Wick
+      if (g.homing.some((h) => h.kind === b.kind)) continue;
       const info = BUILDING_INFO[b.kind];
       const img = A.camp[info.npc];
       const pad = A.padBottom[info.npc] ?? 0;
@@ -622,6 +625,25 @@ export class Renderer {
         ctx.scale(-1, 1);
         ctx.drawImage(img, 0, 0);
       } else ctx.drawImage(img, x, y);
+      ctx.restore();
+    }
+    // the lost: by their fire, or walking home at your heels
+    for (const sl of [...g.souls, ...g.homing]) {
+      const def = LOST[sl.kind];
+      const key = sl.moving ? def.walk : def.sprite;
+      const img = A.camp[key];
+      if (!img) continue;
+      const pad = A.padBottom[key] ?? 0;
+      const frame = sl.moving ? Math.floor(sl.walkT * 11) % 8 : 0;
+      const bob = sl.moving ? (frame % 4 === 1 || frame % 4 === 2 ? -1 : 0) : Math.round(Math.sin(g.time * 2 + sl.x) * 0.6);
+      const x = Math.round(sl.x - 24 - camX);
+      const y = Math.round(sl.y - (48 - pad) + bob - camY);
+      ctx.save();
+      if (sl.facing > 0) {
+        ctx.translate(x + 48, y);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, frame * 48, 0, 48, 48, 0, 0, 48, 48);
+      } else ctx.drawImage(img, frame * 48, 0, 48, 48, x, y, 48, 48);
       ctx.restore();
     }
   }
@@ -1480,6 +1502,48 @@ export class Renderer {
       out.fillText(t.text, x, y);
     }
     out.globalAlpha = 1;
+    // what the lost say, in a speech bubble over their heads
+    for (const sl of [...g.souls, ...g.homing]) {
+      if (sl.sayT <= 0 || !sl.say) continue;
+      const size = Math.round(7 * s);
+      out.font = `${size}px "Pixelify Sans", monospace`;
+      const maxW = 150 * s;
+      const lines: string[] = [];
+      let cur = '';
+      for (const wd of sl.say.split(' ')) {
+        const t = cur ? `${cur} ${wd}` : wd;
+        if (cur && out.measureText(t).width > maxW) {
+          lines.push(cur);
+          cur = wd;
+        } else cur = t;
+      }
+      if (cur) lines.push(cur);
+      const lh = size * 1.25;
+      const bw = Math.round(Math.max(...lines.map((l) => out.measureText(l).width)) + 10 * s);
+      const bh = Math.round(lines.length * lh + 6 * s);
+      const x = Math.round((sl.x - camX) * s);
+      const yb = Math.round((sl.y - 52 - camY) * s);
+      out.globalAlpha = Math.min(1, sl.sayT * 2.5);
+      out.fillStyle = '#2a1c10';
+      out.fillRect(x - bw / 2 - s, yb - bh - s, bw + 2 * s, bh + 2 * s);
+      out.beginPath();
+      out.moveTo(x - 5 * s, yb);
+      out.lineTo(x + 3 * s, yb);
+      out.lineTo(x - 3 * s, yb + 6 * s);
+      out.closePath();
+      out.fill();
+      out.fillStyle = '#f7eedc';
+      out.fillRect(x - bw / 2, yb - bh, bw, bh);
+      out.beginPath();
+      out.moveTo(x - 4 * s, yb - s);
+      out.lineTo(x + 2 * s, yb - s);
+      out.lineTo(x - 2.5 * s, yb + 4 * s);
+      out.closePath();
+      out.fill();
+      out.fillStyle = '#2a1c10';
+      lines.forEach((l, i) => out.fillText(l, x, yb - bh + 3 * s + lh * (i + 0.5)));
+      out.globalAlpha = 1;
+    }
     const pl = g.player;
     if (g.near && !g.ui.isOpen() && !pl.dead && !g.fishing) {
       const size = Math.round(8 * s);

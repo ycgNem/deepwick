@@ -9,7 +9,8 @@ import { ITEMS, ItemDef, RELICS, SHOP_STOCK, equipSlotOf } from './data/items';
 import { ENEMIES, DAY_SURFACE, NIGHT_SURFACE } from './data/enemies';
 import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, WICK_GLOW, WICK_X, WICK_Y, flameLevel } from './data/wick';
-import { GOALS, CHAPTERS, ROMAN, goalDone } from './data/journal';
+import { GOALS, CHAPTERS, ROMAN, OLD_GOAL_IDS, goalDone } from './data/journal';
+import { LOST, LostKind, LostSoul, isLostKind } from './data/lost';
 import { prefs } from './prefs';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
@@ -198,6 +199,21 @@ export function isNight(c: number): boolean {
   return c >= 0.6 && c < 0.96;
 }
 
+/** one of the lost townsfolk as they stand in the world (feet at x, y in px) */
+export interface Soul {
+  kind: LostKind;
+  x: number;
+  y: number;
+  facing: number;
+  walkT: number;
+  moving: boolean;
+  /** how far along your trail they have walked */
+  s: number;
+  say: string;
+  sayT: number;
+  chatT: number;
+}
+
 export class Game {
   world: World;
   p: Progress;
@@ -258,6 +274,12 @@ export class Game {
   private tideT = 0;
   /** the Wick flaring up a level: a light wave, rays and a title card */
   flare: { t: number; level: number; from: number } | null = null;
+  /** the lost townsfolk in the world (rebuilt from the save) */
+  souls: Soul[] = [];
+  /** townsfolk just home, walking from the Wick to their door */
+  homing: (Soul & { tx: number })[] = [];
+  /** where you have walked while someone follows you: they keep to it */
+  private trail: { x: number; y: number; s: number }[] = [];
 
   constructor(
     public input: Input,
@@ -282,6 +304,7 @@ export class Game {
     this.migrateJournal();
     this.ensureWick();
     this.settleMissing(false);
+    this.syncSouls();
     if (this.p.bossRewardPending) setTimeout(() => this.grantBossReward(this.player.cx, this.player.cy), 800);
     this.snapCamera();
     // settle any water a migrated save left hanging
@@ -406,6 +429,7 @@ export class Game {
       this.flowWater(dt);
       this.updateEnemies(dt);
       this.updateTide(dt);
+      this.updateSouls(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
     }
@@ -2264,20 +2288,31 @@ export class Game {
     for (let i = 1; i <= lvl; i++) {
       const kind = FLAME[i].settler;
       if (!kind || this.p.buildings.some((b) => b.kind === kind)) continue;
-      let best = -1;
-      let bestScore = 1e9;
-      for (const d of [9, 15, 21, 27, 33]) {
-        for (const x of [WICK_X - d, WICK_X + d]) {
-          const sc = this.plotScore(x);
-          if (sc >= 0 && sc < bestScore) {
-            best = x;
-            bestScore = sc;
-          }
-        }
-        if (bestScore === 0) break;
+      // the smith and the archivist are down in the dark: they have to be fetched
+      if (isLostKind(kind)) {
+        if (!(this.p.lost ?? []).some((l) => l.kind === kind)) this.hideSoul(kind);
+        continue;
       }
+      const best = this.findPlot();
       if (best >= 0) this.placeBuilding(kind, best, announce);
     }
+  }
+
+  /** the best free plot for a house near the Wick, or -1 */
+  private findPlot(): number {
+    let best = -1;
+    let bestScore = 1e9;
+    for (const d of [9, 15, 21, 27, 33, 39, 45, 51, 57]) {
+      for (const x of [WICK_X - d, WICK_X + d]) {
+        const sc = this.plotScore(x);
+        if (sc >= 0 && sc < bestScore) {
+          best = x;
+          bestScore = sc;
+        }
+      }
+      if (bestScore === 0) break;
+    }
+    return best;
   }
 
   private placeBuilding(kind: BuildingKind, x: number, announce = true): boolean {
@@ -2338,9 +2373,17 @@ export class Game {
 
   /** saves from before the Journal: tick off everything already done, without paying for it again */
   private migrateJournal(): void {
-    if (typeof this.p.journal === 'number' && Number.isFinite(this.p.journal)) return;
-    this.p.journal = 0;
-    this.advanceJournal(false);
+    const p = this.p;
+    if (typeof p.journal !== 'number' || !Number.isFinite(p.journal)) {
+      p.journal = 0;
+      this.advanceJournal(false);
+      return;
+    }
+    // find the goal you were on by its id, wherever new goals have been added
+    const at = p.journalAt ?? (p.journal < OLD_GOAL_IDS.length ? OLD_GOAL_IDS[p.journal] : 'done');
+    const i = GOALS.findIndex((x) => x.goal.id === at);
+    p.journal = i >= 0 ? i : at === 'done' ? GOALS.length : Math.min(p.journal, GOALS.length);
+    p.journalAt = GOALS[p.journal]?.goal.id ?? 'done';
   }
 
   /** tick off every goal that is already met, in order; rewards only when it happens in play */
@@ -2349,6 +2392,7 @@ export class Game {
     while (p.journal < GOALS.length && goalDone(this, GOALS[p.journal].goal)) {
       const { goal, chapter } = GOALS[p.journal];
       p.journal++;
+      p.journalAt = GOALS[p.journal]?.goal.id ?? 'done';
       if (!reward) continue;
       p.coins += goal.coins;
       this.addXp('delving', goal.coins);
@@ -2488,7 +2532,9 @@ export class Game {
   private flameUp(level: number): void {
     const f = FLAME[level];
     this.flare = { t: 0, level, from: level > 1 ? FLAME[level - 1].radius : 0 };
-    this.ui.banner?.(level === 1 ? 'The Wick burns' : `The Wick burns ${f.name.toLowerCase()}`, level === 1 ? 'Deepwick has a heart again.' : f.perk);
+    const calls = f.settler;
+    const sub = level === 1 ? 'Deepwick has a heart again.' : isLostKind(calls) && !this.p.buildings.some((b) => b.kind === calls) ? LOST[calls].call : f.perk;
+    this.ui.banner?.(level === 1 ? 'The Wick burns' : `The Wick burns ${f.name.toLowerCase()}`, sub);
     audio.play('kindle', { vol: 0.9, vary: 0 });
     this.shake = Math.max(this.shake, 8);
     this.burst(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE, 90, ['#ffe08a', '#ffb84a', '#ffffff', '#ff8a2a'], 280, true);
@@ -2497,6 +2543,246 @@ export class Game {
     this.refresh();
     this.onSave?.();
     if (level === 1) this.hint('lumen', 'Anything that glows feeds the Wick: glowcaps, jade, amethyst, glowfin and finer things from deeper down. Bring them home and offer them (E at the Wick).');
+  }
+
+  // ------------------------------------------------------------------ the lost
+  soulFollowing(kind: LostKind): boolean {
+    return !!this.p.lost?.some((l) => l.kind === kind && l.following);
+  }
+
+  /** keep the townsfolk in the world in step with the save */
+  private syncSouls(): void {
+    const lost = this.p.lost ?? [];
+    this.souls = this.souls.filter((s) => lost.some((l) => l.kind === s.kind));
+    for (const l of lost) {
+      if (this.souls.some((s) => s.kind === l.kind)) continue;
+      const s: Soul = { kind: l.kind, x: 0, y: 0, facing: -1, walkT: 0, moving: false, s: 0, say: '', sayT: 0, chatT: 3 };
+      this.souls.push(s);
+      if (l.following) this.regroup();
+      else this.campSoul(s, l);
+    }
+  }
+
+  /** back by their fire */
+  private campSoul(s: Soul, l: LostSoul): void {
+    s.x = (l.x + 0.5) * TILE;
+    s.y = (l.y + 1) * TILE;
+    s.moving = false;
+    s.s = 0;
+  }
+
+  /** everyone following you catches up at once (after a Wickpost, a recall, or a load) */
+  private regroup(): void {
+    const pl = this.player;
+    const fx = pl.cx;
+    const fy = pl.y + pl.h;
+    this.trail = [{ x: fx, y: fy, s: 0 }];
+    for (const s of this.souls) {
+      if (!this.soulFollowing(s.kind)) continue;
+      s.x = fx;
+      s.y = fy;
+      s.s = 0;
+      s.moving = false;
+    }
+  }
+
+  /** the Wick has called someone: they are holed up by a fire somewhere in the dark */
+  private hideSoul(kind: LostKind): void {
+    const def = LOST[kind];
+    const w = this.world;
+    const r = new Rng(w.seed ^ (kind === 'forge' ? 0x51ed1 : 0xa7c3b));
+    for (let tries = 0; tries < 160; tries++) {
+      const side = r.chance(0.5) ? -1 : 1;
+      const x = Math.round(WICK_X + side * r.int(22, 62));
+      if (x < 8 || x > w.w - 9) continue;
+      const y = w.surface[x] + r.int(def.depth[0], def.depth[1]);
+      let ok = true;
+      for (let cx = x - 5; cx <= x + 5 && ok; cx++) {
+        for (let cy = y - 4; cy <= y + 2 && ok; cy++) {
+          const i = w.idx(cx, cy);
+          const b = w.fg[i];
+          const bd = BLOCKS[b];
+          if (b === B.LAVA || b === B.RUIN_BRICK || b === B.RELIC_STONE || (bd.unbreakable && !bd.liquid)) ok = false;
+          else if (w.obj[i] || w.placed[i] || w.rail[i]) ok = false;
+        }
+      }
+      if (!ok) continue;
+      this.carveCamp(x, y);
+      (this.p.lost ??= []).push({ kind, x, y, following: false });
+      this.syncSouls();
+      return;
+    }
+    // nowhere to shelter in this mountain: they find their own way home
+    const plot = this.findPlot();
+    if (plot >= 0) this.placeBuilding(kind, plot, true);
+  }
+
+  /** a hollow in the rock with a fire burning low */
+  private carveCamp(x: number, y: number): void {
+    const w = this.world;
+    const bi = BIOMES[biomeAt(y).id];
+    for (let cx = x - 4; cx <= x + 4; cx++) {
+      const d = Math.abs(cx - x);
+      const top = d === 4 ? y - 1 : d === 3 ? y - 2 : y - 3;
+      for (let cy = top; cy <= y; cy++) {
+        w.set(cx, cy, B.AIR);
+        const i = w.idx(cx, cy);
+        w.decor[i] = 0;
+        w.obj[i] = 0;
+        if (!w.wall[i]) w.setWall(cx, cy, bi.base);
+      }
+      if (!w.rock(cx, y + 1)) w.set(cx, y + 1, bi.alt);
+    }
+    w.setObj(x + 2, y, Obj.CAMPFIRE);
+    for (let cx = x - 6; cx <= x + 6; cx++) for (let cy = y - 5; cy <= y + 2; cy++) if (w.get(cx, cy) === B.WATER) this.waterQ.add(w.idx(cx, cy));
+  }
+
+  /** you found them: from now on they keep to your heels */
+  private findSoul(kind: LostKind): void {
+    const l = this.p.lost?.find((x) => x.kind === kind);
+    const s = this.souls.find((x) => x.kind === kind);
+    if (!l || !s || l.following) return;
+    const def = LOST[kind];
+    const others = this.souls.some((o) => o !== s && this.soulFollowing(o.kind));
+    l.following = true;
+    if (others && this.trail.length) s.s = this.trail[this.trail.length - 1].s - 30;
+    else {
+      this.trail = [{ x: s.x, y: s.y, s: 0 }];
+      s.s = 0;
+    }
+    // the others let them speak
+    for (const o of this.souls) if (o !== s) o.sayT = Math.min(o.sayT, 0.3);
+    s.say = def.found;
+    s.sayT = 7;
+    s.chatT = 16;
+    audio.play('relic', { vary: 0 });
+    this.burst(s.x, s.y - 24, 30, ['#ffe08a', '#fff6d0'], 140, true);
+    this.ui.banner?.(`${def.name} found`, `${def.name} will keep to your heels. Lead the way home into the Wick's light.`);
+    this.addXp('delving', 60);
+    this.onSave?.();
+  }
+
+  private updateSouls(dt: number): void {
+    this.syncSouls();
+    if (!this.souls.length && !this.homing.length) return;
+    const pl = this.player;
+    const fx = pl.cx;
+    const fy = pl.y + pl.h;
+    const followers = this.souls.filter((s) => this.soulFollowing(s.kind));
+    if (followers.length && !pl.dead) {
+      let last = this.trail[this.trail.length - 1];
+      if (!last) {
+        last = { x: fx, y: fy, s: 0 };
+        this.trail.push(last);
+      }
+      const d = Math.hypot(fx - last.x, fy - last.y);
+      if (d >= 4) {
+        last = { x: fx, y: fy, s: last.s + d };
+        this.trail.push(last);
+      }
+      const head = last.s + Math.hypot(fx - last.x, fy - last.y);
+      followers.forEach((s, i) => {
+        const target = head - 44 - i * 38;
+        const ox = s.x;
+        const oy = s.y;
+        if (target > s.s) {
+          const gap = target - s.s;
+          s.s = Math.min(target, s.s + (gap > 240 ? 460 : 175) * dt);
+        }
+        const at = this.trailAt(s.s);
+        s.x = at.x;
+        s.y = at.y;
+        const dx = s.x - ox;
+        s.moving = Math.hypot(dx, s.y - oy) > 0.25;
+        if (Math.abs(dx) > 0.1) s.facing = Math.sign(dx);
+        else if (!s.moving) s.facing = pl.cx > s.x ? 1 : -1;
+        if (s.moving) s.walkT += dt;
+      });
+      // forget the trail behind the last of them
+      const tail = Math.min(...followers.map((s) => s.s));
+      while (this.trail.length > 2 && this.trail[1].s <= tail) this.trail.shift();
+    }
+    // the ones just home walk over to their door
+    for (const h of this.homing) {
+      h.sayT = Math.max(0, h.sayT - dt);
+      const dx = h.tx - h.x;
+      const step = Math.sign(dx) * Math.min(Math.abs(dx), 78 * dt);
+      h.x += step;
+      h.facing = Math.sign(dx) || h.facing;
+      h.moving = Math.abs(step) > 0.05;
+      if (h.moving) h.walkT += dt;
+      const gy = groundAt(this.world, Math.floor(h.x / TILE)) * TILE;
+      h.y += (gy - h.y) * Math.min(1, dt * 12);
+    }
+    this.homing = this.homing.filter((h) => Math.abs(h.tx - h.x) > 1 || h.sayT > 0);
+    const home: LostKind[] = [];
+    for (const s of this.souls) {
+      s.sayT = Math.max(0, s.sayT - dt);
+      s.chatT -= dt;
+      const def = LOST[s.kind];
+      if (!followers.includes(s)) {
+        s.facing = pl.cx > s.x ? 1 : -1;
+        // they call out from their fire when they hear you near
+        if (s.chatT <= 0 && s.sayT <= 0 && Math.hypot(pl.cx - s.x, fy - s.y) < 13 * TILE) {
+          s.chatT = 8 + Math.random() * 6;
+          s.say = this.rng.pick(def.calls);
+          s.sayT = 3.5;
+        }
+        continue;
+      }
+      if (s.chatT <= 0 && s.sayT <= 0) {
+        s.chatT = 15 + Math.random() * 12;
+        s.say = this.rng.pick(this.litHere < LIT ? def.dark : def.lines);
+        s.sayT = 4.5;
+      }
+      // home: up on the meadow inside the Wick's light
+      if (s.y <= (WICK_Y + 1) * TILE && this.inWickLight(s.x, s.y - 20, true)) home.push(s.kind);
+    }
+    for (const k of home) this.bringHome(k);
+  }
+
+  /** a point along your trail */
+  private trailAt(sv: number): { x: number; y: number } {
+    const t = this.trail;
+    const pl = this.player;
+    if (!t.length) return { x: pl.cx, y: pl.y + pl.h };
+    if (sv <= t[0].s) return t[0];
+    for (let i = 1; i < t.length; i++) {
+      if (t[i].s >= sv) {
+        const a = t[i - 1];
+        const b = t[i];
+        const k = (sv - a.s) / Math.max(0.001, b.s - a.s);
+        return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+      }
+    }
+    const a = t[t.length - 1];
+    const fx = pl.cx;
+    const fy = pl.y + pl.h;
+    const d = Math.hypot(fx - a.x, fy - a.y);
+    const k = d > 0 ? Math.min(1, (sv - a.s) / d) : 0;
+    return { x: a.x + (fx - a.x) * k, y: a.y + (fy - a.y) * k };
+  }
+
+  /** they made it: a house goes up beside the Wick and their trade opens */
+  private bringHome(kind: LostKind): void {
+    const def = LOST[kind];
+    const s = this.souls.find((x) => x.kind === kind);
+    this.p.lost = (this.p.lost ?? []).filter((l) => l.kind !== kind);
+    this.souls = this.souls.filter((x) => x.kind !== kind);
+    if (!this.souls.some((x) => this.soulFollowing(x.kind))) this.trail = [];
+    const plot = this.findPlot();
+    if (plot >= 0) this.placeBuilding(kind, plot, false);
+    if (s) {
+      this.burst(s.x, s.y - 24, 44, ['#ffd75a', '#ffffff', '#c89a5a'], 200, true);
+      // and they walk over to their door
+      const b = this.p.buildings.find((x) => x.kind === kind);
+      if (b) this.homing.push({ ...s, tx: (b.x + BUILDING_W / 2 - 0.9) * TILE, say: def.arrive, sayT: 6, chatT: 99 });
+    }
+    audio.play('upgrade', { vary: 0 });
+    this.shake = Math.max(this.shake, 5);
+    this.ui.banner?.(`${def.name} is home`, def.home);
+    this.refresh();
+    this.onSave?.();
   }
 
   /** every Wickpost in the world, shallowest first */
@@ -2760,6 +3046,10 @@ export class Game {
     const n = this.near;
     if (!n) return;
     audio.play('click');
+    if (n.id.startsWith('soul:')) {
+      this.findSoul(n.id.slice(5) as LostKind);
+      return;
+    }
     if (n.id.startsWith('obj:')) {
       const [, xs, ys] = n.id.split(':');
       const tx = Number(xs);
@@ -2860,6 +3150,15 @@ export class Game {
       this.p.satchel = { x: pl.cx, y: pl.cy, items: items.map((s) => ({ ...s })) };
       this.p.inv = new Array<Slot>(INV_SIZE).fill(null);
     }
+    // whoever was following loses you in the dark and goes back to their fire
+    for (const l of this.p.lost ?? []) {
+      if (!l.following) continue;
+      l.following = false;
+      const s = this.souls.find((x) => x.kind === l.kind);
+      if (s) this.campSoul(s, l);
+      this.toast(`${LOST[l.kind].name} lost you in the dark and went back to the fire.`, '#ffb08a');
+    }
+    this.trail = [];
   }
 
   private respawn(): void {
@@ -2905,6 +3204,7 @@ export class Game {
     pl.climbing = false;
     pl.recallT = 0;
     this.enemies = this.enemies.filter((e) => Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 10 * TILE);
+    this.regroup();
     this.snapCamera();
   }
 
@@ -3400,6 +3700,14 @@ export class Game {
           this.near = { id: info.panel, x: b.x * TILE, y: b.y * TILE, label: info.label };
         }
       }
+      for (const s of this.souls) {
+        if (this.soulFollowing(s.kind)) continue;
+        const d = Math.abs(s.x - pl.cx);
+        if (d < best && Math.abs(s.y - (pl.y + pl.h)) < 50) {
+          best = d;
+          this.near = { id: `soul:${s.kind}`, x: s.x, y: s.y - 48, label: `Talk to ${LOST[s.kind].name}` };
+        }
+      }
       if (!this.near) {
         let bd = 99;
         for (let dy = -1; dy <= 1; dy++) {
@@ -3526,6 +3834,8 @@ export class Game {
       if (lit < 0.3) drain *= 1.5;
       if (underground && this.biome >= 4) drain *= 1.6;
       if (this.st.lens) drain *= 0.5;
+      // company in the dark steadies you
+      if (this.souls.some((s) => this.soulFollowing(s.kind))) drain *= 0.5;
       rate = -drain * this.mode.nerve;
     }
     p.nerve = Math.max(0, Math.min(NERVE_MAX, p.nerve + rate * dt));
@@ -3639,6 +3949,10 @@ export class Game {
     if (wr > 0) {
       const wf = 1 + Math.sin(this.time * 5.3) * 0.02 + Math.sin(this.time * 8.9) * 0.015;
       lights.push({ x: WICK_GLOW.x, y: WICK_GLOW.y, r: 1.25, g: 0.92, b: 0.52, radius: wr * wf, cast: false });
+    }
+    for (const s of this.souls) {
+      const f = this.soulFollowing(s.kind);
+      lights.push({ x: s.x / TILE, y: (s.y - 22) / TILE, r: 0.95, g: 0.74, b: 0.46, radius: f ? 4.6 : 3, cast: f });
     }
     const sat = this.p.satchel;
     if (sat) lights.push({ x: sat.x / TILE, y: sat.y / TILE, r: 0.3, g: 0.6, b: 0.3, radius: 3, cast: false });
