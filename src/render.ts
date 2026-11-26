@@ -329,6 +329,7 @@ export class Renderer {
     }
     this.drawSky(g, ctx, camX, camY, vw, vh);
     this.drawBackdrop(g, ctx, camX, camY, vw, vh);
+    this.drawFlock(g, ctx, camX, camY, vw, dt);
     this.terrain.drawBack(ctx, camX, camY, vw, vh);
     this.drawTrees(g, ctx, camX, camY, vw);
     this.drawWick(g, ctx, camX, camY);
@@ -435,6 +436,72 @@ export class Renderer {
       d.y0 = Math.min(d.y0, b);
       d.x1 = Math.max(d.x1, c);
       d.y1 = Math.max(d.y1, e);
+    }
+  }
+
+  // ------------------------------------------------------------------ the valley's birds
+  /** a flock crossing the sky, in parallax space (it drifts at 0.4 of the camera) */
+  private flock: { x: number; y: number; vx: number; vy: number; birds: { dx: number; dy: number; ph: number }[]; scared: boolean } | null = null;
+  private flockT = 6;
+
+  /**
+   * Now and then on a fair day a little flock crosses the sky over the valley, wings flickering.
+   * Never in rain, at night, on a tide night or in the heart's chamber; a crack of lightning scatters it.
+   */
+  private drawFlock(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, dt: number): void {
+    const P = 0.4;
+    const groundY = SURFACE_Y * TILE - camY;
+    const wx = g.weather;
+    if (!this.flock) {
+      this.flockT -= dt;
+      if (this.flockT > 0) return;
+      this.flockT = 16 + Math.random() * 28;
+      if (daylight(g.p.clock) < 0.6 || wx.rain > 0.15 || wx.fog > 0.5 || groundY < 120 || g.p.tide || g.boss) return;
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      const n = 3 + Math.floor(Math.random() * 6);
+      const birds = Array.from({ length: n }, (_, i) => ({ dx: -dir * (i * 9 + Math.random() * 7), dy: (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 5 + Math.random() * 3, ph: Math.random() * 6 }));
+      // across the open sky above the peaks, clear of the HUD along the top
+      const sy = Math.max(40, groundY - 70 - Math.random() * 120);
+      this.flock = { x: camX * P + (dir > 0 ? -60 : vw + 60), y: camY * P + sy, vx: dir * (34 + Math.random() * 22), vy: 0, birds, scared: false };
+      return;
+    }
+    const f = this.flock;
+    // thunder, or the rain coming on, sends them off fast and high
+    if (!f.scared && (wx.flash > 0.5 || wx.rain > 0.3)) {
+      f.scared = true;
+      f.vx *= 2.2;
+      f.vy = -40;
+    }
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+    const sx = f.x - camX * P;
+    const sy = f.y - camY * P;
+    if (sx < -140 || sx > vw + 140 || sy < -60) {
+      this.flock = null;
+      return;
+    }
+    ctx.fillStyle = 'rgba(38,32,46,0.85)';
+    const flap = f.scared ? 16 : 9;
+    for (const b of f.birds) {
+      const bx = Math.round(sx + b.dx);
+      const by = Math.round(sy + b.dy + Math.sin(g.time * 1.7 + b.ph) * 1.5);
+      const fr = Math.floor(g.time * flap + b.ph) % 3;
+      // a five-pixel bird: wings up, level, down
+      ctx.fillRect(bx, by, 1, 1);
+      if (fr === 0) {
+        ctx.fillRect(bx - 1, by - 1, 1, 1);
+        ctx.fillRect(bx + 1, by - 1, 1, 1);
+        ctx.fillRect(bx - 2, by - 2, 1, 1);
+        ctx.fillRect(bx + 2, by - 2, 1, 1);
+      } else if (fr === 1) {
+        ctx.fillRect(bx - 2, by - 1, 2, 1);
+        ctx.fillRect(bx + 1, by - 1, 2, 1);
+      } else {
+        ctx.fillRect(bx - 1, by, 1, 1);
+        ctx.fillRect(bx + 1, by, 1, 1);
+        ctx.fillRect(bx - 2, by + 1, 1, 1);
+        ctx.fillRect(bx + 2, by + 1, 1, 1);
+      }
     }
   }
 

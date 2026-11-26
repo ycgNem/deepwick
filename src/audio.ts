@@ -34,6 +34,12 @@ const SFX = [
   'rain',
   'thunder',
   'thunderfar',
+  'step_grass',
+  'step_stone',
+  'step_wood',
+  'land',
+  'meadow_day',
+  'meadow_night',
   'fireball',
   'roar',
   'teleport',
@@ -180,23 +186,42 @@ class AudioSystem {
     src.start();
   }
 
-  private rainGain: GainNode | null = null;
-  private rainTarget = 0;
+  private beds = new Map<SfxId, { gain: GainNode; target: number; scale: number }>();
 
-  /** the rain on the valley; level 0..1 (0 stops it) */
-  rain(level: number): void {
-    this.rainTarget = level;
+  /**
+   * A looping bed of sound (rain, birdsong, crickets), eased toward `level` (0..1) times `scale`.
+   * Started the first time it is wanted, then left running and only faded.
+   */
+  bed(id: SfxId, level: number, scale = 0.5): void {
+    const b = this.beds.get(id);
+    if (b) {
+      b.target = level;
+      b.scale = scale;
+      return;
+    }
     const ctx = this.ctx;
-    const buf = this.buffers.get('rain');
-    if (!ctx || !buf || !this.sfxGain || this.rainGain || level <= 0) return;
-    this.rainGain = ctx.createGain();
-    this.rainGain.gain.value = 0;
-    this.rainGain.connect(this.sfxGain);
+    const buf = this.buffers.get(id);
+    if (!ctx || !buf || !this.sfxGain || level <= 0) return;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(this.sfxGain);
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.loop = true;
-    src.connect(this.rainGain);
-    src.start();
+    src.connect(gain);
+    // start each somewhere in its loop, so two beds never line up
+    src.start(0, Math.random() * buf.duration);
+    this.beds.set(id, { gain, target: level, scale });
+  }
+
+  /** the rain on the valley; level 0..1 */
+  rain(level: number): void {
+    this.bed('rain', level, 0.55);
+  }
+
+  /** every bed fades out (leaving a world for the title) */
+  hushBeds(): void {
+    for (const b of this.beds.values()) b.target = 0;
   }
 
   update(dt: number): void {
@@ -204,9 +229,9 @@ class AudioSystem {
       const g = this.ambGain.gain;
       g.value += (this.ambTarget * 0.45 - g.value) * Math.min(1, dt * 1.5);
     }
-    if (this.rainGain) {
-      const g = this.rainGain.gain;
-      g.value += (this.rainTarget * 0.55 - g.value) * Math.min(1, dt * 1.2);
+    for (const b of this.beds.values()) {
+      const g = b.gain.gain;
+      g.value += (b.target * b.scale - g.value) * Math.min(1, dt * 1.2);
     }
     const el = this.musicEls.get(this.current);
     if (el && el.volume < this.musicVolume) el.volume = Math.min(this.musicVolume, el.volume + dt * 0.5);

@@ -69,7 +69,7 @@ async function boot(): Promise<void> {
     document.body.classList.remove('cine');
     hud.classList.remove('show');
     audio.music('none');
-    audio.rain(0);
+    audio.hushBeds();
     showTitle();
   };
   window.addEventListener('resize', () => {
@@ -254,7 +254,7 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   const g = new Game(input, ui, loaded.p, loaded.world);
   game = g;
   input.touchUse = (x, y): boolean => g.touchWantsUse(x, y);
-  if (import.meta.env.DEV) Object.assign(window as object, { __game: g, __renderer: renderer });
+  if (import.meta.env.DEV) Object.assign(window as object, { __game: g, __renderer: renderer, __audio: audio });
   ui.attach(g);
   renderer.resize(g);
   g.onSave = () => {

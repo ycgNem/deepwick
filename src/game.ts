@@ -378,6 +378,8 @@ export class Game {
   wet = 0;
   /** beside a fire or in the Wick's light, where the wet does not chill you */
   private warm = false;
+  /** distance walked since the last footstep */
+  private stepDist = 40;
   /** the Gloamheart stilled: its light climbing home to the Wick (a cutscene; the delver waits) */
   ending: Ending | null = null;
   /** placed lights flaring as the climbing light goes by (tile, 0..1) */
@@ -945,9 +947,19 @@ export class Game {
           this.text(pl.cx, pl.y, 'Ouch!', '#ff8a8a');
         }
         if (tiles > 2) this.burst(pl.cx, pl.y + pl.h, 6, ['#9a8a7a', '#6a5a4a'], 60);
+        if (!liquid && tiles > 0.4) this.footstep(Math.min(0.8, 0.32 + tiles * 0.07), true);
         pl.fallStartY = pl.y;
+        this.stepDist = 0;
       }
       if (pl.onGround) pl.fallStartY = pl.y;
+      // footsteps: what is underfoot, as fast as you go (the first comes almost at once)
+      if (pl.onGround && !liquid && Math.abs(pl.vx) > 30) {
+        this.stepDist += Math.abs(pl.vx) * dt;
+        if (this.stepDist > 46) {
+          this.stepDist = 0;
+          this.footstep(0.3);
+        }
+      } else if (pl.onGround) this.stepDist = 40;
     }
 
     this.updateHotbarAndUse(dt);
@@ -5143,6 +5155,34 @@ export class Game {
     else m = this.biome === 2 ? 'cave2' : 'cave';
     audio.music(m);
     audio.ambience(this.onSurface() ? 0 : 1);
+    // the valley's own sound: birdsong by day, crickets by night, hushed by the rain and the Gloam
+    const out = this.boss || this.ending?.stage === 'pour' ? 0 : this.openAir();
+    const day = Math.max(0, Math.min(1, (daylight(this.p.clock) - 0.45) / 0.35));
+    const wx = this.weather;
+    audio.bed('meadow_day', out * day * (1 - 0.9 * wx.rain) * (1 - 0.5 * wx.fog), 0.34);
+    audio.bed('meadow_night', out * (1 - day) * (1 - 0.8 * wx.rain) * (this.p.tide ? 0.15 : 1), 0.32);
+  }
+
+  /** how much of the open valley you can hear: all of it up top, a little near it, none deep down */
+  openAir(): number {
+    const pl = this.player;
+    const tx = Math.max(0, Math.min(this.world.w - 1, Math.floor(pl.cx / TILE)));
+    const under = Math.floor(pl.cy / TILE) - this.world.surface[tx];
+    return under <= 2 ? 1 : under < 14 ? 0.3 * (1 - under / 14) : 0;
+  }
+
+  /** one step (or a landing) on whatever is underfoot */
+  private footstep(vol: number, land = false): void {
+    const pl = this.player;
+    const b = this.world.get(Math.floor(pl.cx / TILE), Math.floor((pl.y + pl.h + 4) / TILE));
+    const soft = b === B.GRASS || b === B.DIRT || b === B.CLAY || b === B.GRAVEL || b === B.GLOWMOSS;
+    const id = b === B.PLANKS ? 'step_wood' : soft ? 'step_grass' : 'step_stone';
+    // gravel crunches lower, and the deep rock rings a little lower the further down you go
+    const pitch = b === B.GRAVEL ? 0.8 : id === 'step_stone' ? 1 - Math.min(0.15, this.biome * 0.035) : 1;
+    // soaked through, every step squelches a little
+    const wet = this.wet > 0.4 ? 0.9 : 1;
+    if (land) audio.play('land', { vol, pitch: (soft ? 0.95 : 1.05) * wet });
+    audio.play(id, { vol: land ? vol * 0.5 : vol * (soft ? 0.85 : 1), pitch: pitch * wet, vary: 0.12 });
   }
 
   /** how much the wet is chilling you: soaked, and nowhere warm */
