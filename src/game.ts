@@ -24,6 +24,7 @@ import { Weather } from './weather';
 import { CAPTIONS } from './captions';
 import { FEATS, FISH } from './data/feats';
 import { Dog } from './dog';
+import { seasonOf, seasonDay, SeasonDef, SEASON_DAYS } from './seasons';
 import type { SfxId } from './audio';
 import {
   Progress,
@@ -390,6 +391,10 @@ export class Game {
   wet = 0;
   /** beside a fire or in the Wick's light, where the wet does not chill you */
   private warm = false;
+  /** how far a winter night has got into you, 0..1 */
+  cold = 0;
+  private frostT = 0;
+  private breathT = 1;
   /** distance walked since the last footstep */
   private stepDist = 40;
   /** the Gloamheart stilled: its light climbing home to the Wick (a cutscene; the delver waits) */
@@ -426,6 +431,7 @@ export class Game {
     this.weather.load(p.weather);
     p.deepRow ??= p.maxDepth + 26;
     this.wet = Math.max(0, Math.min(1, p.wet ?? 0));
+    this.cold = Math.max(0, Math.min(1, p.cold ?? 0));
     if (this.p.bounties.length === 0) this.refillBounties();
     this.reconcileRelics();
     this.migrateWick();
@@ -646,6 +652,9 @@ export class Game {
       p.stats.days++;
       this.toast(`Day ${p.stats.days}`, '#ffe9a8');
       this.tideWarning();
+      const ssn = seasonOf(p.stats.days);
+      if (seasonDay(p.stats.days) === 1) this.seasonTurns(ssn);
+      else if (ssn.id === 'autumn' && seasonDay(p.stats.days) === SEASON_DAYS) this.toast('The air has an edge to it this morning. Winter is coming.', '#cfe8ff');
     }
     const bell = 0.6 - 60 / DAY_LENGTH;
     if (p.clock >= bell && p.clock - dt / DAY_LENGTH < bell) this.duskBell();
@@ -661,6 +670,20 @@ export class Game {
       else this.toast('Dawn breaks.', '#ffd79a');
     }
     this.wasNight = night;
+  }
+
+  /** the season this day falls in */
+  get season(): SeasonDef {
+    return seasonOf(this.p.stats.days);
+  }
+
+  /** a new season comes in with the dawn */
+  private seasonTurns(s: SeasonDef): void {
+    const col = { spring: '#b8f0a0', summer: '#ffe08a', autumn: '#f4b870', winter: '#d8ecff' }[s.id];
+    this.toast(s.arrive, col);
+    this.weather.turn(this);
+    if (s.id === 'winter')
+      this.hint('winter', 'Winter: snow lies on the meadow, nothing grows, and the critters keep to their burrows. Out in the open on a winter night the cold gets into you (the frost chip): you burn food faster, heal slower and fray quicker, and once you are freezing it bites. A campfire, a furnace or the Wick keeps you warm, a few tiles underground the cold cannot follow, and a Leather Coat keeps out half of it.');
   }
 
   /** a minute before dark the old town bell tolls (somebody still rings it) */
@@ -824,6 +847,13 @@ export class Game {
       sr = (sr * (1 - d * 0.6) + grey * d * 0.6) * (1 - d);
       sg = (sg * (1 - d * 0.6) + grey * d * 0.6) * (1 - d);
       sb = (sb * (1 - d * 0.6) + grey * d * 0.6) * (1 - d * 0.85);
+    }
+    // a winter sky is paler and colder
+    if (this.season.id === 'winter') {
+      const grey = (sr + sg + sb) / 3;
+      sr = sr * 0.86 + grey * 0.1;
+      sg = sg * 0.9 + grey * 0.1;
+      sb = sb * 0.92 + grey * 0.12;
     }
     // lightning throws the whole valley into white for an instant
     const fl = wx.flash * (prefs.shake ? 1 : 0.45);
@@ -3912,6 +3942,7 @@ export class Game {
       const id = this.rng.pick(night ? NIGHT_SURFACE : DAY_SURFACE);
       const def = ENEMIES[id];
       if (!night && w.get(tx, gy) !== B.GRASS) continue;
+      if (!night && Math.random() > Math.min(1, this.season.critters)) return;
       const y = def.behavior === 'flyer' ? (ty - 4) * TILE : (ty + 1) * TILE - 1;
       this.enemies.push(new Enemy(def, tx * TILE + TILE / 2, y));
       return;
@@ -4082,14 +4113,15 @@ export class Game {
       const y = pt.y + this.rng.int(-25, 25);
       if (!w.inside(x, y)) continue;
       const o = w.getObj(x, y);
-      const drink = 1 + 1.5 * this.weather.rain;
+      const ssn = this.season;
+      const drink = (1 + 1.5 * this.weather.rain) * ssn.growth;
       if (o === Obj.SAPLING && Math.random() < 0.06 * drink) {
         let room = true;
         for (let yy = y - 4; yy < y; yy++) if (w.rock(x, yy)) room = false;
         if (room && y <= w.skyline[x]) w.setObj(x, y, Obj.TREE);
-      } else if (o === Obj.BUSH && Math.random() < 0.025) w.setObj(x, y, Obj.BUSH_BERRY);
+      } else if (o === Obj.BUSH && Math.random() < 0.025 * ssn.berries) w.setObj(x, y, Obj.BUSH_BERRY);
       else if ((o === Obj.CROP0 || o === Obj.CROP1 || o === Obj.CROP2) && Math.random() < 0.08 * drink && y <= w.skyline[x] + 1) w.setObj(x, y, o + 1);
-      else if (w.get(x, y) === B.DIRT && !w.rock(x, y - 1) && !w.getObj(x, y - 1) && y <= w.skyline[x]) {
+      else if (ssn.growth > 0 && w.get(x, y) === B.DIRT && !w.rock(x, y - 1) && !w.getObj(x, y - 1) && y <= w.skyline[x]) {
         // grass creeps back over bare dirt that sees the sky
         if (w.get(x - 1, y) === B.GRASS || w.get(x + 1, y) === B.GRASS || w.get(x - 1, y + 1) === B.GRASS || w.get(x + 1, y - 1) === B.GRASS) w.set(x, y, B.GRASS);
       } else if (w.get(x, y) === B.GRASS && w.rock(x, y - 1)) w.set(x, y, B.DIRT);
@@ -4908,6 +4940,7 @@ export class Game {
     if (underground) this.hint('underground', 'It is dark down here. Hold a torch (select it in the hotbar) to light your way, or place torches on the walls.');
 
     this.updateWet(dt);
+    this.updateCold(dt);
     // hunger (wet and cold, your body burns food to keep warm)
     const p = this.p;
     p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger * (1 + 0.6 * this.chill));
@@ -5203,8 +5236,11 @@ export class Game {
     const out = this.boss || this.ending?.stage === 'pour' ? 0 : this.openAir();
     const day = Math.max(0, Math.min(1, (daylight(this.p.clock) - 0.45) / 0.35));
     const wx = this.weather;
-    audio.bed('meadow_day', out * day * (1 - 0.9 * wx.rain) * (1 - 0.5 * wx.fog), 0.34);
-    audio.bed('meadow_night', out * (1 - day) * (1 - 0.8 * wx.rain) * (this.p.tide ? 0.15 : 1), 0.32);
+    const ssn = this.season;
+    audio.bed('meadow_day', out * day * ssn.birds * (1 - 0.9 * wx.rain) * (1 - 0.5 * wx.fog), 0.34);
+    audio.bed('meadow_night', out * (1 - day) * ssn.crickets * (1 - 0.8 * wx.rain) * (this.p.tide ? 0.15 : 1), 0.32);
+    // winter wind over the snow, louder while it snows
+    audio.bed('wind', out * (ssn.id === 'winter' ? 0.45 + 0.55 * wx.snow : 0.6 * wx.snow), 0.42);
   }
 
   /** a running count toward a Feat */
@@ -5263,7 +5299,9 @@ export class Game {
     const pl = this.player;
     const b = this.world.get(Math.floor(pl.cx / TILE), Math.floor((pl.y + pl.h + 4) / TILE));
     const soft = b === B.GRASS || b === B.DIRT || b === B.CLAY || b === B.GRAVEL || b === B.GLOWMOSS;
-    const id = b === B.PLANKS ? 'step_wood' : soft ? 'step_grass' : 'step_stone';
+    const ftx = Math.floor(pl.cx / TILE);
+    const snowy = this.weather.cover > 0.35 && b !== B.PLANKS && Math.floor((pl.y + pl.h + 4) / TILE) <= this.world.skyline[Math.max(0, Math.min(this.world.w - 1, ftx))];
+    const id = snowy ? 'step_snow' : b === B.PLANKS ? 'step_wood' : soft ? 'step_grass' : 'step_stone';
     // gravel crunches lower, and the deep rock rings a little lower the further down you go
     const pitch = b === B.GRAVEL ? 0.8 : id === 'step_stone' ? 1 - Math.min(0.15, this.biome * 0.035) : 1;
     // soaked through, every step squelches a little
@@ -5274,7 +5312,7 @@ export class Game {
 
   /** how much the wet is chilling you: soaked, and nowhere warm */
   get chill(): number {
-    return this.warm ? 0 : this.wet;
+    return this.warm ? 0 : Math.max(this.wet, this.cold);
   }
 
   /** rain soaks you out in the open and a swim soaks you through; a fire, a furnace or the Wick dries you */
@@ -5298,6 +5336,43 @@ export class Game {
       this.parts.push({ x: pl.x + 4 + Math.random() * (pl.w - 8), y: pl.y + 8 + Math.random() * (pl.h - 10), vx: 0, vy: 20, life: 0.45, max: 0.45, color: '#8ec0ee', size: 1, grav: 500, glow: false });
     if (this.warm && this.wet > 0.05 && Math.random() < this.wet * dt * 10)
       this.parts.push({ x: pl.x + 4 + Math.random() * (pl.w - 8), y: pl.y + 6 + Math.random() * 14, vx: (Math.random() - 0.5) * 6, vy: -22 - Math.random() * 10, life: 0.9, max: 0.9, color: '#c4c8d2', size: 2, grav: 0, glow: false });
+  }
+
+  /** winter: out in the open at night (or in falling snow) with no fire, the cold gets into you */
+  private updateCold(dt: number): void {
+    const pl = this.player;
+    const before = this.cold;
+    const winter = this.season.id === 'winter';
+    const open = this.openAir();
+    const night = isNight(this.p.clock);
+    const snow = this.weather.snow;
+    let bite = 0;
+    if (winter && open > 0.25 && !this.warm && !pl.dead) bite = ((night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1);
+    if (bite > 0) this.cold = Math.min(1, this.cold + dt * bite);
+    else this.cold = Math.max(0, this.cold - dt / (this.warm ? 5 : open <= 0.25 ? 40 : winter ? 90 : 30));
+    if (this.cold >= 0.4 && before < 0.4)
+      this.hint('cold', 'The winter night is getting into you (the frost chip). Cold, you get hungry faster, heal slower and the dark frays you quicker, and once you are freezing it bites. Get to a campfire, a furnace or the Wick, or go a few tiles underground where the cold cannot follow. A Leather Coat keeps out half of it.');
+    if (this.cold >= 0.98 && !pl.dead) {
+      if (before < 0.98) this.toast('You are freezing. Get to a fire, the Wick, or under the ground.', '#cfe8ff');
+      this.frostT += dt;
+      if (this.frostT > 6) {
+        this.frostT = 0;
+        this.sap(Math.max(1, Math.round(2 * this.mode.dmg)), 'The cold bites', '#bfe4ff');
+      }
+    } else this.frostT = 0;
+    // breath smokes in the cold air, yours and the dog's
+    if (winter && open > 0.5 && !pl.dead && (this.breathT -= dt) <= 0) {
+      this.breathT = 1.7 + Math.random() * 0.9;
+      const puff = (x: number, y: number, dir: number, n: number): void => {
+        for (let k = 0; k < n; k++) {
+          const life = 0.9 + Math.random() * 0.5;
+          this.parts.push({ x: x + dir * k * 2, y: y - Math.random() * 2, vx: dir * (8 + Math.random() * 10), vy: -6 - Math.random() * 8, life, max: life, color: k % 2 ? '#dfe7f2' : '#eef3fa', size: 2, grav: -8, glow: false });
+        }
+      };
+      puff(pl.cx + pl.facing * 7, pl.y + 11, pl.facing, 3);
+      const dg = this.dog;
+      if (dg.found && Math.hypot(dg.x - pl.cx, dg.y - pl.y) < 20 * TILE) puff(dg.x + dg.facing * 14, dg.y - 20, dg.facing, 2);
+    }
   }
 
   // ------------------------------------------------------------------ economy (from the UI)
@@ -5462,6 +5537,7 @@ export class Game {
   syncProgress(): void {
     this.p.weather = this.weather.save();
     this.p.wet = Math.round(this.wet * 100) / 100;
+    this.p.cold = Math.round(this.cold * 100) / 100;
     const pl = this.player;
     if (pl.dead) {
       const s = this.p.spawn;

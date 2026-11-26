@@ -752,6 +752,22 @@ button.ghost {
   transform: rotate(-45deg);
   box-shadow: 0 0 5px rgba(122, 184, 240, 0.8);
 }
+/* a frost star */
+.chip.buff i.bcold {
+  border-radius: 0;
+  background: radial-gradient(circle, #ffffff 0 20%, transparent 22%), linear-gradient(#cfe8ff, #cfe8ff) center / 2px 100% no-repeat,
+    linear-gradient(45deg, transparent 43%, #cfe8ff 43% 57%, transparent 57%), linear-gradient(-45deg, transparent 43%, #cfe8ff 43% 57%, transparent 57%);
+  box-shadow: 0 0 6px rgba(160, 210, 255, 0.8);
+}
+.chip.buff i.bcold.freeze {
+  box-shadow: 0 0 9px #9ad0ff;
+  animation: freezepulse 1.2s ease-in-out infinite;
+}
+@keyframes freezepulse {
+  50% {
+    box-shadow: 0 0 2px #9ad0ff;
+  }
+}
 .chip.buff i.bwet.cold {
   background: #c8e4ff;
   box-shadow: 0 0 6px #9ad0ff;
@@ -1885,6 +1901,29 @@ body.cine #touch {
 .chip.clock i.wx.fog {
   border-radius: 2px;
   background: repeating-linear-gradient(#e4e8f0 0 2px, transparent 2px 4px);
+}
+.chip.clock {
+  white-space: nowrap;
+}
+.chip.clock .ssn {
+  font-size: 11px;
+  margin-left: 3px;
+}
+.chip.clock .ssn.spring {
+  color: #b8f0a0;
+}
+.chip.clock .ssn.summer {
+  color: #ffe08a;
+}
+.chip.clock .ssn.autumn {
+  color: #f4b870;
+}
+.chip.clock .ssn.winter {
+  color: #d8ecff;
+}
+.chip.clock i.wx.snow {
+  border-radius: 3px;
+  background: linear-gradient(#d2dae6 0 50%, transparent 50%), radial-gradient(circle, #ffffff 0 1px, transparent 1.5px) 0 0 / 4px 4px;
 }
 .chip.clock .wxl {
   font-size: 11px;

@@ -45,6 +45,8 @@ const SFX = [
   'dog_whine',
   'dog_dig',
   'dog_sniff',
+  'wind',
+  'step_snow',
   'fireball',
   'roar',
   'teleport',

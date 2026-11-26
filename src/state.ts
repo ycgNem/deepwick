@@ -1,4 +1,5 @@
 import type { DogSave } from './dog';
+import type { WeatherSave } from './weather';
 import type { LostSoul } from './data/lost';
 import type { ModeId } from './data/nerve';
 import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
@@ -102,10 +103,12 @@ export interface Progress {
   deepRow?: number;
   /** how soaked you were */
   wet?: number;
+  /** how cold you were (winter nights) */
+  cold?: number;
   /** Tallow, the stray who comes to the Wick (missing until he first turns up) */
   dog?: DogSave;
   /** the weather over the valley, and how long it has left */
-  weather?: { kind: 'clear' | 'rain' | 'storm' | 'fog'; left: number };
+  weather?: WeatherSave;
   /** Gloam Tides the Wick has held through */
   tidesHeld?: number;
   /** time of day 0..1 (0 = dawn) */
@@ -252,6 +255,8 @@ export interface Stats {
   lens: boolean;
   /** an oilskin sheds the rain */
   dry: boolean;
+  /** a coat keeps out the winter cold */
+  warm: boolean;
 }
 
 export function has(p: Progress, relic: string): boolean {
@@ -330,6 +335,7 @@ export function computeStats(p: Progress): Stats {
     heatWard: charms.some((ch) => ch.fx?.heat),
     lens: charms.some((ch) => ch.fx?.lens),
     dry: charms.some((ch) => ch.fx?.dry),
+    warm: !!arm?.fx?.warm || charms.some((ch) => ch.fx?.warm),
   };
 }
 

@@ -11,6 +11,7 @@ import { Obj } from './world/world';
 import { BOSS_CENTER } from './world/gen';
 import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
 import { DOG_CELL } from './dog';
+import { seasonOf, autumnTint } from './seasons';
 import { heldDef } from './state';
 import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME } from './data/wick';
 import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
@@ -338,6 +339,7 @@ export class Renderer {
     this.drawLiquids(g, ctx, camX, camY, vw, vh);
     this.terrain.drawFore(ctx, camX, camY, vw, vh);
     this.drawBlockDetails(g, ctx, camX, camY, vw, vh);
+    this.drawSnowCover(g, ctx, camX, camY, vw, vh);
     this.drawObjects(g, ctx, camX, camY, vw, vh);
     this.drawNpcs(g, ctx, camX, camY);
     this.drawDog(g, ctx, camX, camY);
@@ -354,6 +356,7 @@ export class Renderer {
     this.drawGhost(g, ctx, camX, camY);
     this.drawFog(g, ctx, camX, camY, vw, vh);
     this.drawRain(g, ctx, camX, camY, vw, vh);
+    this.drawSnow(g, ctx, camX, camY, vw, vh);
 
     // ---- lighting
     const L = g.light;
@@ -459,7 +462,7 @@ export class Renderer {
       this.flockT -= dt;
       if (this.flockT > 0) return;
       this.flockT = 16 + Math.random() * 28;
-      if (daylight(g.p.clock) < 0.6 || wx.rain > 0.15 || wx.fog > 0.5 || groundY < 120 || g.p.tide || g.boss) return;
+      if (daylight(g.p.clock) < 0.6 || wx.rain > 0.15 || wx.fog > 0.5 || groundY < 120 || g.p.tide || g.boss || seasonOf(g.p.stats.days).id === 'winter') return;
       const dir = Math.random() < 0.5 ? 1 : -1;
       const n = 3 + Math.floor(Math.random() * 6);
       const birds = Array.from({ length: n }, (_, i) => ({ dx: -dir * (i * 9 + Math.random() * 7), dy: (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 5 + Math.random() * 3, ph: Math.random() * 6 }));
@@ -962,6 +965,10 @@ export class Renderer {
     const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE) + 3);
     const ty0 = Math.max(0, Math.floor(camY / TILE) - 1);
     const ty1 = Math.min(w.h - 1, Math.floor((camY + this.scene.height) / TILE) + 5);
+    const autumn = autumnTint(g.p.stats.days, g.p.clock);
+    // in winter the last leaves hang dull and brown under the snow
+    const leaves = seasonOf(g.p.stats.days).id === 'winter' ? 'winter' : 'autumn';
+    const cover = g.weather.cover;
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         if (w.obj[ty * w.w + tx] !== Obj.TREE) continue;
@@ -974,6 +981,16 @@ export class Renderer {
         const dmg = w.damage.get(ty * w.w + tx);
         const wob = dmg ? Math.sin(g.time * 40) * 1.5 : 0;
         ctx.drawImage(img, Math.round(x + wob), y);
+        if (autumn > 0 && (key === 'oak' || key === 'birch')) {
+          ctx.globalAlpha = autumn;
+          ctx.drawImage(this.seasonal(key, img, leaves), Math.round(x + wob), y);
+          ctx.globalAlpha = 1;
+        }
+        if (cover > 0.02) {
+          ctx.globalAlpha = cover;
+          ctx.drawImage(this.seasonal(key, img, 'snow'), Math.round(x + wob), y);
+          ctx.globalAlpha = 1;
+        }
       }
     }
   }
@@ -1010,6 +1027,131 @@ export class Renderer {
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.fillRect(x + 6, Math.round(b.y * TILE - camY) - 1, img.width - 12, 3);
       ctx.drawImage(img, x, y);
+      if (g.weather.cover > 0.02) {
+        ctx.globalAlpha = g.weather.cover;
+        ctx.drawImage(this.seasonal(info.sprite, img, 'snow'), x, y);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  /** a sprite in the season's colours: autumn leaves, or snow lying on every top edge (made once) */
+  private seasonArt = new Map<string, HTMLCanvasElement>();
+  private seasonal(key: string, img: HTMLImageElement, kind: 'autumn' | 'winter' | 'snow'): HTMLCanvasElement {
+    const id = kind + ':' + key;
+    const have = this.seasonArt.get(id);
+    if (have) return have;
+    const W = img.width;
+    const H = img.height;
+    const [cv, cx] = makeCanvas(W, H);
+    cx.drawImage(img, 0, 0);
+    const d = cx.getImageData(0, 0, W, H).data;
+    const out = new ImageData(W, H);
+    const o = out.data;
+    const put = (i: number, r: number, gg: number, b: number, a: number): void => {
+      o[i] = r;
+      o[i + 1] = gg;
+      o[i + 2] = b;
+      o[i + 3] = a;
+    };
+    const AUTUMN = [
+      [222, 128, 44],
+      [236, 176, 62],
+      [190, 74, 46],
+    ];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        if (d[i + 3] < 40) continue;
+        if (kind !== 'snow') {
+          const r = d[i];
+          const gg = d[i + 1];
+          const b = d[i + 2];
+          // only the leaves: green over red and blue
+          if (gg <= r + 6 || gg <= b) continue;
+          const L = (r + gg + b) / 765;
+          const pick = hash(Math.floor(x / 6) + Math.floor(y / 5) * 37, 11);
+          const c = kind === 'winter' ? (pick < 0.5 ? [128, 104, 86] : [148, 120, 96]) : AUTUMN[pick < 0.45 ? 0 : pick < 0.8 ? 1 : 2];
+          const m = 0.4 + L * 1.25;
+          put(i, Math.min(255, c[0] * m), Math.min(255, c[1] * m), Math.min(255, c[2] * m), d[i + 3]);
+        } else {
+          // snow: lying on every edge that faces the sky, a pixel proud of it and two into it
+          const up = y === 0 ? 0 : d[i - W * 4 + 3];
+          const up2 = y < 2 ? 0 : d[i - W * 8 + 3];
+          if (up < 40) {
+            put(i, 246, 249, 255, 255);
+            if (y > 0 && hash(x, y + 5) < 0.75) put(i - W * 4, 236, 242, 252, 255);
+          } else if (up2 < 40) put(i, 226, 234, 246, 255);
+          else if (y > 2 && d[i - W * 12 + 3] < 40 && hash(x * 7, y) < 0.5) put(i, 200, 214, 234, 255);
+        }
+      }
+    }
+    cx.clearRect(0, 0, W, H);
+    cx.putImageData(out, 0, 0);
+    this.seasonArt.set(id, cv);
+    return cv;
+  }
+
+  /** snow lying on the meadow: a white cap on every top that sees the sky */
+  private drawSnowCover(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const cover = g.weather.cover;
+    if (cover < 0.02) return;
+    const w = g.world;
+    const sky = w.skyline;
+    const c0 = Math.max(0, Math.floor(camX / TILE));
+    const c1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
+    const depth = Math.round(2 + cover * 6);
+    for (let x = c0; x <= c1; x++) {
+      const ty = sky[x];
+      if (ty >= w.h) continue;
+      const sy = Math.round(ty * TILE - camY);
+      if (sy < -12 || sy > vh + 12) continue;
+      const b = w.fg[ty * w.w + x];
+      if (b === B.WATER || b === B.LAVA) continue;
+      const sx = Math.round(x * TILE - camX);
+      for (let k = 0; k < TILE; k += 4) {
+        // little drifts: the top edge rises and falls along the ground
+        const bump = Math.round((1 + hash(x * 8 + k / 4, w.seed + 77) * 2) * cover);
+        ctx.fillStyle = '#eef4fc';
+        ctx.fillRect(sx + k, sy - bump, 4, depth + bump);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(sx + k, sy - bump, 4, 1);
+      }
+      // a cold blue shade under it, and the snow wrapping over a step down
+      ctx.fillStyle = 'rgba(150,172,210,0.6)';
+      ctx.fillRect(sx, sy + depth, TILE, 1);
+      ctx.fillStyle = '#e2eaf6';
+      if (x > 0 && sky[x - 1] > ty) ctx.fillRect(sx, sy, 2, depth + 3);
+      if (x < w.w - 1 && sky[x + 1] > ty) ctx.fillRect(sx + TILE - 2, sy, 2, depth + 3);
+    }
+  }
+
+  /** falling snow: slow flakes drifting side to side */
+  private drawSnow(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const s = g.weather.snow;
+    if (s < 0.02) return;
+    const w = g.world;
+    const sky = w.skyline;
+    const c0 = Math.max(0, Math.floor(camX / TILE));
+    const c1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
+    let low = 0;
+    for (let x = c0; x <= c1; x++) if (sky[x] > low) low = sky[x];
+    if (low * TILE < camY) return;
+    const W = vw + 80;
+    const H = vh + 80;
+    const n = Math.min(this.drops.length, Math.round((s * (vw * vh)) / 1000));
+    const t = g.time;
+    ctx.fillStyle = 'rgba(242,247,255,0.9)';
+    for (let i = 0; i < n; i++) {
+      const d = this.drops[i];
+      const fall = t * (26 + 34 * (d.s - 0.8));
+      const y = mod(d.y * H + fall * 1.6 - camY, H) - 40;
+      const x = mod(d.x * W - camX + Math.sin(t * (0.6 + d.s * 0.5) + i * 1.7) * 12 - fall * 0.25, W) - 40;
+      const col = Math.floor((x + camX) / TILE);
+      if (col < 0 || col >= w.w) continue;
+      if (y > sky[col] * TILE - camY) continue;
+      const sz = d.l > 13 ? 2 : 1;
+      ctx.fillRect(Math.round(x), Math.round(y), sz, sz);
     }
   }
 
@@ -1169,6 +1311,7 @@ export class Renderer {
     const ty0 = Math.max(0, Math.floor(camY / TILE));
     const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
     const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE) + 1);
+    const snowCover = g.weather.cover;
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = ty * w.w + tx;
@@ -1180,7 +1323,13 @@ export class Renderer {
         const sy = ty * TILE - camY;
         if (def.topper && !BLOCKS[w.get(tx, ty - 1)].solid) {
           const set = def.topper === 'grass' ? A.grassTop : A.mossTop;
-          ctx.drawImage(set[(tx * 7 + ty) & 3], sx, sy - 7);
+          // under snow the grass is buried
+          const buried = ty === w.skyline[tx] ? snowCover : 0;
+          if (buried < 0.95) {
+            ctx.globalAlpha = 1 - buried;
+            ctx.drawImage(set[(tx * 7 + ty) & 3], sx, sy - 7);
+            ctx.globalAlpha = 1;
+          }
         }
         if (fg !== B.LAVA && dampAt(w, tx, ty)) ctx.drawImage(this.dampArt[(tx * 7 + ty * 3) & 3], sx, sy);
         if (w.loose[i]) {
@@ -1226,6 +1375,9 @@ export class Renderer {
         if (!w.inside(tx, ty)) continue;
         const dc = w.decor[ty * w.w + tx];
         if (!dc || propOf(dc)) continue;
+        // little plants on the meadow vanish under the snow
+        const under = ty + 1 === w.skyline[tx] ? snowCover : 0;
+        if (under > 0.6) continue;
         const src = iconSrc(decorIcon(dc));
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;

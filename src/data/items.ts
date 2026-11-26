@@ -35,6 +35,8 @@ export interface CharmFx {
   lens?: boolean;
   /** sheds the rain */
   dry?: boolean;
+  /** keeps out the winter cold */
+  warm?: boolean;
 }
 
 export interface ItemDef {
@@ -208,7 +210,7 @@ const LIST: Record<string, Partial2> = {
   wickpost: { name: 'Wickpost', icon: cv(3), kind: 'place', obj: Obj.WICKPOST, value: 6, desc: 'A little lantern on a post, lit from the Wick. Nothing spawns in its glow, and from any Wickpost you can travel home to the Wick and back down to the others.', stack: 20 },
 
   // ---- equipment
-  leathercoat: { name: 'Leather Coat', icon: i32(17), kind: 'armor', hp: 15, reduce: 0.06, value: 20, desc: '+15 health, 6% less damage.' },
+  leathercoat: { name: 'Leather Coat', icon: i32(17), kind: 'armor', hp: 15, reduce: 0.06, value: 20, desc: '+15 health, 6% less damage. Keeps out half the winter cold.', fx: { warm: true } },
   ironarmor: { name: 'Iron Harness', icon: n32(56), kind: 'armor', hp: 35, reduce: 0.15, value: 200, desc: '+35 health, 15% less damage.' },
   crystalmail: { name: 'Crystal Mail', icon: i32(19), kind: 'armor', hp: 70, reduce: 0.25, value: 900, desc: '+70 health, 25% less damage.' },
   gloamplate: { name: 'Gloamward Plate', icon: i32(18), kind: 'armor', hp: 110, reduce: 0.35, value: 3000, desc: '+110 health, 35% less damage.' },

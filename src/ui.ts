@@ -17,6 +17,7 @@ import { prefs, HUD_SIZES } from './prefs';
 import { LOST } from './data/lost';
 import { MINERS } from './data/lampless';
 import { FEATS } from './data/feats';
+import { seasonOf } from './seasons';
 import { BREWS } from './data/brews';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
@@ -413,7 +414,9 @@ export class UI implements UIHooks {
     const hours = Math.floor(((c * 24 + 6) % 24) * 1);
     const mins = Math.floor((((c * 24 + 6) % 1) * 60) / 10) * 10;
     const wl = g.weather.label;
-    h.clock.innerHTML = `<i class="${wl ? `wx ${wl.toLowerCase()}` : isNight(c) ? 'moon' : 'sun'}"></i>Day ${g.p.stats.days} · ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}${wl ? ` <small class="wxl">${wl}</small>` : ''}`;
+    const ssn = seasonOf(g.p.stats.days);
+    const clockHtml = `<i class="${wl ? `wx ${wl.toLowerCase()}` : isNight(c) ? 'moon' : 'sun'}"></i>Day ${g.p.stats.days} · ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')} <small class="ssn ${ssn.id}">${ssn.name}</small>${wl ? ` <small class="wxl">${wl}</small>` : ''}`;
+    if (h.clock.innerHTML !== clockHtml) h.clock.innerHTML = clockHtml;
     const tideNote = g.p.tide ? 'Gloam Tide' : g.tideTonight() && !isNight(c) ? 'Tide tonight' : '';
     h.tideChip.textContent = tideNote;
     h.tideChip.style.display = tideNote ? '' : 'none';
@@ -421,7 +424,8 @@ export class UI implements UIHooks {
     const bf: string[] = [];
     if (g.buffs.nightglass > 0) bf.push(`<i class="bn"></i>Nightglass ${mmss(g.buffs.nightglass)}`);
     if (g.buffs.ward > 0) bf.push(`<i class="bw"></i>Gloamward ${mmss(g.buffs.ward)}`);
-    if (g.wet > 0.15) bf.push(`<i class="bwet${g.chill > 0.3 ? ' cold' : ''}"></i>${g.wet > 0.6 ? 'Soaked' : 'Damp'}${g.chill > 0.3 ? ' · cold' : ''}`);
+    if (g.wet > 0.15) bf.push(`<i class="bwet${g.chill > 0.3 ? ' cold' : ''}"></i>${g.wet > 0.6 ? 'Soaked' : 'Damp'}${g.chill > 0.3 && g.cold < 0.15 ? ' · cold' : ''}`);
+    if (g.cold > 0.15) bf.push(`<i class="bcold${g.cold > 0.95 ? ' freeze' : ''}"></i>${g.cold > 0.95 ? 'Freezing' : g.cold > 0.5 ? 'Cold' : 'Chilly'}`);
     const bfHtml = bf.join('<b class="sep"></b>');
     if (h.buffChip.innerHTML !== bfHtml) h.buffChip.innerHTML = bfHtml;
     h.buffChip.style.display = bfHtml ? '' : 'none';

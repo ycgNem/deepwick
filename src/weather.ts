@@ -8,19 +8,24 @@
 import { TILE } from './constants';
 import { audio } from './audio';
 import type { Game } from './game';
+import { seasonOf } from './seasons';
 
-export type WeatherKind = 'clear' | 'rain' | 'storm' | 'fog';
+export type WeatherKind = 'clear' | 'rain' | 'storm' | 'fog' | 'snow';
 
 /** what the save keeps */
 export interface WeatherSave {
   kind: WeatherKind;
   /** seconds left of it */
   left: number;
+  /** snow lying on the ground, 0..1 */
+  cover?: number;
 }
 
 /** how hard each kind rains, and how much it darkens the sky */
-const RAIN: Record<WeatherKind, number> = { clear: 0, rain: 0.7, storm: 1, fog: 0 };
-const DARK: Record<WeatherKind, number> = { clear: 0, rain: 0.22, storm: 0.42, fog: 0.08 };
+const RAIN: Record<WeatherKind, number> = { clear: 0, rain: 0.7, storm: 1, fog: 0, snow: 0 };
+const DARK: Record<WeatherKind, number> = { clear: 0, rain: 0.22, storm: 0.42, fog: 0.08, snow: 0.14 };
+/** the chance of fog on a clear dawn, by season */
+const DAWN_FOG = { spring: 0.3, summer: 0.2, autumn: 0.5, winter: 0.15 };
 
 export interface Bolt {
   /** the jagged path, world px */
@@ -43,16 +48,20 @@ export class Weather {
   private lastClock = -1;
   /** where the last bolt came down, for the thunder's caption */
   private lastStrike: { x: number; y: number } | undefined;
+  /** snow lying on the meadow, 0..1: it builds while it snows and melts away once winter is over */
+  cover = 0;
 
   load(s: WeatherSave | undefined): void {
-    if (!s || !(s.kind in RAIN)) return;
+    if (!s) return;
+    this.cover = Math.max(0, Math.min(1, s.cover ?? 0));
+    if (!(s.kind in RAIN)) return;
     this.kind = s.kind;
     this.left = s.left;
     this.k = 1;
   }
 
   save(): WeatherSave {
-    return { kind: this.kind, left: Math.round(this.left) };
+    return { kind: this.kind, left: Math.round(this.left), cover: Math.round(this.cover * 100) / 100 };
   }
 
   /** 0..1: how hard it is raining right now */
@@ -63,12 +72,16 @@ export class Weather {
   get dark(): number {
     return DARK[this.kind] * this.k + DARK[this.was] * (1 - this.k);
   }
+  /** 0..1: how hard it is snowing */
+  get snow(): number {
+    return (this.kind === 'snow' ? this.k : 0) + (this.was === 'snow' ? 1 - this.k : 0);
+  }
   get fog(): number {
     return (this.kind === 'fog' ? this.k : 0) + (this.was === 'fog' ? 1 - this.k : 0);
   }
   /** a word for the HUD clock, or '' */
   get label(): string {
-    return this.kind === 'clear' || this.k < 0.3 ? '' : this.kind === 'rain' ? 'Rain' : this.kind === 'storm' ? 'Storm' : 'Fog';
+    return this.kind === 'clear' || this.k < 0.3 ? '' : this.kind === 'rain' ? 'Rain' : this.kind === 'storm' ? 'Storm' : this.kind === 'snow' ? 'Snow' : 'Fog';
   }
 
   /** settle it now (the light coming home at the end clears the sky) */
@@ -90,9 +103,14 @@ export class Weather {
     this.k = Math.min(1, this.k + dt / 20);
     this.left -= dt;
     if (this.left <= 0) this.next(g);
+    // snow settles while it falls, and lies until the spring melts it
+    const season = seasonOf(g.p.stats.days).id;
+    const sn = this.snow;
+    if (sn > 0.05) this.cover = Math.min(1, this.cover + (dt * sn) / 100);
+    else if (season !== 'winter') this.cover = Math.max(0, this.cover - dt / 150);
     // some mornings the valley fills with fog as the sun comes up
     const c = g.p.clock;
-    if (this.lastClock >= 0 && this.lastClock < 0.965 && c >= 0.965 && this.kind === 'clear' && g.p.stats.days >= 2 && !g.ending && Math.random() < 0.3) {
+    if (this.lastClock >= 0 && this.lastClock < 0.965 && c >= 0.965 && this.kind === 'clear' && g.p.stats.days >= 2 && !g.ending && Math.random() < DAWN_FOG[season]) {
       this.was = 'clear';
       this.k = 0;
       this.set(g, 'fog', 110 + Math.random() * 80);
@@ -130,12 +148,39 @@ export class Weather {
       return;
     }
     const r = Math.random();
-    if (dawn && r < 0.25) this.set(g, 'fog', 90 + Math.random() * 90);
-    else if (r < 0.32) this.set(g, 'rain', 120 + Math.random() * 150);
-    else if (r < 0.48) this.set(g, 'storm', 100 + Math.random() * 110);
+    const season = seasonOf(g.p.stats.days).id;
+    if (season === 'winter') {
+      if (dawn && r < 0.15) this.set(g, 'fog', 90 + Math.random() * 90);
+      else if (r < 0.5) this.set(g, 'snow', 150 + Math.random() * 170);
+      else {
+        this.kind = 'clear';
+        this.left = 140 + Math.random() * 200;
+      }
+      return;
+    }
+    // wet springs, stormy summers, foggy autumns
+    const [fog, rain, storm] = season === 'spring' ? [0.25, 0.42, 0.06] : season === 'summer' ? [0.15, 0.14, 0.2] : [0.45, 0.25, 0.06];
+    if (dawn && r < fog) this.set(g, 'fog', 90 + Math.random() * 90);
+    else if (r < rain) this.set(g, 'rain', 120 + Math.random() * 150);
+    else if (r < rain + storm) this.set(g, 'storm', 100 + Math.random() * 110);
     else {
       this.kind = 'clear';
       this.left = 140 + Math.random() * 220;
+    }
+  }
+
+  /** a new season: winter opens with snow, spring with the sky clearing */
+  turn(g: Game): void {
+    const season = seasonOf(g.p.stats.days).id;
+    if (season === 'winter' && this.kind !== 'snow') {
+      this.was = this.kind;
+      this.k = 0;
+      this.set(g, 'snow', 200 + Math.random() * 120);
+    } else if (season !== 'winter' && this.kind === 'snow') {
+      this.was = this.kind;
+      this.k = 0;
+      this.kind = 'clear';
+      this.left = 200 + Math.random() * 200;
     }
   }
 
@@ -150,6 +195,7 @@ export class Weather {
       if (out) g.toast('A storm is coming over the peaks.', '#c0b8ff');
       g.hint('rain', 'Rain and storms make a torch or campfire out in the open sputter and burn low. Put a roof over it (any block above it) and it burns bright. The Wick, lamps and your lantern do not mind the wet, and the fish bite in the rain.');
     } else if (kind === 'fog' && out) g.toast('Fog fills the valley.', '#d8dce8');
+    else if (kind === 'snow' && out) g.toast('Snow is falling.', '#e4eefc');
   }
 
   /** a bolt somewhere in view or off over the hills */
