@@ -238,6 +238,8 @@ export interface Stats {
   heatResist: number;
   heatWard: boolean;
   lens: boolean;
+  /** an oilskin sheds the rain */
+  dry: boolean;
 }
 
 export function has(p: Progress, relic: string): boolean {
@@ -315,6 +317,7 @@ export function computeStats(p: Progress): Stats {
     heatResist: has(p, 'r_tooth') ? 0.5 : 1,
     heatWard: charms.some((ch) => ch.fx?.heat),
     lens: charms.some((ch) => ch.fx?.lens),
+    dry: charms.some((ch) => ch.fx?.dry),
   };
 }
 

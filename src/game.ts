@@ -372,6 +372,10 @@ export class Game {
   flare: { t: number; level: number; from: number } | null = null;
   /** rain, storms and fog over the valley */
   weather = new Weather();
+  /** how soaked you are, 0..1: rain on you out in the open, or a swim */
+  wet = 0;
+  /** beside a fire or in the Wick's light, where the wet does not chill you */
+  private warm = false;
   /** the Gloamheart stilled: its light climbing home to the Wick (a cutscene; the delver waits) */
   ending: Ending | null = null;
   /** placed lights flaring as the climbing light goes by (tile, 0..1) */
@@ -4825,9 +4829,10 @@ export class Game {
     }
     if (underground) this.hint('underground', 'It is dark down here. Hold a torch (select it in the hotbar) to light your way, or place torches on the walls.');
 
-    // hunger
+    this.updateWet(dt);
+    // hunger (wet and cold, your body burns food to keep warm)
     const p = this.p;
-    p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger);
+    p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger * (1 + 0.6 * this.chill));
     if (p.food <= 0) {
       pl.starveT += dt;
       if (pl.starveT > 3) {
@@ -4844,7 +4849,7 @@ export class Game {
     // healing
     if (pl.regenT > 0) pl.regenT -= dt;
     else if (p.food > 30 && pl.hp < this.st.maxHp) {
-      let rate = p.food > 75 ? 0.9 : 0.4;
+      let rate = (p.food > 75 ? 0.9 : 0.4) * (1 - 0.5 * this.chill);
       if (this.nearObj(Obj.CAMPFIRE, 3)) rate += 1.6;
       if (this.inWickLight(pl.cx, pl.cy)) rate += 0.8 + this.flame * 0.25;
       pl.hp = Math.min(this.st.maxHp, pl.hp + rate * dt);
@@ -4927,8 +4932,11 @@ export class Game {
       if (this.buffs.nightglass > 0) drain *= 0.5;
       // with the heart stilled the dark below is only dark
       if (p.bossDefeated) drain *= 0.5;
+      drain *= 1 + 0.5 * this.chill;
       rate = -drain * this.mode.nerve;
     }
+    // soaked through in the cold of the night or the deep, even a little light is not enough
+    if (this.chill > 0.3 && rate >= 0 && rate < 9 && (underground || isNight(p.clock))) rate -= 1.4 * this.chill * this.mode.nerve;
     p.nerve = Math.max(0, Math.min(NERVE_MAX, p.nerve + rate * dt));
     const n = p.nerve;
     if (n < NERVE_FRAYED && before >= NERVE_FRAYED) this.hint('nerve', 'Your nerve frays in the dark (the purple bar). Light steadies it: hold a torch, keep your lantern fed, sit by a campfire, or go home to the Wick.');
@@ -5112,6 +5120,34 @@ export class Game {
     else m = this.biome === 2 ? 'cave2' : 'cave';
     audio.music(m);
     audio.ambience(this.onSurface() ? 0 : 1);
+  }
+
+  /** how much the wet is chilling you: soaked, and nowhere warm */
+  get chill(): number {
+    return this.warm ? 0 : this.wet;
+  }
+
+  /** rain soaks you out in the open and a swim soaks you through; a fire, a furnace or the Wick dries you */
+  private updateWet(dt: number): void {
+    const pl = this.player;
+    const before = this.wet;
+    const rain = this.weather.rain;
+    const dry = this.st.dry;
+    const tx = Math.floor(pl.cx / TILE);
+    const head = Math.floor((pl.y + 4) / TILE);
+    // the Ember Depths are hot enough to dry you on their own
+    this.warm = this.biome === 3 || this.inWickLight(pl.cx, pl.cy) || this.nearObj(Obj.CAMPFIRE, 3) || this.nearObj(Obj.FURNACE, 2);
+    const day = daylight(this.p.clock) > 0.7;
+    if (touches(this.world, pl, B.WATER)) this.wet = Math.min(1, this.wet + dt * 1.5);
+    else if (rain > 0.05 && this.exposed(tx, head)) this.wet = Math.min(1, this.wet + (dt * rain) / (dry ? 110 : 28));
+    else if (this.warm) this.wet = Math.max(0, this.wet - dt / (dry ? 3 : 6));
+    else this.wet = Math.max(0, this.wet - dt / ((dry ? 0.5 : 1) * (day && rain <= 0.05 && this.exposed(tx, head) ? 40 : 90)));
+    if (this.wet >= 0.6 && before < 0.6) this.hint('soaked', "You are soaked through. Wet and cold, you get hungry faster, heal slower and the dark frays you quicker. A campfire, a furnace or the Wick keeps the chill off, and dries you once you are out of the rain (under a roof, or when it stops). An Oilskin Sou'wester (workbench: 4 Hide, 2 Coal, or from Old Pell) sheds most of it.");
+    // drips off you, and steam as a fire dries you out
+    if (this.wet > 0.15 && Math.random() < this.wet * dt * 14)
+      this.parts.push({ x: pl.x + 4 + Math.random() * (pl.w - 8), y: pl.y + 8 + Math.random() * (pl.h - 10), vx: 0, vy: 20, life: 0.45, max: 0.45, color: '#8ec0ee', size: 1, grav: 500, glow: false });
+    if (this.warm && this.wet > 0.05 && Math.random() < this.wet * dt * 10)
+      this.parts.push({ x: pl.x + 4 + Math.random() * (pl.w - 8), y: pl.y + 6 + Math.random() * 14, vx: (Math.random() - 0.5) * 6, vy: -22 - Math.random() * 10, life: 0.9, max: 0.9, color: '#c4c8d2', size: 2, grav: 0, glow: false });
   }
 
   // ------------------------------------------------------------------ economy (from the UI)

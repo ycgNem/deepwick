@@ -60,6 +60,7 @@ export const RECIPES: Recipe[] = [
   r('fishingrod', 1, 'workbench', { wood: 8, hide: 1 }),
   r('arrows', 10, 'workbench', { wood: 1, stone: 1 }),
   r('leathercoat', 1, 'workbench', { hide: 8, batwing: 4 }),
+  r('oilskin', 1, 'workbench', { hide: 4, coal: 2 }),
   r('wickpost', 2, 'workbench', { wood: 4, copperbar: 1, sporecap: 2 }, 2),
 
   // furnace

@@ -33,6 +33,8 @@ export interface CharmFx {
   reduce?: number;
   heat?: boolean;
   lens?: boolean;
+  /** sheds the rain */
+  dry?: boolean;
 }
 
 export interface ItemDef {
@@ -223,6 +225,7 @@ const LIST: Record<string, Partial2> = {
   locket: { name: 'Heart Locket', icon: n32(38), kind: 'charm', fx: { hp: 25 }, value: 400, desc: 'Charm: +25 max health.' },
   amulet: { name: 'Starlight Amulet', icon: n32(39), kind: 'charm', fx: { light: 2 }, value: 900, desc: 'Charm: +2 light radius, even without a lantern.', glow: '#bff8ff' },
   emberward: { name: 'Emberward Talisman', icon: i32(20), kind: 'charm', fx: { heat: true }, value: 900, desc: 'Charm: protects you from the heat of the Ember Depths.' },
+  oilskin: { name: "Oilskin Sou'wester", icon: { sheet: 'f32', idx: 17 }, kind: 'charm', fx: { dry: true }, value: 30, desc: 'Charm: a fisherman\'s hat of waxed, tarred cloth with a long brim down the back. Rain soaks you four times slower, and you dry out twice as fast.' },
   sunlens: { name: 'Sunglass Lens', icon: i32(21), kind: 'charm', fx: { lens: true }, value: 1600, desc: 'Charm: stops the Sunless Vault from swallowing your light.' },
 };
 
@@ -277,6 +280,7 @@ export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
   { id: 'prop', price: 5, n: 2 },
   { id: 'bomb', price: 30, n: 1 },
   { id: 'canary', price: 60, n: 1 },
+  { id: 'oilskin', price: 45, n: 1 },
   { id: 'recall', price: 45, n: 1 },
   { id: 'seeds', price: 4, n: 3 },
   { id: 'fishingrod', price: 30, n: 1 },

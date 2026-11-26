@@ -365,6 +365,7 @@ export class UI implements UIHooks {
     const bf: string[] = [];
     if (g.buffs.nightglass > 0) bf.push(`<i class="bn"></i>Nightglass ${mmss(g.buffs.nightglass)}`);
     if (g.buffs.ward > 0) bf.push(`<i class="bw"></i>Gloamward ${mmss(g.buffs.ward)}`);
+    if (g.wet > 0.15) bf.push(`<i class="bwet${g.chill > 0.3 ? ' cold' : ''}"></i>${g.wet > 0.6 ? 'Soaked' : 'Damp'}${g.chill > 0.3 ? ' · cold' : ''}`);
     const bfHtml = bf.join('<b class="sep"></b>');
     if (h.buffChip.innerHTML !== bfHtml) h.buffChip.innerHTML = bfHtml;
     h.buffChip.style.display = bfHtml ? '' : 'none';
