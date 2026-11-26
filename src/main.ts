@@ -130,7 +130,7 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   if (fresh) {
     setTimeout(() => {
       g.toast('You wake beside the Wick, the great lantern of Deepwick. It has gone cold.', '#ffe9a8');
-      g.toast('Hold the left mouse button on a tree trunk to punch out some wood. Esc shows all controls.', '#ffe9a8');
+      g.toast('Your Journal (top right, J) always shows what to do next. Esc shows all controls.', '#ffe9a8');
     }, 600);
   } else g.toast('Welcome back, delver.', '#ffe9a8');
 }
@@ -174,6 +174,9 @@ document.getElementById('btnBegin')?.addEventListener('click', () => {
 function loop(t: number): void {
   const dt = Math.min(1 / 30, (t - last) / 1000 || 0);
   last = t;
+  // a controller drives play, or a pointer in menus and on the title
+  const menu = !game || !ui || ui.isOpen() || title.classList.contains('show') || intro.classList.contains('show');
+  input?.pollPad(dt, menu);
   if (game && renderer && ui && input) {
     game.update(dt);
     ui.update(dt);

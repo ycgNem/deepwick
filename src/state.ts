@@ -80,6 +80,8 @@ export interface Progress {
   nerve: number;
   /** difficulty */
   mode: ModeId;
+  /** how far through the Journal's goals you are */
+  journal: number;
   /** time of day 0..1 (0 = dawn) */
   clock: number;
   spawn: { x: number; y: number };
@@ -100,6 +102,7 @@ export function newProgress(seed: number, spawnX: number, spawnY: number): Progr
     wick: { kindled: false, lumen: 0 },
     nerve: 100,
     mode: 'delver',
+    journal: 0,
     skills: { mining: { lvl: 1, xp: 0 }, combat: { lvl: 1, xp: 0 }, delving: { lvl: 1, xp: 0 }, fishing: { lvl: 1, xp: 0 } },
     catalogued: [],
     relicsDropped: [],

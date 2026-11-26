@@ -12,6 +12,7 @@ import { WICK_X, WICK_Y } from './data/wick';
 import { audio } from './audio';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, lumenToNext } from './data/wick';
 import { MODES, MODE_IDS, ModeId, NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
+import { CHAPTERS, GOALS, ROMAN } from './data/journal';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -46,7 +47,7 @@ const EQUIP_SLOTS: { key: EquipKey; label: string; slot: string }[] = [
   { key: 'charm2', label: 'Charm', slot: 'charm' },
 ];
 
-type Panel = 'inv' | 'chest' | 'shop' | 'smith' | 'archive' | 'wick' | 'map' | 'pause' | 'victory' | null;
+type Panel = 'inv' | 'chest' | 'shop' | 'smith' | 'archive' | 'wick' | 'map' | 'pause' | 'victory' | 'journal' | null;
 
 export class UI implements UIHooks {
   game!: Game;
@@ -68,6 +69,9 @@ export class UI implements UIHooks {
   private hudT = 0;
   private cursor: Stack | null = null;
   private lastHotbar = '';
+  private lastGoal = '';
+  private lastGoalIdx = -1;
+  private lastHelp = '';
   onQuit: (() => void) | null = null;
   onSettings: ((music: number, sfx: number) => void) | null = null;
 
@@ -83,7 +87,7 @@ export class UI implements UIHooks {
     this.miniCtx = mc;
     [this.mapCanvas, this.mapCtx] = makeCanvas(WORLD_W, WORLD_H);
     this.mapImg = this.mapCtx.createImageData(WORLD_W, WORLD_H);
-    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill']) {
+    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill']) {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -184,6 +188,9 @@ export class UI implements UIHooks {
     } else if (e.code === 'KeyM') {
       if (this.panel === 'map') this.close();
       else if (!this.panel) this.open('map');
+    } else if (e.code === 'KeyJ') {
+      if (this.panel === 'journal') this.close();
+      else if (!this.panel) this.open('journal');
     } else if (e.code === 'KeyE' && this.panel && this.panel !== 'pause' && this.panel !== 'victory') {
       this.close();
       // otherwise the same press reopens whatever you are standing next to
@@ -225,6 +232,7 @@ export class UI implements UIHooks {
     h.nerveFill.classList.toggle('low', nv < NERVE_SHAKEN);
     h.nerveBar.classList.toggle('frayed', nv < NERVE_FRAYED);
     h.nerveText.textContent = nv <= 0 ? 'BROKEN' : nv < NERVE_SHAKEN ? 'SHAKEN' : nv < NERVE_FRAYED ? 'FRAYED' : `${Math.ceil(nv)}`;
+    this.updateGoal();
     h.coins.textContent = fmt(g.p.coins);
     const c = g.p.clock;
     const hours = Math.floor(((c * 24 + 6) % 24) * 1);
@@ -422,6 +430,9 @@ export class UI implements UIHooks {
         break;
       case 'pause':
         html = this.pauseHtml();
+        break;
+      case 'journal':
+        html = this.journalHtml();
         break;
       case 'victory':
         html = this.victoryHtml();
@@ -707,6 +718,60 @@ export class UI implements UIHooks {
     ctx.fillRect((pt.x - vx) * z - 2, (pt.y - vy) * z - 4, 5, 8);
   }
 
+  /** the Journal's current goal, under the minimap */
+  private updateGoal(): void {
+    const g = this.game;
+    const h = this.hudEls;
+    const cur = GOALS[g.p.journal];
+    let html = '';
+    if (cur) {
+      const [have, need] = cur.goal.progress(g);
+      html = `<small>Journal \u00b7 ${ROMAN[cur.chapter]}</small><b>${cur.goal.text}</b>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><span>${fmt(have)} / ${fmt(need)}</span>` : ''}`;
+    }
+    if (html !== this.lastGoal) {
+      h.goal.innerHTML = html;
+      h.goal.style.display = html ? '' : 'none';
+      this.lastGoal = html;
+    }
+    if (this.lastGoalIdx !== g.p.journal) {
+      // a fresh goal catches the eye
+      if (this.lastGoalIdx >= 0) {
+        h.goal.classList.remove('fresh');
+        void h.goal.offsetWidth;
+        h.goal.classList.add('fresh');
+      }
+      this.lastGoalIdx = g.p.journal;
+    }
+    const help = g.input.usingPad ? 'Y pack \u00b7 D-pad \u2192 journal \u00b7 Back map \u00b7 Start menu' : 'Tab pack & craft \u00b7 J journal \u00b7 M map \u00b7 Esc menu';
+    if (help !== this.lastHelp) {
+      h.hudHelp.textContent = help;
+      this.lastHelp = help;
+    }
+  }
+
+  private journalHtml(): string {
+    const g = this.game;
+    const at = g.p.journal;
+    const cur = GOALS[at];
+    let html = `<div class="hd"><div><h2>Journal</h2><p class="line">${cur ? `Chapter ${ROMAN[cur.chapter]}: ${CHAPTERS[cur.chapter].title}` : 'Every page filled. The Wick burns, and Deepwick is yours.'}</p></div></div><div class="journal">`;
+    let k = 0;
+    CHAPTERS.forEach((c, ci) => {
+      const open = !cur || ci <= cur.chapter;
+      html += `<div class="jch ${open ? '' : 'locked'}"><h3 class="sub">${ROMAN[ci]}. ${open ? c.title : '? ? ?'}</h3>`;
+      for (const goal of c.goals) {
+        const i = k++;
+        if (!open) continue;
+        if (i < at) html += `<div class="jg done"><i>\u2713</i><span>${goal.text}</span><small>+${goal.coins}</small></div>`;
+        else if (i === at) {
+          const [have, need] = goal.progress(g);
+          html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${goal.how}</p>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><small>${fmt(have)} / ${fmt(need)}</small>` : ''}</div><small>+${goal.coins}</small></div>`;
+        } else html += `<div class="jg later"><i>\u00b7</i><span>${goal.text}</span></div>`;
+      }
+      html += '</div>';
+    });
+    return html + '</div>';
+  }
+
   private pauseHtml(): string {
     const m = Math.round(audio.musicVolume * 100);
     const s = Math.round(audio.sfxVolume * 100);
@@ -720,8 +785,12 @@ export class UI implements UIHooks {
       <div><kbd>Left mouse</kbd> with a fishing rod: cast at water, click when the bobber dips, then click while the needle is in the green · <kbd>Space</kbd> swims up</div>
       <div><kbd>1</kbd>–<kbd>0</kbd> or wheel: hotbar · <kbd>Q</kbd> drop held stack</div>
       <div><kbd>E</kbd> talk / interact / ride a cart · <kbd>F</kbd> lamp oil · <kbd>H</kbd> tonic · <kbd>R</kbd> recall to bed · <kbd>G</kbd> grappling hook</div>
-      <div><kbd>Tab</kbd> pack &amp; crafting · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</div></div>
-      <div class="row-actions"><button class="big" data-a="close">Resume</button><button data-a="save">Save now</button><button class="ghost" data-a="quit">Save &amp; quit to title</button></div>`;
+      <div><kbd>Tab</kbd> pack &amp; crafting · <kbd>J</kbd> journal · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</div>
+      <h3 class="sub">Controller</h3>
+      <div><kbd>Left stick</kbd> move / climb · <kbd>A</kbd> jump · <kbd>RT</kbd> use the held item · <kbd>LT</kbd> or <kbd>X</kbd> open, place, eat · <kbd>Right stick</kbd> aim (let go to work the block in front of you)</div>
+      <div><kbd>B</kbd> interact · <kbd>Y</kbd> pack · <kbd>LB</kbd><kbd>RB</kbd> hotbar · <kbd>L3</kbd> hook · <kbd>R3</kbd> drop · D-pad: <kbd>\u2190</kbd> oil <kbd>\u2191</kbd> tonic <kbd>\u2193</kbd> recall <kbd>\u2192</kbd> journal · <kbd>Back</kbd> map · <kbd>Start</kbd> pause</div>
+      <div>In menus the left stick moves a pointer: <kbd>A</kbd> click, <kbd>X</kbd> right-click, <kbd>B</kbd> back, right stick scrolls.</div></div>
+      <div class="row-actions"><button class="big" data-a="close">Resume</button><button data-a="journal">Journal</button><button data-a="save">Save now</button><button class="ghost" data-a="quit">Save &amp; quit to title</button></div>`;
   }
 
   private victoryHtml(): string {
@@ -1025,6 +1094,9 @@ export class UI implements UIHooks {
         }
         break;
       }
+      case 'journal':
+        this.open('journal');
+        return;
       case 'save':
         g.onSave?.();
         this.toast('Game saved.', '#9af0a0');

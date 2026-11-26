@@ -9,6 +9,7 @@ import { ITEMS, ItemDef, RELICS, SHOP_STOCK, equipSlotOf } from './data/items';
 import { ENEMIES, DAY_SURFACE, NIGHT_SURFACE } from './data/enemies';
 import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, WICK_GLOW, WICK_X, WICK_Y, flameLevel } from './data/wick';
+import { GOALS, CHAPTERS, ROMAN, goalDone } from './data/journal';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
@@ -249,6 +250,7 @@ export class Game {
   private whisperT = 8;
   /** light at the delver's head, from the last light pass */
   litHere = 1;
+  private journalT = 0;
 
   constructor(
     public input: Input,
@@ -270,6 +272,7 @@ export class Game {
     this.reconcileRelics();
     this.migrateWick();
     this.migrateNerve();
+    this.migrateJournal();
     this.ensureWick();
     this.settleMissing(false);
     if (this.p.bossRewardPending) setTimeout(() => this.grantBossReward(this.player.cx, this.player.cy), 800);
@@ -398,6 +401,11 @@ export class Game {
       this.randomTicks(dt);
     }
     this.updateDrops(dt);
+    this.journalT -= dt;
+    if (this.journalT <= 0) {
+      this.journalT = 0.4;
+      this.advanceJournal(true);
+    }
     this.updateShots(dt);
     this.updateBombs(dt);
     this.updateParticles(dt);
@@ -1269,7 +1277,31 @@ export class Game {
   }
 
   mouseWorld(): { x: number; y: number } {
+    if (this.input.usingPad) return this.padAim();
     return { x: this.input.mouseX / this.scale + this.camX, y: this.input.mouseY / this.scale + this.camY };
+  }
+
+  /**
+   * With a controller the right stick points where you act. Left alone, you work whatever is in
+   * front of you (the block at your chest, else the one at your feet), or the ground below while
+   * you hold the stick down.
+   */
+  private padAim(): { x: number; y: number } {
+    const pl = this.player;
+    const { aimX, aimY, moveY } = this.input;
+    const len = Math.hypot(aimX, aimY);
+    if (len < 0.25) {
+      if (moveY > 0.6) return { x: pl.cx, y: pl.y + pl.h + TILE / 2 };
+      const x = pl.cx + pl.facing * TILE * 1.05;
+      const tx = Math.floor(x / TILE);
+      const upper = pl.cy - 2;
+      const lower = pl.y + pl.h - 6;
+      if (!this.world.solid(tx, Math.floor(upper / TILE)) && this.world.solid(tx, Math.floor(lower / TILE))) return { x, y: lower };
+      return { x, y: upper };
+    }
+    const reach = Math.max(1.5, this.st.reach - 0.3) * TILE;
+    const d = TILE * 0.9 + (reach - TILE * 0.9) * Math.min(1, (len - 0.25) / 0.65);
+    return { x: pl.cx + (aimX / len) * d, y: pl.cy - 6 + (aimY / len) * d };
   }
 
   private updateTargeting(): void {
@@ -2163,6 +2195,33 @@ export class Game {
     return MODES[this.p.mode] ?? MODES.delver;
   }
 
+  /** saves from before the Journal: tick off everything already done, without paying for it again */
+  private migrateJournal(): void {
+    if (typeof this.p.journal === 'number' && Number.isFinite(this.p.journal)) return;
+    this.p.journal = 0;
+    this.advanceJournal(false);
+  }
+
+  /** tick off every goal that is already met, in order; rewards only when it happens in play */
+  advanceJournal(reward: boolean): void {
+    const p = this.p;
+    while (p.journal < GOALS.length && goalDone(this, GOALS[p.journal].goal)) {
+      const { goal, chapter } = GOALS[p.journal];
+      p.journal++;
+      if (!reward) continue;
+      p.coins += goal.coins;
+      this.addXp('delving', goal.coins);
+      this.toast(`Journal: ${goal.text} \u2713  +${goal.coins} coins`, '#ffd75a');
+      audio.play('upgrade', { pitch: 1.25, vol: 0.6, vary: 0 });
+      const next = GOALS[p.journal];
+      if (!next) this.toast('Every page of the Journal is filled. Deepwick is yours.', '#ffe9a8');
+      else if (next.chapter !== chapter) {
+        this.toast(`Chapter ${ROMAN[next.chapter]}: ${CHAPTERS[next.chapter].title}`, '#e8d8ff');
+        this.text(this.player.cx, this.player.y - 34, `Chapter ${ROMAN[next.chapter]}: ${CHAPTERS[next.chapter].title}`, '#ffd75a', true);
+      }
+    }
+  }
+
   /** saves from before nerve and difficulty existed */
   private migrateNerve(): void {
     if (typeof this.p.nerve !== 'number' || !Number.isFinite(this.p.nerve)) this.p.nerve = NERVE_MAX;
@@ -2730,6 +2789,7 @@ export class Game {
     }
     if (made) {
       this.p.stats.crafted += made;
+      this.p.seen['made_' + r.out] = true;
       audio.play('craft', { vary: 0.05 });
       if (r.out === 'workbench') this.hint('placeBench', 'Select the Workbench in your hotbar and click the ground to place it.');
     }

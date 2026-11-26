@@ -58,6 +58,14 @@ the flame) decides how far the light reaches tomorrow.
       burn in it, and drop Gloam Motes (6 Lumen). Difficulty: Hearth (keep your
       pack, softer), Delver, Gloam (harder, more Gloamlings); picked on the
       intro card, changeable from the pause menu.
-- [ ] Cycle 4: guidance. Journal of goals that walks the loop, better
-      onboarding, gamepad support.
+- [x] Cycle 4: guidance. The Journal: 21 goals in four chapters (The Cold
+      Wick, Into the Dark, The Long Descent, The Deep Places) walking the whole
+      loop from punching wood to stilling the Gloamheart. Each is judged from the
+      world state, pays coins and Delving XP, shows on the HUD under the minimap
+      with a progress bar, and in full with how-to text on J. Old saves skip
+      what they have done without being paid twice. Controller support: stick
+      movement, right-stick aim (idle aim works the block in front of you, or
+      below while holding down), triggers to use, an on-screen pointer that
+      clicks through every menu and the title, button latching across menu
+      changes, and a controller section in the pause menu.
 - [ ] Cycle 5+: review cycles: balance, polish, audio, performance, content.
