@@ -5,6 +5,7 @@ import { RELICS } from '../data/items';
 import { WORLD_W, WORLD_H, SURFACE_Y } from '../constants';
 import { Rng, fbm, valueNoise, clamp } from '../rng';
 import { propOf, propsOfKind, PROPS } from '../data/props';
+import { seedGas } from './gas';
 
 /** the centre of the world, where a new delver wakes up */
 export const SPAWN_X = Math.floor(WORLD_W / 2);
@@ -250,6 +251,9 @@ export function generateWorld(seed: number): World {
   placeDecor(w, rng);
   placeChests(w, rng);
   placeHeartCrystals(w, rng);
+
+  // ---- firedamp: sealed seams by the coal, gas under cave roofs ---------------------------------
+  seedGas(w, rng);
 
   unburyObjects(w);
   clearWater(w);

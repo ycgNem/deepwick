@@ -14,6 +14,7 @@ import { LOST, LostKind, LostSoul, isLostKind } from './data/lost';
 import { BREWS, BREW_TIME } from './data/brews';
 import { prefs } from './prefs';
 import { forTouch } from './touch';
+import { stepGas, sniff, gasOpen, isFlameObj, GAS_IGNITE, GAS_BURN, GAS_DENSE } from './world/gas';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
@@ -50,6 +51,23 @@ const AIR_JUMP_V = 440;
 const TREE_HP = 5;
 export const CHEST_SLOTS = 20;
 export const BUILDING_W = 4;
+
+/** how the canary feels about the air (none: you carry no canary) */
+export type CanaryMood = 'none' | 'calm' | 'uneasy' | 'frantic' | 'fainted';
+
+/** a flash fire racing through a cloud of firedamp */
+interface Flash {
+  front: number[];
+  seen: Set<number>;
+  /** tiles burned so far, and the size of the whole cloud when it caught */
+  n: number;
+  size: number;
+  t: number;
+  ox: number;
+  oy: number;
+  hitPlayer: boolean;
+  hit: Set<Enemy>;
+}
 
 export interface Interactable {
   id: string;
@@ -251,6 +269,15 @@ export class Game {
   drops: Drop[] = [];
   shots: Projectile[] = [];
   bombs: Bomb[] = [];
+  /** firedamp: the simulation clock, how many tiles near you hold gas, and a flash fire in progress */
+  private gasT = 0;
+  gasNear = 0;
+  private flash: Flash | null = null;
+  /** tiles on fire right now (drawn as flame, and they give light) */
+  burning: { x: number; y: number; t: number }[] = [];
+  private hissT = 0;
+  /** the canary's nose: what it smells, how it feels, how long it has breathed thick gas, and when it next sings */
+  canary = { smell: 0, mood: 'none' as CanaryMood, faint: 0, songT: 3 };
   parts: Particle[] = [];
   texts: FloatText[] = [];
   boss: Boss | null = null;
@@ -476,6 +503,7 @@ export class Game {
     }
     this.updateShots(dt);
     this.updateBombs(dt);
+    this.updateGas(dt);
     this.updateParticles(dt);
     if (this.fishFly && (this.fishFly.t += dt) > 0.6) this.fishFly = null;
     this.updateEnvironment(dt, menu);
@@ -1882,6 +1910,7 @@ export class Game {
     w.set(tx, ty, B.AIR);
     w.damage.delete(i);
     this.wakeWater(tx, ty);
+    this.checkBreach(tx, ty);
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
     // decor resting on (or hanging from) this block goes with it; big formations break loose
@@ -2701,6 +2730,8 @@ export class Game {
     }
     w.setObj(x + 2, y, Obj.CAMPFIRE);
     for (let cx = x - 6; cx <= x + 6; cx++) for (let cy = y - 5; cy <= y + 2; cy++) if (w.get(cx, cy) === B.WATER) this.waterQ.add(w.idx(cx, cy));
+    // their fire has burned the air clean around them
+    for (let cx = x - 12; cx <= x + 12; cx++) for (let cy = y - 10; cy <= y + 8; cy++) if (w.inside(cx, cy)) w.gas[w.idx(cx, cy)] = 0;
   }
 
   /** you found them: from now on they keep to your heels */
@@ -2989,6 +3020,20 @@ export class Game {
         if (this.hook) this.releaseHook(false);
         else this.fireGrapple();
         return;
+      case 'canary': {
+        const m = this.canary.mood;
+        const say =
+          m === 'frantic'
+            ? 'The canary beats against the bars: firedamp, close!'
+            : m === 'uneasy'
+              ? 'The canary hops and chirps: there is firedamp nearby.'
+              : m === 'fainted'
+                ? 'The canary has fainted! Get it out of the gas.'
+                : 'The canary sings: the air is clean.';
+        this.toast(say, m === 'calm' || m === 'none' ? '#ffe9a8' : '#ffb050');
+        audio.play('chirp', { vol: 0.5, pitch: m === 'frantic' ? 1.35 : 1.05 });
+        return;
+      }
       case 'steadydraught':
         if (this.p.nerve >= NERVE_MAX - 1) {
           this.text(pl.cx, pl.y - 6, 'Already steady', '#e8d8ff');
@@ -3771,6 +3816,280 @@ export class Game {
     }
     const pl = this.player;
     if (Math.hypot(pl.cx - x, pl.cy - y) < 2.2 * TILE) this.hurtPlayer(14, x);
+    // and any firedamp it reaches goes up with it
+    for (let dy = -2; dy <= 2 && !this.flash; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (this.world.inside(tx + dx, ty + dy) && this.world.gas[this.world.idx(tx + dx, ty + dy)] >= GAS_BURN) {
+          this.ignite(tx + dx, ty + dy);
+          break;
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ firedamp
+  private updateGas(dt: number): void {
+    this.updateFlash(dt);
+    for (const b of this.burning) b.t -= dt;
+    if (this.burning.length) this.burning = this.burning.filter((b) => b.t > 0);
+    if (this.hissT > 0) this.hissT -= dt;
+    this.gasT -= dt;
+    if (this.gasT > 0) return;
+    this.gasT = 0.2;
+    const pl = this.player;
+    const tx = Math.floor(pl.cx / TILE);
+    const ty = Math.floor(pl.cy / TILE);
+    const x0 = tx - 42;
+    const y0 = ty - 28;
+    const x1 = tx + 42;
+    const y1 = ty + 28;
+    this.gasNear = stepGas(this.world, x0, y0, x1, y1, Math.random);
+    if (this.gasNear && !this.flash) this.checkIgnition(x0, y0, x1, y1);
+    if (this.gasNear) this.noticeGas(tx, ty);
+    // breathing thick firedamp makes your head swim
+    const headY = Math.floor((pl.cy - TILE * 0.5) / TILE);
+    if (this.gasNear && !pl.dead && this.world.inside(tx, headY) && this.world.gas[this.world.idx(tx, headY)] > 150) {
+      this.p.nerve = Math.max(0, this.p.nerve - 0.5);
+      this.hint('firedamp_breath', 'The sweet air makes your head swim. Thick firedamp is hard to breathe: it wears your nerve down while you stand in it.');
+    }
+    this.updateCanary(0.2, tx, ty);
+  }
+
+  /** an open flame in thick enough gas sets it off: a torch in hand, on a wall, a campfire, a lamp, lava */
+  private checkIgnition(x0: number, y0: number, x1: number, y1: number): void {
+    const w = this.world;
+    const pl = this.player;
+    if (!pl.dead && heldDef(this.p)?.id === 'torch') {
+      // the hand, and the flame licking up above it (gas hangs high)
+      const hx = Math.floor((pl.cx + pl.facing * 6) / TILE);
+      for (const fy of [pl.cy - 4, pl.cy - 4 - TILE * 0.7]) {
+        const hy = Math.floor(fy / TILE);
+        if (w.inside(hx, hy) && w.gas[w.idx(hx, hy)] >= GAS_IGNITE) {
+          this.ignite(hx, hy);
+          return;
+        }
+      }
+    }
+    const W = w.w;
+    for (let y = Math.max(1, y0); y < Math.min(w.h - 1, y1); y++) {
+      for (let x = Math.max(1, x0); x < Math.min(W - 1, x1); x++) {
+        const i = y * W + x;
+        if (w.gas[i] < GAS_IGNITE) continue;
+        const lava = w.fg[i - 1] === B.LAVA || w.fg[i + 1] === B.LAVA || w.fg[i - W] === B.LAVA || w.fg[i + W] === B.LAVA;
+        if (lava || isFlameObj(w.obj[i])) {
+          this.ignite(x, y);
+          return;
+        }
+      }
+    }
+  }
+
+  /** the gas catches here: the flash runs through every connected tile of it */
+  private ignite(tx: number, ty: number): void {
+    if (this.flash) return;
+    const w = this.world;
+    const W = w.w;
+    const i0 = w.idx(tx, ty);
+    // measure the whole cloud first: its size is how hard it hits
+    const seen = new Set<number>([i0]);
+    const q = [i0];
+    let tiles = 0;
+    let mass = 0;
+    while (q.length && tiles < 900) {
+      const i = q.pop() as number;
+      tiles++;
+      mass += w.gas[i];
+      for (const j of [i - 1, i + 1, i - W, i + W]) {
+        if (j < 0 || j >= w.gas.length || seen.has(j) || w.gas[j] < GAS_BURN) continue;
+        seen.add(j);
+        q.push(j);
+      }
+    }
+    // how much gas there was, not how far it had spread, is how hard it goes up
+    const size = Math.round(mass / 120);
+    this.flash = { front: [i0], seen: new Set([i0]), n: 0, size, t: 0, ox: (tx + 0.5) * TILE, oy: (ty + 0.5) * TILE, hitPlayer: false, hit: new Set() };
+    audio.play('whoomph', { pitch: size > 80 ? 0.8 : size > 30 ? 0.95 : 1.15, vol: Math.min(1, 0.55 + size / 120), vary: 0.05 });
+    if (size > 60) audio.play('explosion', { pitch: 0.6, vol: 0.6 });
+    this.shake = Math.max(this.shake, Math.min(16, 4 + size / 7));
+    this.hint('firedamp_boom', 'Firedamp! An open flame set the gas off. Keep torches, campfires and lamps away from the haze: your lantern is a safety lamp and will not light it.');
+  }
+
+  private updateFlash(dt: number): void {
+    const f = this.flash;
+    if (!f) return;
+    const w = this.world;
+    const W = w.w;
+    f.t -= dt;
+    while (f.t <= 0 && f.front.length) {
+      f.t += 0.028;
+      const next: number[] = [];
+      for (const i of f.front) {
+        this.burnTile(i, f);
+        for (const j of [i - 1, i + 1, i - W, i + W]) {
+          if (j < 0 || j >= w.gas.length || f.seen.has(j) || w.gas[j] < GAS_BURN) continue;
+          f.seen.add(j);
+          next.push(j);
+        }
+      }
+      f.front = f.n > 900 ? [] : next;
+    }
+    if (!f.front.length) this.flash = null;
+  }
+
+  private burnTile(i: number, f: Flash): void {
+    const w = this.world;
+    const tx = i % w.w;
+    const ty = (i - tx) / w.w;
+    const g = w.gas[i];
+    w.gas[i] = 0;
+    f.n++;
+    this.burning.push({ x: tx, y: ty, t: 0.3 + Math.random() * 0.35 });
+    const cx = (tx + 0.5) * TILE;
+    const cy = (ty + 0.5) * TILE;
+    for (let k = 0; k < 2; k++) {
+      this.parts.push({
+        x: cx + (Math.random() - 0.5) * 26,
+        y: cy + (Math.random() - 0.5) * 26,
+        vx: (Math.random() - 0.5) * 60,
+        vy: -30 - Math.random() * 70,
+        life: 0.45,
+        max: 0.45,
+        color: ['#fff3c0', '#ffd75a', '#ff8a2a', '#ff5a1a'][Math.floor(Math.random() * 4)],
+        size: Math.random() < 0.5 ? 2 : 3,
+        grav: -30,
+        glow: true,
+      });
+    }
+    // thick gas blows the soft rock around it apart
+    if (g >= GAS_DENSE) {
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const bx = tx + dx;
+        const by = ty + dy;
+        const def = BLOCKS[w.get(bx, by)];
+        if (!def.solid || def.unbreakable || def.tier > 2 || this.isProtected(bx, by) || Math.random() > 0.35) continue;
+        this.breakBlock(bx, by, true);
+      }
+    }
+    for (const e of this.enemies) {
+      if (e.dead || f.hit.has(e)) continue;
+      if (Math.abs(e.cx - cx) < TILE * 1.1 && Math.abs(e.cy - cy) < TILE * 1.1) {
+        f.hit.add(e);
+        this.damageEnemy(e, Math.atan2(e.cy - f.oy, e.cx - f.ox), 30 + this.st.attack);
+      }
+    }
+    const pl = this.player;
+    if (!f.hitPlayer && !pl.dead && Math.abs(pl.cx - cx) < TILE * 1.2 && Math.abs(pl.cy - cy) < TILE * 1.5) {
+      f.hitPlayer = true;
+      // the bigger the cloud, the harder it hits; the first time it ever catches you, it is kinder
+      let dmg = Math.min(40, 10 + f.size * 0.4);
+      if (!this.p.seen.firedamp_burned) {
+        this.p.seen.firedamp_burned = true;
+        dmg *= 0.5;
+      }
+      pl.invuln = 0;
+      this.hurtPlayer(dmg, f.ox === pl.cx ? pl.cx - pl.facing : f.ox);
+      this.p.nerve = Math.max(0, this.p.nerve - 10);
+    }
+  }
+
+  /** a block just came away: if gas was sealed behind it, it hisses out */
+  private checkBreach(tx: number, ty: number): void {
+    const w = this.world;
+    let most = 0;
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      if (w.inside(tx + dx, ty + dy)) most = Math.max(most, w.gas[w.idx(tx + dx, ty + dy)]);
+    }
+    if (most < 100) return;
+    if (this.hissT <= 0) {
+      audio.play('hiss', { vol: 0.7 });
+      this.hissT = 1.5;
+    }
+    for (let k = 0; k < 10; k++) {
+      this.parts.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, vx: (Math.random() - 0.5) * 90, vy: -20 - Math.random() * 50, life: 0.9, max: 0.9, color: Math.random() < 0.5 ? '#d8e490' : '#b8c870', size: 2, grav: -10, glow: false });
+    }
+    this.hintGas();
+  }
+
+  /** you are close to gas you could see: the first time, say what it is */
+  private noticeGas(tx: number, ty: number): void {
+    if (this.p.seen.firedamp) return;
+    const w = this.world;
+    // only gas in the air you are standing in (not sealed away behind rock)
+    if (!w.inside(tx, ty)) return;
+    const W = w.w;
+    const i0 = w.idx(tx, ty);
+    const seen = new Set<number>([i0]);
+    const q = [i0];
+    while (q.length) {
+      const i = q.pop() as number;
+      if (w.gas[i] >= 30) {
+        this.hintGas();
+        return;
+      }
+      const x = i % W;
+      const y = (i - x) / W;
+      for (const [j, jx, jy] of [
+        [i - 1, x - 1, y],
+        [i + 1, x + 1, y],
+        [i - W, x, y - 1],
+        [i + W, x, y + 1],
+      ]) {
+        if (Math.abs(jx - tx) > 6 || Math.abs(jy - ty) > 5 || seen.has(j) || !w.inside(jx, jy) || !gasOpen(w, j)) continue;
+        seen.add(j);
+        q.push(j);
+      }
+    }
+  }
+
+  private hintGas(): void {
+    this.hint(
+      'firedamp',
+      'The air shimmers and smells sweet: firedamp, mine gas. An open flame sets it off (a torch in your hand or on a wall, a campfire). Your lantern is a safety lamp and will not. Old Pell sells canaries that smell it first.',
+    );
+  }
+
+  /** the canary in your pack smells gas through rock before you can see it */
+  private updateCanary(dt: number, tx: number, ty: number): void {
+    const c = this.canary;
+    const pl = this.player;
+    if (pl.dead || count(this.p, 'canary') <= 0) {
+      c.mood = 'none';
+      return;
+    }
+    const w = this.world;
+    c.smell = sniff(w, tx, ty, 7);
+    const here = w.inside(tx, ty) ? w.gas[w.idx(tx, ty)] : 0;
+    c.faint = here > 140 ? Math.min(6, c.faint + dt) : Math.max(0, c.faint - dt * 0.5);
+    const mood: CanaryMood = c.faint >= 3 ? 'fainted' : c.smell >= 90 ? 'frantic' : c.smell >= 22 ? 'uneasy' : 'calm';
+    if (mood !== c.mood) {
+      if (mood === 'frantic' && c.mood !== 'fainted') this.toast('Your canary is frantic: firedamp close by!', '#ffb050');
+      else if (mood === 'fainted') this.toast('Your canary has fainted! Get it out of the gas.', '#ff7a5a');
+      c.mood = mood;
+      c.songT = Math.min(c.songT, 0.2);
+    }
+    c.songT -= dt;
+    if (c.songT > 0) return;
+    const underground = ty > w.surface[Math.max(0, Math.min(w.w - 1, tx))] + 2;
+    if (mood === 'calm') {
+      c.songT = 7 + Math.random() * 9;
+      if (underground) audio.play('chirp', { vol: 0.3, pitch: 1 + Math.random() * 0.15 });
+    } else if (mood === 'uneasy') {
+      c.songT = 1.3;
+      audio.play('chirp', { vol: 0.45, pitch: 1.12 + Math.random() * 0.08 });
+    } else if (mood === 'frantic') {
+      c.songT = 0.4;
+      audio.play('chirp', { vol: 0.55, pitch: 1.3 + Math.random() * 0.2 });
+    } else c.songT = 1;
   }
 
   private updateParticles(dt: number): void {
@@ -4082,6 +4401,12 @@ export class Game {
     }
     const sat = this.p.satchel;
     if (sat) lights.push({ x: sat.x / TILE, y: sat.y / TILE, r: 0.3, g: 0.6, b: 0.3, radius: 3, cast: false });
+    // a flash fire lights the tunnel it runs down
+    const step = Math.max(1, Math.ceil(this.burning.length / 28));
+    for (let k = 0; k < this.burning.length; k += step) {
+      const b = this.burning[k];
+      lights.push({ x: b.x + 0.5, y: b.y + 0.5, r: 1.3, g: 0.75, b: 0.3, radius: 3.6 * Math.min(1, b.t * 3), cast: false });
+    }
     this.light.compute(this.world, tx0, ty0, tw, th, lights, this.time, this.skyColor());
     this.light.finish(this.world);
   }

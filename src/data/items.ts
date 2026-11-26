@@ -179,6 +179,7 @@ const LIST: Record<string, Partial2> = {
   bomb: { name: 'Blast Charge', icon: i16(23), kind: 'use', value: 10, desc: 'Thrown toward the cursor. Breaks rock up to one tier above your pick.', stack: 30 },
   fishingrod: { name: 'Fishing Rod', icon: n32(46), kind: 'rod', rod: 1, value: 10, stack: 1, desc: 'Click on water to cast. When the bobber dips, click to hook the fish, then click as the needle crosses the green.' },
   brassrod: { name: 'Brass Rod', icon: f32(9), kind: 'rod', rod: 1.5, value: 90, stack: 1, desc: 'Quicker bites, a wider catch zone and better odds of something rare.' },
+  canary: { name: 'Canary', icon: { sheet: 'f32', idx: 13 }, kind: 'use', value: 30, stack: 1, desc: 'A songbird in a brass cage. Anywhere in your pack, it smells firedamp before you can see it, even through rock: it sings in clean air, chirps when gas is near and panics when it is close. Click while holding it to listen.' },
   grapple: { name: 'Grappling Hook', icon: n32(48), kind: 'use', value: 40, stack: 1, desc: 'Press G, or click while holding it, to throw it at the cursor. It bites into rock and hauls you up. W and S climb the rope, Space jumps off.' },
   heartcrystal: { name: 'Heart Crystal', icon: n32(43), kind: 'use', value: 50, desc: 'Use it to raise your max health by 10 (up to +100).', glow: '#ff6a9a', stack: 10 },
 
@@ -271,6 +272,7 @@ export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
   { id: 'oil', price: 20, n: 1 },
   { id: 'tonic', price: 28, n: 1 },
   { id: 'bomb', price: 30, n: 1 },
+  { id: 'canary', price: 60, n: 1 },
   { id: 'recall', price: 45, n: 1 },
   { id: 'seeds', price: 4, n: 3 },
   { id: 'fishingrod', price: 30, n: 1 },

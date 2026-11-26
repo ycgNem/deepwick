@@ -79,6 +79,7 @@ export class UI implements UIHooks {
   private lastSeek = '';
   private lastGoalIdx = -1;
   private lastHelp = '';
+  private lastCanary = '';
   onQuit: (() => void) | null = null;
   onSettings: ((music: number, sfx: number) => void) | null = null;
   onPrefs: (() => void) | null = null;
@@ -95,7 +96,7 @@ export class UI implements UIHooks {
     this.miniCtx = mc;
     [this.mapCanvas, this.mapCtx] = makeCanvas(WORLD_W, WORLD_H);
     this.mapImg = this.mapCtx.createImageData(WORLD_W, WORLD_H);
-    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill', 'bossName', 'tideChip', 'seek', 'buffChip']) {
+    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill', 'bossName', 'tideChip', 'seek', 'buffChip', 'canaryChip']) {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -365,6 +366,19 @@ export class UI implements UIHooks {
     const bfHtml = bf.join('<b class="sep"></b>');
     if (h.buffChip.innerHTML !== bfHtml) h.buffChip.innerHTML = bfHtml;
     h.buffChip.style.display = bfHtml ? '' : 'none';
+    // the canary: shown underground, or anywhere it is upset
+    const cm = g.canary.mood;
+    const below = pl.cy / TILE > g.world.surface[Math.max(0, Math.min(WORLD_W - 1, Math.floor(pl.cx / TILE)))] + 2;
+    const showCanary = cm !== 'none' && (cm !== 'calm' || below);
+    h.canaryChip.style.display = showCanary ? '' : 'none';
+    if (showCanary && cm !== this.lastCanary) {
+      this.lastCanary = cm;
+      h.canaryChip.className = `chip canary ${cm}`;
+      const label = h.canaryChip.querySelector('span');
+      if (label) label.textContent = cm === 'calm' ? 'Canary singing' : cm === 'uneasy' ? 'Canary uneasy' : cm === 'frantic' ? 'Canary frantic!' : 'Canary fainted';
+      const im = h.canaryChip.querySelector('img');
+      if (im && !im.getAttribute('src')) im.src = iconUrl(ITEMS.canary.icon);
+    }
     h.clock.classList.toggle('night', daylight(c) < 0.5);
     const fl = g.flame;
     const nextNeed = fl > 0 && fl < MAX_FLAME ? FLAME[fl + 1].need : 0;

@@ -19,6 +19,9 @@
   --hp: #e0484f;
   --oil: #f2a83a;
   font-family: 'DW Digits', 'Pixelify Sans', monospace;
+  /* Pixelify Sans has an fi/fl ligature that draws as a capital A ("Arst", "Aame") */
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'clig' 0;
 }
 * {
   box-sizing: border-box;
@@ -603,6 +606,29 @@ button.ghost {
 .brews .li .costs {
   margin: 0 8px 0 auto;
   flex-wrap: nowrap;
+}
+.chip.canary {
+  font-size: 12px;
+  color: #f4ead6;
+}
+.chip.canary img {
+  width: 20px;
+  height: 20px;
+}
+.chip.canary.uneasy {
+  color: #ffd890;
+  border-color: #a8802a;
+}
+.chip.canary.frantic {
+  color: #ffb0a0;
+  border-color: #c84a2a;
+  box-shadow: 0 0 10px rgba(255, 90, 50, 0.5);
+  animation: pulse 0.35s infinite alternate;
+}
+.chip.canary.fainted {
+  color: #b8b0a0;
+  border-color: #5a5048;
+  filter: grayscale(0.6);
 }
 #seek {
   margin-top: 6px;

@@ -2,7 +2,8 @@ import { SAVE_KEY, SETTINGS_KEY } from './constants';
 import type { Progress } from './state';
 import { World } from './world/world';
 import { generateWorld } from './world/gen';
-import { B } from './data/blocks';
+import { B, BLOCKS } from './data/blocks';
+import { farFromFlame } from './world/gas';
 
 interface SaveFile {
   p: Progress;
@@ -13,6 +14,8 @@ interface SaveFile {
   explored: string;
   rail?: string;
   placed?: string;
+  /** firedamp; saves from before it have their seams carved where the rock is still whole */
+  gas?: string;
   /** set once worlds had water in them */
   water?: number;
 }
@@ -46,7 +49,7 @@ function unrle(b64: string, target: Uint8Array): void {
 }
 
 export function saveGame(p: Progress, w: World): boolean {
-  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed), water: 1 };
+  const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed), gas: rle(w.gas), water: 1 };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
@@ -76,6 +79,8 @@ export function loadGame(): { p: Progress; world: World } | null {
     // worlds saved before there was water get the cave pools wherever that space is still open
     const pools: number[] = [];
     if (!data.water) for (let i = 0; i < world.fg.length; i++) if (world.fg[i] === B.WATER) pools.push(i);
+    const gassy: number[] = [];
+    if (!data.gas) for (let i = 0; i < world.gas.length; i++) if (world.gas[i]) gassy.push(i);
     unrle(data.fg, world.fg);
     if (data.wall) unrle(data.wall, world.wall);
     unrle(data.obj, world.obj);
@@ -85,6 +90,19 @@ export function loadGame(): { p: Progress; world: World } | null {
     else world.rail.fill(0);
     if (data.placed) unrle(data.placed, world.placed);
     for (const i of pools) if (world.fg[i] === B.AIR && !world.obj[i] && !world.rail[i]) world.fg[i] = B.WATER;
+    if (data.gas) unrle(data.gas, world.gas);
+    else {
+      // a world from before firedamp: open its seams where the rock is still as it was made
+      // (but never right beside a torch or fire the player has put up since, nor in their buildings)
+      for (const i of gassy) {
+        const x = i % world.w;
+        const y = (i - x) / world.w;
+        const def = BLOCKS[world.fg[i]];
+        if (!farFromFlame(world, x, y, 8) || world.placed[i] || world.placed[i - world.w]) world.gas[i] = 0;
+        else if (def.solid && !def.unbreakable && !world.obj[i] && !world.rail[i]) world.fg[i] = B.AIR;
+        else if (def.solid || world.fg[i] === B.WATER || world.fg[i] === B.LAVA) world.gas[i] = 0;
+      }
+    }
     world.updateAllSky();
     world.dirty.clear();
     return { p: data.p, world };

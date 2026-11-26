@@ -81,6 +81,13 @@ export class Renderer {
   /** the part of the overlay drawn on last frame, wiped before the next */
   private dirty: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private overOpacity = '';
+  /** firedamp: a soft map of the gas (one pixel per tile), the cloud that fills it, and the layer they meet on */
+  private gasMap: HTMLCanvasElement | null = null;
+  private gasMapCtx: CanvasRenderingContext2D | null = null;
+  private gasImg: ImageData | null = null;
+  private gasLayer: HTMLCanvasElement | null = null;
+  private gasLayerCtx: CanvasRenderingContext2D | null = null;
+  private gasCloud: HTMLCanvasElement | null = null;
   scale = 2;
   dpr = 1;
   private backdrops: Backdrop[] = [];
@@ -236,6 +243,7 @@ export class Renderer {
       ctx.drawImage(c, Math.round(g.ride.x - c.width / 2 - camX), Math.round((g.ride.row + 1) * TILE - c.height - 3 + bob - camY));
     }
     this.drawWater(g, ctx, camX, camY, vw, vh);
+    this.drawGas(g, ctx, camX, camY, vw, vh);
     this.drawFishing(g, ctx, camX, camY);
     this.updateAmbient(g, dt, camX, camY, vw, vh);
     this.drawGhost(g, ctx, camX, camY);
@@ -1068,6 +1076,7 @@ export class Renderer {
     const pose = swingDef ? this.swingPose(pl.swingT) : null;
     // on the wind-up the tool is over the shoulder, behind the miner
     if (swingDef && pose && pose.a < -1.3) this.drawSwingTool(ctx, swingDef, pose, cx, footY, pl.facing);
+    if (g.canary.mood !== 'none' && !pl.dead) this.drawCage(g, ctx, cx, footY, pl.facing);
     ctx.save();
     if (pl.dead) ctx.globalAlpha = Math.max(0, 1 - pl.deadT * 0.3);
     if (flip) {
@@ -1220,6 +1229,26 @@ export class Renderer {
   private drawGlows(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    for (const b of g.burning) {
+      const k = Math.min(1, b.t * 3);
+      const sx = b.x * TILE - camX;
+      const sy = b.y * TILE - camY;
+      if (sx < -40 || sy < -40 || sx > vw + 40 || sy > vh + 40) continue;
+      this.glowAt(ctx, sx + 16, sy + 16, (20 + Math.random() * 8) * k, 'rgba(255,150,50,0.75)');
+      // a few licks of flame, pixel by pixel: a wide orange foot, a yellow body, a pale tip
+      const seed = (b.x * 7 + b.y * 13) % 5;
+      for (let f = 0; f < 3; f++) {
+        const fx = Math.round(sx + 5 + ((seed + f * 9) % 20) + (Math.random() - 0.5) * 3);
+        const h = Math.max(2, Math.round((6 + Math.random() * 10) * k));
+        const fy = Math.round(sy + 26 - ((seed * 3 + f * 5) % 10));
+        ctx.fillStyle = `rgba(255,90,30,${(0.55 * k).toFixed(2)})`;
+        ctx.fillRect(fx - 2, fy - 3, 5, 3);
+        ctx.fillStyle = `rgba(255,170,50,${(0.7 * k).toFixed(2)})`;
+        ctx.fillRect(fx - 1, fy - Math.ceil(h * 0.7), 3, Math.ceil(h * 0.7));
+        ctx.fillStyle = `rgba(255,240,170,${(0.8 * k).toFixed(2)})`;
+        ctx.fillRect(fx, fy - h, 1, Math.ceil(h * 0.45));
+      }
+    }
     const w = g.world;
     const tx0 = Math.max(0, Math.floor(camX / TILE) - 1);
     const ty0 = Math.max(0, Math.floor(camY / TILE) - 1);
@@ -1471,6 +1500,122 @@ export class Renderer {
     for (const [x, y, r] of pts) pixDisc(ctx, x, y, r);
   }
 
+  /**
+   * Firedamp haze: the gas map, smoothed up to world size, cuts a drifting cloud to its shape.
+   * It is drawn before the lighting, so gas is only seen where there is light to see it by.
+   */
+  private drawGas(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    if (!g.gasNear) return;
+    const w = g.world;
+    const tx0 = Math.floor(camX / TILE) - 1;
+    const ty0 = Math.floor(camY / TILE) - 1;
+    const tw = Math.ceil(vw / TILE) + 3;
+    const th = Math.ceil(vh / TILE) + 3;
+    if (!this.gasMap || !this.gasMapCtx || !this.gasImg || this.gasMap.width !== tw || this.gasMap.height !== th) {
+      const c = document.createElement('canvas');
+      c.width = tw;
+      c.height = th;
+      const cc = c.getContext('2d');
+      if (!cc) return;
+      this.gasMap = c;
+      this.gasMapCtx = cc;
+      this.gasImg = cc.createImageData(tw, th);
+    }
+    const d = this.gasImg.data;
+    let any = false;
+    for (let y = 0; y < th; y++) {
+      const wy = ty0 + y;
+      for (let x = 0; x < tw; x++) {
+        const wx = tx0 + x;
+        let a = 0;
+        if (wx >= 0 && wy >= 0 && wx < w.w && wy < w.h) {
+          const v = w.gas[wy * w.w + wx];
+          if (v > 8) {
+            a = Math.min(235, 24 + (v - 8) * 1.4);
+            any = true;
+          }
+        }
+        const o = (y * tw + x) * 4;
+        d[o] = 255;
+        d[o + 1] = 255;
+        d[o + 2] = 255;
+        d[o + 3] = a;
+      }
+    }
+    if (!any) return;
+    this.gasMapCtx.putImageData(this.gasImg, 0, 0);
+    if (!this.gasLayer || !this.gasLayerCtx || this.gasLayer.width !== vw || this.gasLayer.height !== vh) {
+      const c = document.createElement('canvas');
+      c.width = vw;
+      c.height = vh;
+      const cc = c.getContext('2d');
+      if (!cc) return;
+      this.gasLayer = c;
+      this.gasLayerCtx = cc;
+    }
+    const L = this.gasLayerCtx;
+    const cloud = this.gasCloud ?? (this.gasCloud = makeCloud());
+    const N = cloud.width;
+    const mod = (v: number): number => ((v % N) + N) % N;
+    L.clearRect(0, 0, vw, vh);
+    L.globalCompositeOperation = 'source-over';
+    L.globalAlpha = 1;
+    // two sheets of cloud drifting past each other, fixed to the world
+    const ax = mod(camX - g.time * 6);
+    const ay = mod(camY + g.time * 2);
+    for (let y = -ay; y < vh; y += N) for (let x = -ax; x < vw; x += N) L.drawImage(cloud, Math.round(x), Math.round(y));
+    L.globalAlpha = 0.5;
+    const bx = mod(camX + g.time * 4 + 57);
+    const by = mod(camY - g.time * 3 + 31);
+    for (let y = -by; y < vh; y += N) for (let x = -bx; x < vw; x += N) L.drawImage(cloud, Math.round(x), Math.round(y));
+    L.globalAlpha = 1;
+    L.globalCompositeOperation = 'destination-in';
+    L.imageSmoothingEnabled = true;
+    L.imageSmoothingQuality = 'high';
+    L.drawImage(this.gasMap, 0, 0, tw, th, tx0 * TILE - camX, ty0 * TILE - camY, tw * TILE, th * TILE);
+    L.globalCompositeOperation = 'source-over';
+    ctx.drawImage(this.gasLayer, 0, 0);
+  }
+
+  /** the canary's cage, hanging from the pack on the miner's back; the bird inside shows how it feels */
+  private drawCage(g: Game, ctx: CanvasRenderingContext2D, cx: number, footY: number, facing: number): void {
+    const mood = g.canary.mood;
+    const x = Math.round(cx - facing * 12) - 3;
+    const y = footY - 32;
+    const P = (px: number, py: number, pw: number, ph: number, c: string): void => {
+      ctx.fillStyle = c;
+      ctx.fillRect(x + (facing < 0 ? 7 - px - pw : px), y + py, pw, ph);
+    };
+    const t = g.time;
+    // the cage
+    P(3, 0, 1, 1, '#4a3a20');
+    P(2, 1, 3, 1, '#d8b060');
+    P(1, 2, 5, 1, '#c8a050');
+    P(0, 3, 1, 5, '#8a6a30');
+    P(6, 3, 1, 5, '#8a6a30');
+    // the bird
+    let hop = 0;
+    if (mood === 'frantic') hop = Math.floor(t * 14) % 2 ? -1 : 0;
+    else if (mood === 'uneasy') hop = t % 0.8 < 0.12 ? -1 : 0;
+    if (mood === 'fainted') {
+      P(2, 7, 3, 1, '#c8b060');
+      P(5, 7, 1, 1, '#d8c070');
+    } else {
+      P(1, 7, 5, 1, '#6a4a20');
+      P(3, 4 + hop, 2, 1, '#ffd43a');
+      P(5, 4 + hop, 1, 1, '#ff9a2a');
+      P(2, 5 + hop, 3, 2, '#ffd43a');
+      P(2, 5 + hop, 1, 1, mood === 'frantic' && hop ? '#fff0a0' : '#e0a820');
+      P(1, 6 + hop, 1, 1, '#e0a820');
+    }
+    P(3, 3, 1, 4, 'rgba(110,80,36,0.7)');
+    P(0, 8, 7, 1, '#a07838');
+    if (mood === 'frantic' && Math.floor(t * 4) % 2) {
+      P(3, -5, 1, 2, '#ff5a3a');
+      P(3, -2, 1, 1, '#ff5a3a');
+    }
+  }
+
   private glowAt(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string): void {
     const c = this.tinted(color);
     ctx.drawImage(c, Math.round(x - r), Math.round(y - r), Math.round(r * 2), Math.round(r * 2));
@@ -1614,6 +1759,50 @@ export class Renderer {
       out.fillRect(x, y, w * (1 - pl.recallT / 1.6), 3 * s);
     }
   }
+}
+
+/** a tileable cloud for firedamp haze: soft noise in a few pale bands, sickly yellow-green */
+function makeCloud(): HTMLCanvasElement {
+  const N = 128;
+  const c = document.createElement('canvas');
+  c.width = N;
+  c.height = N;
+  const g = c.getContext('2d');
+  if (!g) return c;
+  const img = g.createImageData(N, N);
+  const grid = (n: number): Float32Array => {
+    const a = new Float32Array(n * n);
+    for (let i = 0; i < a.length; i++) a[i] = Math.random();
+    return a;
+  };
+  const sample = (a: Float32Array, n: number, x: number, y: number): number => {
+    const fx = (x / N) * n;
+    const fy = (y / N) * n;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const s = (v: number): number => v * v * (3 - 2 * v);
+    const sx = s(fx - x0);
+    const sy = s(fy - y0);
+    const at = (xx: number, yy: number): number => a[(((yy % n) + n) % n) * n + (((xx % n) + n) % n)];
+    const top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * sx;
+    const bot = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * sx;
+    return top + (bot - top) * sy;
+  };
+  const g1 = grid(6);
+  const g2 = grid(14);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const v = sample(g1, 6, x, y) * 0.65 + sample(g2, 14, x, y) * 0.35;
+      const q = Math.floor(v * 5) / 5;
+      const o = (y * N + x) * 4;
+      img.data[o] = Math.round(180 + q * 40);
+      img.data[o + 1] = Math.round(198 + q * 34);
+      img.data[o + 2] = Math.round(112 + q * 40);
+      img.data[o + 3] = Math.round(60 + q * 150);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
 }
 
 interface SkyTop {
