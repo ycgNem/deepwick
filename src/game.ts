@@ -23,6 +23,7 @@ import { Ending, DAWN_RADIUS, DAWN_FROM, DAWN_TO } from './ending';
 import { Weather } from './weather';
 import { CAPTIONS } from './captions';
 import { FEATS, FISH } from './data/feats';
+import { Dog } from './dog';
 import type { SfxId } from './audio';
 import {
   Progress,
@@ -316,6 +317,8 @@ export class Game {
   breath = BREATH_MAX;
   private drownT = 0;
   private gaspReady = false;
+  /** down to the last of your breath on this dive (for the Feat) */
+  private gaspLast = false;
   private gushT = 0;
   /** the Lampless: seconds your flame has left low, the time until it next gutters, and whether it has started to sputter */
   gutter = 0;
@@ -381,6 +384,8 @@ export class Game {
   flare: { t: number; level: number; from: number } | null = null;
   /** rain, storms and fog over the valley */
   weather = new Weather();
+  /** Tallow: a stray by the Wick, then your dog */
+  dog = new Dog();
   /** how soaked you are, 0..1: rain on you out in the open, or a swim */
   wet = 0;
   /** beside a fire or in the Wick's light, where the wet does not chill you */
@@ -419,6 +424,8 @@ export class Game {
     pl.fallStartY = pl.y;
     this.wasNight = isNight(p.clock);
     this.weather.load(p.weather);
+    p.deepRow ??= p.maxDepth + 26;
+    this.wet = Math.max(0, Math.min(1, p.wet ?? 0));
     if (this.p.bounties.length === 0) this.refillBounties();
     this.reconcileRelics();
     this.migrateWick();
@@ -573,6 +580,7 @@ export class Game {
       this.updateGutter(dt);
       this.updateTide(dt);
       this.updateSouls(dt);
+      this.dog.update(this, dt);
       this.tickBuffs(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
@@ -3428,6 +3436,10 @@ export class Game {
       this.findSoul(n.id.slice(5) as LostKind);
       return;
     }
+    if (n.id === 'dog') {
+      this.dog.interact(this);
+      return;
+    }
     if (n.id.startsWith('obj:')) {
       const [, xs, ys] = n.id.split(':');
       const tx = Number(xs);
@@ -4649,6 +4661,7 @@ export class Game {
     if (pl.dead) {
       this.breath = BREATH_MAX;
       this.gaspReady = false;
+      this.gaspLast = false;
       return;
     }
     const w = this.world;
@@ -4657,7 +4670,8 @@ export class Game {
       if (this.gaspReady) {
         this.gaspReady = false;
         audio.play('gasp', { vol: 0.75 });
-        this.tally('gasp');
+        if (this.gaspLast) this.tally('gasp');
+        this.gaspLast = false;
       }
       this.breath = Math.min(BREATH_MAX, this.breath + dt * 5);
       this.drownT = 0;
@@ -4665,6 +4679,7 @@ export class Game {
     }
     this.breath = Math.max(0, this.breath - dt);
     if (this.breath < BREATH_MAX * 0.6) this.gaspReady = true;
+    if (this.breath < BREATH_MAX * 0.15) this.gaspLast = true;
     if (this.breath < BREATH_MAX - 1.5) this.hint('breath', 'Under water you hold your breath: the bubbles over your head. Get your head above the surface before they run out.');
     if (Math.random() < dt * 2.5) {
       this.parts.push({ x: pl.cx + pl.facing * 5, y: pl.y + 8, vx: (Math.random() - 0.5) * 10, vy: -40 - Math.random() * 30, life: 0.9, max: 0.9, color: '#cfeeff', size: Math.random() < 0.5 ? 2 : 1, grav: -30, glow: false });
@@ -4871,12 +4886,18 @@ export class Game {
           }
         }
       }
+      // the dog, when you have stopped beside him (so he never steals a door or a chest)
+      const dg = this.dog;
+      if (!this.near && dg.present && Math.abs(pl.vx) < 20 && Math.abs(dg.x - pl.cx) < 1.8 * TILE && Math.abs(dg.y - (pl.y + pl.h)) < 40) {
+        this.near = { id: 'dog', x: dg.x, y: dg.y - 40, label: dg.label(this) };
+      }
     }
 
     if (menu || pl.dead) return;
 
     // depth
     const depth = Math.max(0, pt.y - w.surface[cx]);
+    if (underground && pt.y > (this.p.deepRow ?? 0)) this.p.deepRow = pt.y;
     if (underground && depth > this.p.maxDepth) {
       const gained = depth - this.p.maxDepth;
       this.p.maxDepth = depth;
@@ -4986,6 +5007,7 @@ export class Game {
       if (this.st.lens) drain *= 0.5;
       // company in the dark steadies you, and so does a Nightglass Tonic
       if (this.souls.some((s) => this.soulFollowing(s.kind))) drain *= 0.5;
+      if (this.dog.near(this)) drain *= 0.7;
       if (this.buffs.nightglass > 0) drain *= 0.5;
       // with the heart stilled the dark below is only dark
       if (p.bossDefeated) drain *= 0.5;
@@ -5198,6 +5220,7 @@ export class Game {
     const got = (p.feats ??= []);
     if (this.wet >= 0.99 && !p.tally?.soaked) this.tally('soaked');
     if (p.nerve < NERVE_SHAKEN && !p.tally?.shaken) this.tally('shaken');
+    if (p.mode !== 'gloam' && !p.tally?.eased) this.tally('eased');
     let n = 0;
     for (const f of FEATS) {
       if (got.includes(f.id)) continue;
@@ -5384,7 +5407,7 @@ export class Game {
   }
 
   maxBiome(): number {
-    return biomeAt(this.p.maxDepth + 26).id;
+    return biomeAt(this.p.deepRow ?? this.p.maxDepth + 26).id;
   }
 
   refillBounties(): void {
@@ -5438,6 +5461,7 @@ export class Game {
   /** persist positional state into progress before saving */
   syncProgress(): void {
     this.p.weather = this.weather.save();
+    this.p.wet = Math.round(this.wet * 100) / 100;
     const pl = this.player;
     if (pl.dead) {
       const s = this.p.spawn;

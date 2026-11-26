@@ -165,6 +165,7 @@ export function forTouch(msg: string): string {
   return msg
     .replace(/\(top right, J\)/g, '(top right; tap it)')
     .replace(/Esc shows every control\./g, 'The ☰ button pauses.')
+    .replace(/ \(E\)/g, ' (tap Use)')
     .replace(/\bPress E\b/g, 'Tap Use')
     .replace(/\bpress E\b/g, 'tap Use')
     .replace(/\bpressing E\b/g, 'tapping Use')

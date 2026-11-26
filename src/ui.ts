@@ -125,6 +125,10 @@ export class UI implements UIHooks {
 
   attach(game: Game): void {
     this.game = game;
+    this.goalQ = [];
+    this.goalFlash = null;
+    this.goalFlashUntil = 0;
+    this.journalTab = 'story';
     for (const el of document.querySelectorAll<HTMLImageElement>('img[data-icon]')) {
       const key = el.dataset.icon as keyof typeof UI_ICON;
       if (UI_ICON[key]) el.src = iconUrl(UI_ICON[key]);

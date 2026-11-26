@@ -1,3 +1,4 @@
+import type { DogSave } from './dog';
 import type { LostSoul } from './data/lost';
 import type { ModeId } from './data/nerve';
 import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
@@ -97,6 +98,12 @@ export interface Progress {
   tally?: Record<string, number>;
   /** Feats earned, by id (missing in saves from before Feats, which are settled quietly) */
   feats?: string[];
+  /** the deepest tile row you have stood in underground (missing in old saves) */
+  deepRow?: number;
+  /** how soaked you were */
+  wet?: number;
+  /** Tallow, the stray who comes to the Wick (missing until he first turns up) */
+  dog?: DogSave;
   /** the weather over the valley, and how long it has left */
   weather?: { kind: 'clear' | 'rain' | 'storm' | 'fog'; left: number };
   /** Gloam Tides the Wick has held through */

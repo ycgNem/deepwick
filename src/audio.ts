@@ -40,6 +40,11 @@ const SFX = [
   'land',
   'meadow_day',
   'meadow_night',
+  'dog_bark',
+  'dog_growl',
+  'dog_whine',
+  'dog_dig',
+  'dog_sniff',
   'fireball',
   'roar',
   'teleport',
@@ -227,6 +232,7 @@ class AudioSystem {
   /** every bed fades out (leaving a world for the title) */
   hushBeds(): void {
     for (const b of this.beds.values()) b.target = 0;
+    this.ambTarget = 0;
   }
 
   update(dt: number): void {

@@ -31,4 +31,9 @@ export const CAPTIONS: Partial<Record<SfxId, Caption>> = {
   roar: { text: 'A roar' },
   tendril: { text: 'A tendril lashes out', warn: true },
   heartdrink: { text: 'The heart drinks the light', warn: true },
+  dog_growl: { text: 'Tallow growls at the dark', warn: true },
+  dog_bark: { text: 'Tallow barks' },
+  dog_whine: { text: 'A dog whines' },
+  dog_sniff: { text: 'Tallow has caught a scent' },
+  dog_dig: { text: 'Paws scrabbling at earth' },
 };

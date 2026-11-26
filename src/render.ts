@@ -10,6 +10,7 @@ import { ITEMS, IconRef } from './data/items';
 import { Obj } from './world/world';
 import { BOSS_CENTER } from './world/gen';
 import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
+import { DOG_CELL } from './dog';
 import { heldDef } from './state';
 import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME } from './data/wick';
 import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
@@ -339,6 +340,7 @@ export class Renderer {
     this.drawBlockDetails(g, ctx, camX, camY, vw, vh);
     this.drawObjects(g, ctx, camX, camY, vw, vh);
     this.drawNpcs(g, ctx, camX, camY);
+    this.drawDog(g, ctx, camX, camY);
     this.drawEntities(g, ctx, camX, camY);
     if (g.ride) {
       const c = A.camp.minecart;
@@ -366,6 +368,7 @@ export class Renderer {
     this.drawGlows(g, ctx, camX, camY, vw, vh);
     this.drawBolt(g, ctx, camX, camY);
     this.drawShades(g, ctx, camX, camY);
+    this.drawDogMarks(g, ctx, camX, camY);
     this.drawReelMeter(g, ctx, camX, camY);
     this.drawBreath(g, ctx, camX, camY);
     if (this.vignette) ctx.drawImage(this.vignette, 0, 0);
@@ -1007,6 +1010,83 @@ export class Renderer {
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.fillRect(x + 6, Math.round(b.y * TILE - camY) - 1, img.width - 12, 3);
       ctx.drawImage(img, x, y);
+    }
+  }
+
+  /** Tallow, at your heels or waiting where you left him */
+  private drawDog(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const dg = g.dog;
+    const img = A.camp.dog;
+    if (!dg.present || !img) return;
+    const { row, f, feet } = dg.frame();
+    const C = DOG_CELL;
+    const x = Math.round(dg.x - C / 2 - camX);
+    const y = Math.round(dg.y - feet - camY) + 1;
+    // a soft shadow under him so he stands on the ground
+    if (dg.anim !== 'leap') {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(x + 14, Math.round(dg.y - camY), C - 28, 2);
+    }
+    ctx.save();
+    if (dg.facing < 0) {
+      ctx.translate(x + C, y);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, f * C, row * C, C, C, 0, 0, C, C);
+    } else ctx.drawImage(img, f * C, row * C, C, C, x, y, C, C);
+    ctx.restore();
+  }
+
+  /** over the dark: his eyes catching your lamp, a scent he has caught, a pat */
+  private drawDogMarks(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const dg = g.dog;
+    if (!dg.present) return;
+    const t = g.time;
+    // two pinpricks of eyeshine where the light does not reach him
+    if (dg.lit < 0.3 && dg.anim !== 'dig') {
+      const blink = (t * 0.7 + dg.x * 0.01) % 4 < 0.12;
+      if (!blink) {
+        const head = dg.anim === 'sniff' ? 20 : dg.anim === 'run' || dg.anim === 'leap' ? 24 : 26;
+        const ex = Math.round(dg.x + dg.facing * 11 - camX);
+        const ey = Math.round(dg.y - head - camY);
+        ctx.globalAlpha = 0.85 * (1 - dg.lit / 0.3) + 0.15;
+        ctx.fillStyle = '#e8f0a0';
+        ctx.fillRect(ex, ey, 1, 1);
+        ctx.fillRect(ex - dg.facing * 2, ey, 1, 1);
+        ctx.globalAlpha = 1;
+      }
+    }
+    // the scent: faint wisps curling up out of the rock
+    const sc = dg.scent;
+    if (sc) {
+      const a = Math.min(1, sc.t / 2) * Math.min(1, (9 - sc.t) * 2);
+      const cx = (sc.x + 0.5) * TILE - camX;
+      const cy = (sc.y + 0.5) * TILE - camY;
+      for (let k = 0; k < 7; k++) {
+        const ph = (t * 0.45 + k / 7) % 1;
+        const px = Math.round(cx + Math.sin(t * 2 + k * 1.7 + ph * 5) * (5 + ph * 7));
+        const py = Math.round(cy + 6 - ph * 34);
+        ctx.globalAlpha = a * 0.9 * Math.sin(ph * Math.PI);
+        ctx.fillStyle = k % 2 ? '#fff0b8' : '#e8d498';
+        ctx.fillRect(px, py, 2, 3);
+        ctx.globalAlpha *= 0.35;
+        ctx.fillRect(px - 1, py - 1, 4, 5);
+      }
+      ctx.globalAlpha = 1;
+    }
+    // a pat: a little heart floating up
+    if (dg.heartT > 0) {
+      const k = 1 - dg.heartT / 1.4;
+      const hx = Math.round(dg.x - camX) - 3;
+      const hy = Math.round(dg.y - 40 - k * 18 - camY);
+      ctx.globalAlpha = Math.min(1, dg.heartT * 2);
+      ctx.fillStyle = '#ff7a96';
+      ctx.fillRect(hx + 1, hy, 2, 1);
+      ctx.fillRect(hx + 4, hy, 2, 1);
+      ctx.fillRect(hx, hy + 1, 7, 2);
+      ctx.fillRect(hx + 1, hy + 3, 5, 1);
+      ctx.fillRect(hx + 2, hy + 4, 3, 1);
+      ctx.fillRect(hx + 3, hy + 5, 1, 1);
+      ctx.globalAlpha = 1;
     }
   }
 
