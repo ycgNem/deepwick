@@ -12,6 +12,7 @@ import { newProgress } from './state';
 import { generateWorld, worldSpawn } from './world/gen';
 import { saveGame, loadGame, hasSave, deleteSave, loadSettings, storeSettings } from './save';
 import { TitleScene } from './title';
+import { MODES, ModeId } from './data/nerve';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const loading = document.getElementById('loading') as HTMLElement;
@@ -96,7 +97,7 @@ async function startAudio(): Promise<void> {
   audio.resume();
 }
 
-function startGame(fresh: boolean): void {
+function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   if (!input || !ui || !renderer) return;
   let loaded = fresh ? null : loadGame();
   if (!fresh && !loaded) {
@@ -109,7 +110,9 @@ function startGame(fresh: boolean): void {
     const seed = (Math.random() * 1e9) | 0;
     const world = generateWorld(seed);
     const s = worldSpawn(world);
-    loaded = { p: newProgress(seed, s.x, s.y), world };
+    const p = newProgress(seed, s.x, s.y);
+    p.mode = mode;
+    loaded = { p, world };
   }
   const g = new Game(input, ui, loaded.p, loaded.world);
   game = g;
@@ -144,11 +147,28 @@ document.getElementById('btnContinue')?.addEventListener('click', async () => {
   audio.play('click');
   startGame(false);
 });
+/** the difficulty picked on the intro card */
+let pickedMode: ModeId = 'delver';
+const modeButtons = Array.from(document.querySelectorAll<HTMLElement>('#modePick .mode'));
+function pickMode(id: ModeId): void {
+  pickedMode = id;
+  for (const b of modeButtons) b.classList.toggle('on', b.dataset.mode === id);
+  const blurb = document.getElementById('modeBlurb');
+  if (blurb) blurb.textContent = MODES[id].blurb + ' You can change this later from the pause menu.';
+}
+for (const b of modeButtons) {
+  b.addEventListener('click', () => {
+    audio.play('click');
+    const id = b.dataset.mode as ModeId;
+    if (MODES[id]) pickMode(id);
+  });
+}
+pickMode('delver');
 document.getElementById('btnBegin')?.addEventListener('click', () => {
   audio.play('click');
   intro.classList.remove('show');
   deleteSave();
-  startGame(true);
+  startGame(true, pickedMode);
 });
 
 function loop(t: number): void {

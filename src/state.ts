@@ -1,3 +1,4 @@
+import type { ModeId } from './data/nerve';
 import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
 import { TILE, INV_SIZE, DAY_LENGTH } from './constants';
 import { WickState, flameLevel } from './data/wick';
@@ -75,6 +76,10 @@ export interface Progress {
   hearts: number;
   sharpen: number;
   hone: number;
+  /** how much dark you can stand, 0..100 */
+  nerve: number;
+  /** difficulty */
+  mode: ModeId;
   /** time of day 0..1 (0 = dawn) */
   clock: number;
   spawn: { x: number; y: number };
@@ -93,6 +98,8 @@ export function newProgress(seed: number, spawnX: number, spawnY: number): Progr
     chests: {},
     buildings: [],
     wick: { kindled: false, lumen: 0 },
+    nerve: 100,
+    mode: 'delver',
     skills: { mining: { lvl: 1, xp: 0 }, combat: { lvl: 1, xp: 0 }, delving: { lvl: 1, xp: 0 }, fishing: { lvl: 1, xp: 0 } },
     catalogued: [],
     relicsDropped: [],

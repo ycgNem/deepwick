@@ -12,6 +12,7 @@ import { BOSS_CENTER } from './world/gen';
 import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
 import { heldDef } from './state';
 import { WICK_X, WICK_Y, WICK_GLOW, MAX_FLAME } from './data/wick';
+import { NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -78,6 +79,8 @@ export class Renderer {
   private cracks: HTMLCanvasElement[] = [];
   private glowSprite: HTMLCanvasElement;
   private vignette: HTMLCanvasElement | null = null;
+  /** the dark closing in as your nerve goes */
+  private dread: HTMLCanvasElement | null = null;
   private stars: { x: number; y: number; b: number }[] = [];
   private amb: Ambient[] = [];
   private lastT = 0;
@@ -167,6 +170,14 @@ export class Renderer {
     vg.fillStyle = grad;
     vg.fillRect(0, 0, vw, vh);
     this.vignette = vc;
+    const [dc, dg] = makeCanvas(vw, vh);
+    const dgrad = dg.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.2, vw / 2, vh / 2, Math.hypot(vw, vh) * 0.55);
+    dgrad.addColorStop(0, 'rgba(6,2,12,0)');
+    dgrad.addColorStop(0.55, 'rgba(6,2,12,0.55)');
+    dgrad.addColorStop(1, 'rgba(6,2,12,0.97)');
+    dg.fillStyle = dgrad;
+    dg.fillRect(0, 0, vw, vh);
+    this.dread = dc;
   }
 
   draw(g: Game): void {
@@ -220,8 +231,10 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
 
     this.drawGlows(g, ctx, camX, camY, vw, vh);
+    this.drawShades(g, ctx, camX, camY);
     this.drawReelMeter(g, ctx, camX, camY);
     if (this.vignette) ctx.drawImage(this.vignette, 0, 0);
+    this.drawDread(g, ctx, vw, vh);
     this.drawHover(g, ctx, camX, camY);
 
     if (g.gloom > 0) {
@@ -846,6 +859,7 @@ export class Renderer {
       ctx.restore();
     }
     for (const e of g.enemies) {
+      if (e.def.shade) continue;
       const img = A.enemies[e.def.id];
       const fs = e.def.size;
       const frames = Math.floor(img.width / fs);
@@ -1230,6 +1244,105 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** Gloamlings: living shadow with a violet rim, and eyes that open before the body has formed */
+  private drawShades(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    for (const e of g.enemies) {
+      if (!e.def.shade) continue;
+      const x = e.cx - camX;
+      const y = e.cy - camY;
+      if (x < -40 || y < -40 || x > this.scene.width + 40 || y > this.scene.height + 40) continue;
+      const t = e.t;
+      const sp = Math.hypot(e.vx, e.vy);
+      // wisps trail against its motion; at rest they hang beneath it like smoke
+      const bx = sp > 8 ? -e.vx / sp : 0;
+      const by = sp > 8 ? -e.vy / sp : 1;
+      const pieces: [number, number, number][] = [
+        [0, 0, 7 + Math.sin(t * 5) * 0.8],
+        [Math.cos(t * 3.1) * 3, Math.sin(t * 2.7) * 2 - 2, 5.5],
+        [bx * 7 + Math.sin(t * 4) * 1.5, by * 7 + Math.cos(t * 3.3), 4.5],
+        [bx * 12 + Math.sin(t * 3 + 1) * 2, by * 12 + Math.cos(t * 2.6 + 1) * 1.5, 3],
+        [bx * 16 + Math.sin(t * 2.4 + 2) * 2.5, by * 16 + Math.cos(t * 2 + 2) * 2, 1.6],
+        [-5 + Math.sin(t * 6) * 1.5, 4 + Math.cos(t * 4.4), 2.5],
+        [5 + Math.cos(t * 5.2) * 1.5, 4 + Math.sin(t * 3.8), 2.5],
+      ];
+      const form = Math.min(1, Math.max(0, (e.age - 0.4) / 1.2));
+      if (form > 0) {
+        ctx.globalAlpha = form;
+        ctx.fillStyle = e.burn > 0 && Math.floor(g.time * 24) % 2 ? '#a0502a' : '#33195c';
+        for (const [px, py, r] of pieces) pixDisc(ctx, x + px, y + py, r + 1);
+        ctx.fillStyle = '#07040c';
+        for (const [px, py, r] of pieces) pixDisc(ctx, x + px, y + py, r);
+        ctx.fillStyle = '#1c0f30';
+        pixDisc(ctx, x - 2, y - 3, 2);
+        ctx.globalAlpha = 1;
+      }
+      // eyes, turned your way
+      const hunting = e.mode === 1;
+      const blink = (t * 0.83) % 4.1 < 0.13;
+      const ex = Math.round(x + e.facing * 2);
+      const ey = Math.round(y - 1 + Math.sin(t * 5) * 0.5);
+      ctx.globalAlpha = Math.min(1, e.age / 0.4);
+      ctx.fillStyle = hunting ? '#ff8ab4' : '#f0dcff';
+      if (blink) {
+        ctx.fillRect(ex - 4, ey, 2, 1);
+        ctx.fillRect(ex + 2, ey, 2, 1);
+      } else {
+        ctx.fillRect(ex - 4, ey - 1, 2, 2);
+        ctx.fillRect(ex + 2, ey - 1, 2, 2);
+      }
+      ctx.globalCompositeOperation = 'lighter';
+      const eg = hunting ? 'rgba(255,80,150,0.6)' : 'rgba(180,130,255,0.5)';
+      this.glowAt(ctx, ex - 3, ey, 6, eg);
+      this.glowAt(ctx, ex + 3, ey, 6, eg);
+      if (form > 0) this.glowAt(ctx, x, y, 20, 'rgba(90,40,160,0.18)');
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** as your nerve goes the screen closes in, and below Shaken the dark reaches in from the edges */
+  private drawDread(g: Game, ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
+    const n = g.p.nerve;
+    if (n >= NERVE_FRAYED || g.player.dead) return;
+    const f = (NERVE_FRAYED - n) / NERVE_FRAYED;
+    const shaken = n < NERVE_SHAKEN;
+    // the dark breathes with your heartbeat once you are shaken
+    const beat = shaken ? Math.max(0, Math.sin(g.time * (5 + (1 - n / NERVE_SHAKEN) * 3))) * 0.12 : 0;
+    if (this.dread) {
+      ctx.globalAlpha = Math.min(1, f * 0.9 + beat);
+      ctx.drawImage(this.dread, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+    if (!shaken) return;
+    const s = 1 - n / NERVE_SHAKEN;
+    const m = Math.min(vw, vh);
+    // a violet cast over everything
+    ctx.fillStyle = `rgba(40,12,72,${0.08 + s * 0.12})`;
+    ctx.fillRect(0, 0, vw, vh);
+    const pts: [number, number, number][] = [];
+    for (let k = 0; k < 9; k++) {
+      // each tendril roots on an edge and gropes toward the middle
+      const side = k % 4;
+      const u = ((k * 0.37 + 0.13) % 1) * 0.8 + 0.1;
+      const ox = side === 0 ? u * vw : side === 1 ? vw + 6 : side === 2 ? u * vw : -6;
+      const oy = side === 0 ? -6 : side === 1 ? u * vh : side === 2 ? vh + 6 : u * vh;
+      const ang = Math.atan2(vh / 2 - oy, vw / 2 - ox) + Math.sin(g.time * 0.7 + k * 1.9) * 0.35;
+      const len = m * (0.1 + 0.26 * s) * (0.75 + 0.25 * Math.sin(g.time * 0.9 + k));
+      // enough segments that the discs overlap into one tapering limb
+      const segs = Math.max(12, Math.ceil(len / 3));
+      for (let i = 0; i < segs; i++) {
+        const q = i / (segs - 1);
+        const wob = Math.sin(g.time * 2.3 + k * 2.1 + q * 5) * 7 * q;
+        pts.push([ox + Math.cos(ang) * len * q - Math.sin(ang) * wob, oy + Math.sin(ang) * len * q + Math.cos(ang) * wob, Math.pow(1 - q, 0.8) * 11 + 1]);
+      }
+    }
+    // a violet rim so they read against the black, then the black itself
+    ctx.fillStyle = '#3a1d66';
+    for (const [x, y, r] of pts) pixDisc(ctx, x, y, r + 1);
+    ctx.fillStyle = '#05020a';
+    for (const [x, y, r] of pts) pixDisc(ctx, x, y, r);
+  }
+
   private glowAt(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string): void {
     const c = this.tinted(color);
     ctx.drawImage(c, Math.round(x - r), Math.round(y - r), Math.round(r * 2), Math.round(r * 2));
@@ -1470,4 +1583,15 @@ function blitWrapped(ctx: CanvasRenderingContext2D, img: HTMLCanvasElement, ox: 
   if (w - w1 > 0 && h1 > 0) ctx.drawImage(img, 0, oy, w - w1, h1, dx + w1, dy, w - w1, h1);
   if (h - h1 > 0 && w1 > 0) ctx.drawImage(img, ox, 0, w1, h - h1, dx, dy + h1, w1, h - h1);
   if (w - w1 > 0 && h - h1 > 0) ctx.drawImage(img, 0, 0, w - w1, h - h1, dx + w1, dy + h1, w - w1, h - h1);
+}
+
+/** a filled circle in whole pixels: crisp at any size, unlike arc() */
+function pixDisc(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
+  const xi = Math.round(x);
+  const yi = Math.round(y);
+  const ri = Math.max(1, Math.round(r));
+  for (let dy = -ri; dy <= ri; dy++) {
+    const w = Math.floor(Math.sqrt(ri * ri - dy * dy) + 0.35);
+    ctx.fillRect(xi - w, yi + dy, w * 2 + 1, 1);
+  }
 }

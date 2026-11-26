@@ -11,6 +11,7 @@ import { Obj } from './world/world';
 import { WICK_X, WICK_Y } from './data/wick';
 import { audio } from './audio';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, lumenToNext } from './data/wick';
+import { MODES, MODE_IDS, ModeId, NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -82,7 +83,7 @@ export class UI implements UIHooks {
     this.miniCtx = mc;
     [this.mapCanvas, this.mapCtx] = makeCanvas(WORLD_W, WORLD_H);
     this.mapImg = this.mapCtx.createImageData(WORLD_W, WORLD_H);
-    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill']) {
+    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill']) {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -219,6 +220,11 @@ export class UI implements UIHooks {
       h.oilFill.classList.toggle('low', of < 0.2);
       h.oilText.textContent = pl.oil > 0 ? `${Math.ceil(pl.oil)}s` : 'EMPTY';
     }
+    const nv = g.p.nerve;
+    h.nerveFill.style.width = `${nv}%`;
+    h.nerveFill.classList.toggle('low', nv < NERVE_SHAKEN);
+    h.nerveBar.classList.toggle('frayed', nv < NERVE_FRAYED);
+    h.nerveText.textContent = nv <= 0 ? 'BROKEN' : nv < NERVE_SHAKEN ? 'SHAKEN' : nv < NERVE_FRAYED ? 'FRAYED' : `${Math.ceil(nv)}`;
     h.coins.textContent = fmt(g.p.coins);
     const c = g.p.clock;
     const hours = Math.floor(((c * 24 + 6) % 24) * 1);
@@ -653,7 +659,12 @@ export class UI implements UIHooks {
         const bm = BIOMES.find((b) => b.enemies.includes(e.id));
         const known = !!p.seen['kill_' + e.id];
         const drop = e.drops[0] ? ITEMS[e.drops[0].id]?.name : '';
-        html += `<div class="beast ${known ? '' : 'unknown'}"><div class="sprite" style="background-image:url(./assets/enemies/${e.id}.png);background-position:-${e.size}px 0;width:${e.size}px;height:${e.size}px"></div><b>${known ? e.name : '???'}</b><small>${bm?.name ?? (e.nocturnal ? 'Surface, at night' : 'The surface')}${known ? ` · ${e.hp} hp · drops ${drop}` : ' · not yet defeated'}</small></div>`;
+        // shades have no sprite sheet: their portrait is the mote they leave behind
+        const sprite = e.shade
+          ? `<div class="sprite" style="background-image:url(${iconUrl(ITEMS.gloammote.icon)});background-size:contain;image-rendering:pixelated;width:48px;height:48px"></div>`
+          : `<div class="sprite" style="background-image:url(./assets/enemies/${e.id}.png);background-position:-${e.size}px 0;width:${e.size}px;height:${e.size}px"></div>`;
+        const where = e.shade ? 'Wherever it is dark, when your nerve is going' : bm?.name ?? (e.nocturnal ? 'Surface, at night' : 'The surface');
+        html += `<div class="beast ${known ? '' : 'unknown'}">${sprite}<b>${known ? e.name : '???'}</b><small>${where}${known ? ` · ${e.hp} hp · drops ${drop}` : ' · not yet defeated'}</small></div>`;
       }
       html += '</div>';
     }
@@ -701,6 +712,7 @@ export class UI implements UIHooks {
     const s = Math.round(audio.sfxVolume * 100);
     return `<div class="hd"><div><h2>Paused</h2><p class="line">The mountain will wait.</p></div></div>
       <div class="settings"><label>Music <input type="range" min="0" max="100" value="${m}" data-set="music"></label><label>Sound <input type="range" min="0" max="100" value="${s}" data-set="sfx"></label></div>
+      <div class="settings diff"><span>Difficulty</span>${MODE_IDS.map((id) => `<button class="${this.game.p.mode === id ? 'on' : ''}" data-a="mode" data-id="${id}">${MODES[id].name}</button>`).join('')}<small>${MODES[this.game.mode.id].blurb}</small></div>
       <div class="controls"><h3 class="sub">Controls</h3>
       <div><kbd>A</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>W</kbd><kbd>S</kbd> climb ladders, <kbd>S</kbd> drops through ladder tops</div>
       <div><kbd>Left mouse</kbd> use the held item: dig, chop, attack, place, eat. Clicking rock with anything in hand digs with your best pickaxe</div>
@@ -1004,6 +1016,14 @@ export class UI implements UIHooks {
         const x = t.dataset.x;
         g.travelTo(x === undefined ? null : { x: Number(x), y: Number(t.dataset.y) });
         return;
+      }
+      case 'mode': {
+        const id = (t.dataset.id ?? '') as ModeId;
+        if (MODES[id] && g.p.mode !== id) {
+          g.p.mode = id;
+          this.toast(`Difficulty: ${MODES[id].name}`, '#e8d8ff');
+        }
+        break;
       }
       case 'save':
         g.onSave?.();

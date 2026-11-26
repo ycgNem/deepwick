@@ -48,9 +48,16 @@ the flame) decides how far the light reaches tomorrow.
       (deeds removed; old saves migrate), nothing hostile survives in its light,
       a warm safe pool at night, rest heals faster there. Wickposts at flame 2:
       lit waypoints, travel between any of them and the Wick.
-- [ ] Cycle 3: darkness. A Nerve meter that drains in the dark and recovers in
-      light; Gloamlings that only exist in darkness; difficulty modes
-      (Hearthkeeper, Delver, Gloamwalker).
+- [x] Cycle 3: darkness. Nerve (0-100, saved) drains in the dark (faster the
+      deeper you go, much faster in the Sunless Vault, halved by the Sunglass
+      Lens) and recovers in light, fastest by a campfire or in the Wick's
+      light. Frayed under 60: the screen closes in. Shaken under 35: a
+      heartbeat, whispers, tendrils of dark at the screen edge, and Gloamlings
+      hunt you while you stand in the dark. At 0 the dark bites. Gloamlings are
+      living shadow: they seep through rock, circle at the edge of your light,
+      burn in it, and drop Gloam Motes (6 Lumen). Difficulty: Hearth (keep your
+      pack, softer), Delver, Gloam (harder, more Gloamlings); picked on the
+      intro card, changeable from the pause menu.
 - [ ] Cycle 4: guidance. Journal of goals that walks the loop, better
       onboarding, gamepad support.
 - [ ] Cycle 5+: review cycles: balance, polish, audio, performance, content.

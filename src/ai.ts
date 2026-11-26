@@ -2,6 +2,7 @@ import type { Game } from './game';
 import { Enemy, moveBody, applyGravity } from './entities';
 import { TILE } from './constants';
 import { audio } from './audio';
+import { LIT, NERVE_SHAKEN } from './data/nerve';
 
 function los(g: Game, ax: number, ay: number, bx: number, by: number): boolean {
   const dx = bx - ax;
@@ -21,6 +22,7 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
   const dist = Math.hypot(dx, dy);
   const aware = dist < 13 * TILE && !pl.dead;
   e.t += dt;
+  e.age += dt;
   e.animT += dt;
   if (e.flash > 0) e.flash -= dt;
   if (e.knock > 0) e.knock -= dt;
@@ -198,6 +200,54 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
         e.vy += (ty - e.vy) * Math.min(1, dt * 2);
       }
       moveBody(g.world, e, dt);
+      e.facing = Math.sign(dx) || 1;
+      break;
+    }
+    case 'lurker': {
+      // a scrap of the dark: it seeps through rock, shuns light, and circles at the edge of your
+      // lamp until your nerve goes; then it hunts you, but only while you stand in the dark
+      const lit = g.light.at(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
+      const plLit = g.litHere;
+      const hunting = !pl.dead && g.p.nerve < NERVE_SHAKEN && plLit < LIT && e.age > 1.2;
+      let tx = 0;
+      let ty = 0;
+      const d = dist || 1;
+      e.stateT -= dt;
+      if (lit > LIT) {
+        // scatter from the light
+        tx = -(dx / d) * sp * 1.5;
+        ty = -(dy / d) * sp * 1.5;
+        e.mode = 0;
+      } else if (hunting && dist < 18 * TILE && e.knock <= 0) {
+        tx = (dx / d) * sp;
+        ty = (dy / d) * sp + Math.sin(e.t * 3) * 25;
+        if (e.stateT <= 0 && dist < 3.5 * TILE) {
+          e.vx = (dx / d) * sp * 3.2;
+          e.vy = (dy / d) * sp * 3.2;
+          e.stateT = 1.3 + Math.random();
+        }
+        e.mode = 1;
+      } else {
+        // watch from the edge of the light, drifting round
+        const a = e.t * 0.32;
+        const want = (g.p.nerve < NERVE_SHAKEN ? 5 : 7.5) * TILE;
+        const gx = pl.cx + Math.cos(a) * want;
+        const gy = pl.cy + Math.sin(a) * want * 0.55;
+        const ox = gx - e.cx;
+        const oy = gy - e.cy;
+        const od = Math.hypot(ox, oy) || 1;
+        const k = Math.min(1, od / (2 * TILE)) * 0.7;
+        tx = (ox / od) * sp * k;
+        ty = (oy / od) * sp * k + Math.sin(e.t * 2.1) * 14;
+        e.mode = 0;
+      }
+      if (e.knock <= 0) {
+        e.vx += (tx - e.vx) * Math.min(1, dt * 2.6);
+        e.vy += (ty - e.vy) * Math.min(1, dt * 2.6);
+      }
+      const thick = g.world.solidAtPx(e.cx, e.cy) ? 0.55 : 1;
+      e.x += e.vx * dt * thick;
+      e.y += e.vy * dt * thick;
       e.facing = Math.sign(dx) || 1;
       break;
     }

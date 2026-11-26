@@ -121,7 +121,14 @@ button.ghost {
 .bar.food .fill {
   background: linear-gradient(#ffd0a0, #d07a3a 55%, #7a3a18);
 }
+.bar.nerve .fill {
+  background: linear-gradient(#e0c8ff, #8a5ad8 55%, #3a1d66);
+}
+.bar.nerve.frayed {
+  box-shadow: 0 0 0 2px #5a3a7a, 0 0 10px rgba(150, 90, 230, 0.45);
+}
 .bar.food .fill.low,
+.bar.nerve .fill.low,
 .bar.oil .fill.low {
   animation: pulse 0.6s infinite alternate;
 }
@@ -914,6 +921,94 @@ kbd {
 }
 .intro-card p {
   color: #d8cbb8;
+  font-size: 16px;
+}
+.modes {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin: 18px 0 4px;
+}
+.modes .mode {
+  flex: 1;
+  max-width: 180px;
+  padding: 9px 8px 8px;
+  background: #161019;
+  border: 2px solid #3d2f45;
+  color: #d8cbb8;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+}
+.modes .mode b {
+  display: block;
+  font-family: 'Silkscreen', monospace;
+  font-weight: 400;
+  font-size: 16px;
+  color: #e8dcc8;
+}
+.modes .mode span {
+  display: block;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--dim);
+  margin-top: 3px;
+}
+.modes .mode:hover {
+  border-color: #6a5478;
+}
+.modes .mode.on {
+  border-color: var(--gold);
+  background: #2a1e18;
+  box-shadow: 0 0 12px rgba(255, 200, 90, 0.25);
+}
+.modes .mode.on b {
+  color: var(--gold);
+}
+.modes .mode[data-mode='gloam'].on {
+  border-color: #b48aff;
+  background: #1e1430;
+  box-shadow: 0 0 12px rgba(180, 138, 255, 0.35);
+}
+.modes .mode[data-mode='gloam'].on b {
+  color: #d0b0ff;
+}
+.intro-card .modeblurb {
+  font-size: 14px;
+  color: var(--dim);
+  min-height: 2.8em;
+  margin: 6px auto 14px;
+  max-width: 520px;
+}
+.diff {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.diff > span {
+  font-family: 'Silkscreen', monospace;
+  font-size: 12px;
+  color: var(--dim);
+  margin-right: 4px;
+}
+.diff button {
+  background: transparent;
+  color: #d8cbb8;
+  border-color: var(--edge);
+  box-shadow: none;
+}
+.diff button.on {
+  background: linear-gradient(#ffe08a, #d9a441);
+  color: #1a1206;
+  border-color: #3a2410;
+  box-shadow:
+    inset 0 -3px 0 #a8702a,
+    0 2px 0 #000;
+}
+.diff small {
+  flex-basis: 100%;
+  color: var(--dim);
+  font-size: 13px;
 }
 .intro-card em,
 .intro-card b {

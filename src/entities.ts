@@ -187,6 +187,10 @@ export class Enemy implements Body {
   shootT = 1.5 + Math.random() * 2;
   dead = false;
   knock = 0;
+  /** seconds since it appeared */
+  age = 0;
+  /** how hard the light is burning it (shades only) */
+  burn = 0;
 
   constructor(
     public def: EnemyDef,

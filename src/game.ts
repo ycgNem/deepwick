@@ -9,6 +9,7 @@ import { ITEMS, ItemDef, RELICS, SHOP_STOCK, equipSlotOf } from './data/items';
 import { ENEMIES, DAY_SURFACE, NIGHT_SURFACE } from './data/enemies';
 import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, WICK_GLOW, WICK_X, WICK_Y, flameLevel } from './data/wick';
+import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
   Stats,
@@ -243,6 +244,11 @@ export class Game {
   wickFrom: { x: number; y: number } | null = null;
   /** what the current left-button hold is doing: decided when it starts, so digging never turns into placing */
   private lmbMode: 'none' | 'break' | 'use' = 'none';
+  /** nerve effects: time to the next heartbeat and the next whisper */
+  private beatT = 0;
+  private whisperT = 8;
+  /** light at the delver's head, from the last light pass */
+  litHere = 1;
 
   constructor(
     public input: Input,
@@ -263,6 +269,7 @@ export class Game {
     if (this.p.bounties.length === 0) this.refillBounties();
     this.reconcileRelics();
     this.migrateWick();
+    this.migrateNerve();
     this.ensureWick();
     this.settleMissing(false);
     if (this.p.bossRewardPending) setTimeout(() => this.grantBossReward(this.player.cx, this.player.cy), 800);
@@ -1546,8 +1553,14 @@ export class Game {
     e.dead = true;
     this.p.stats.kills++;
     this.p.seen['kill_' + e.def.id] = true;
-    audio.play('enemy_die');
-    this.burst(e.cx, e.cy, 18, ['#ffffff', '#c8c0d8', e.def.shot ?? '#a09080'], 150);
+    this.p.nerve = Math.min(NERVE_MAX, this.p.nerve + (e.def.shade ? 6 : 3));
+    if (e.def.shade) {
+      audio.play('gloam_hiss', { vol: 0.7 });
+      this.burst(e.cx, e.cy, 22, ['#2a1446', '#5a2e8f', '#c8a0ff'], 110);
+    } else {
+      audio.play('enemy_die');
+      this.burst(e.cx, e.cy, 18, ['#ffffff', '#c8c0d8', e.def.shot ?? '#a09080'], 150);
+    }
     this.addXp('combat', e.def.xp);
     for (const d of e.def.drops) {
       if (Math.random() < d.chance) this.drops.push(new Drop(d.id, this.rng.int(d.n[0], d.n[1]), e.cx, e.cy));
@@ -2145,6 +2158,17 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ the Wick
+  /** the difficulty this world is played on */
+  get mode(): ModeDef {
+    return MODES[this.p.mode] ?? MODES.delver;
+  }
+
+  /** saves from before nerve and difficulty existed */
+  private migrateNerve(): void {
+    if (typeof this.p.nerve !== 'number' || !Number.isFinite(this.p.nerve)) this.p.nerve = NERVE_MAX;
+    if (!MODES[this.p.mode]) this.p.mode = 'delver';
+  }
+
   get flame(): number {
     return flameLevel(this.p.wick);
   }
@@ -2512,7 +2536,8 @@ export class Game {
         p.stats.days++;
         this.player.hp = Math.min(this.st.maxHp, this.player.hp + this.st.maxHp * 0.5);
         p.food = Math.max(0, p.food - 15);
-        this.enemies = this.enemies.filter((e) => !e.def.nocturnal);
+        p.nerve = NERVE_MAX;
+        this.enemies = this.enemies.filter((e) => !e.def.nocturnal && !e.def.shade);
         this.wasNight = false;
         this.toast(`You sleep soundly. Day ${p.stats.days}.`, '#ffd79a');
         this.onSave?.();
@@ -2582,8 +2607,9 @@ export class Game {
   hurtPlayer(dmg: number, fromX: number, ignoreArmor = false): void {
     const pl = this.player;
     if (pl.dead || pl.invuln > 0) return;
-    const real = Math.max(1, Math.round(dmg * (ignoreArmor ? 1 : 1 - this.st.reduce)));
+    const real = Math.max(1, Math.round(dmg * this.mode.dmg * (ignoreArmor ? 1 : 1 - this.st.reduce)));
     pl.hp -= real;
+    this.p.nerve = Math.max(0, this.p.nerve - 4);
     pl.invuln = 0.9;
     pl.hurtT = 0.25;
     pl.regenT = 4;
@@ -2621,7 +2647,7 @@ export class Game {
     audio.music('none');
     this.p.stats.deaths++;
     const items = this.p.inv.filter((s): s is Stack => !!s);
-    if (items.length) {
+    if (items.length && this.mode.dropOnDeath) {
       // an older satchel is lost for good
       this.p.satchel = { x: pl.cx, y: pl.cy, items: items.map((s) => ({ ...s })) };
       this.p.inv = new Array<Slot>(INV_SIZE).fill(null);
@@ -2632,8 +2658,9 @@ export class Game {
     this.hook = null;
     const pl = this.player;
     pl.dead = false;
-    const lost = Math.floor(this.p.coins * 0.1);
+    const lost = Math.floor(this.p.coins * this.mode.coinLoss);
     this.p.coins -= lost;
+    this.p.nerve = Math.max(this.p.nerve, 70);
     this.teleportHome();
     pl.hp = this.st.maxHp;
     this.p.food = Math.max(this.p.food, 50);
@@ -2766,6 +2793,14 @@ export class Game {
         this.hurtPlayer(e.def.dmg, e.cx);
         e.vx = -Math.sign(pl.cx - e.cx || 1) * 160;
         e.knock = 0.25;
+        if (e.def.shade) {
+          // it feeds on your nerve and slips back into the dark
+          this.p.nerve = Math.max(0, this.p.nerve - 4);
+          e.vx *= 1.6;
+          e.vy = -Math.sign(pl.cy - e.cy || 1) * 140;
+          e.knock = 0.9;
+          e.stateT = 2;
+        }
         // a boar that lands a hit usually trots off and calms down
         if (e.def.behavior === 'charger') {
           e.mode = 0;
@@ -2785,6 +2820,7 @@ export class Game {
           if (e.hp <= 0) this.killEnemy(e);
         }
       }
+      if (e.def.shade && !e.dead) this.updateShade(e, dt);
       if (e.def.id === 'hollow' && Math.random() < dt * 0.08 && Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 12 * TILE) audio.play('groan', { vol: 0.35 });
       if (Math.hypot(e.cx - pl.cx, e.cy - pl.cy) > 46 * TILE) e.dead = true;
     }
@@ -2795,6 +2831,48 @@ export class Game {
       this.spawnT = 1.1;
       if (this.onSurface()) this.trySurfaceSpawn();
       else this.trySpawn();
+      this.trySpawnGloam();
+    }
+  }
+
+  /** Gloamlings: light burns them, and once your nerve is back they let go and melt into the dark */
+  private updateShade(e: Enemy, dt: number): void {
+    const lit = this.light.at(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
+    e.burn = lit > LIT ? lit : 0;
+    if (e.burn > 0) {
+      e.hp -= dt * 16 * lit;
+      if (Math.random() < dt * 25) this.parts.push({ x: e.cx + (Math.random() - 0.5) * 14, y: e.cy + (Math.random() - 0.5) * 14, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, life: 0.5, max: 0.5, color: Math.random() < 0.5 ? '#c08aff' : '#ff9a4a', size: 1, grav: -10, glow: true });
+      if (Math.random() < dt * 2) audio.play('sizzle', { vol: 0.2, pitch: 1.6 });
+      if (e.hp <= 0) this.killEnemy(e);
+    } else if (this.p.nerve > 75 && e.age > 3 && Math.random() < dt * 0.6) {
+      e.dead = true;
+      this.burst(e.cx, e.cy, 10, ['#2a1446', '#5a2e8f'], 60);
+    }
+  }
+
+  /** the dark sends Gloamlings after a delver whose nerve is going */
+  private trySpawnGloam(): void {
+    const p = this.p;
+    const pl = this.player;
+    if (this.boss || pl.dead || p.nerve >= NERVE_FRAYED) return;
+    const underground = !this.onSurface();
+    if (!underground && !isNight(p.clock)) return;
+    const base = p.nerve < 12 ? 4 : p.nerve < NERVE_SHAKEN ? 2 : 1;
+    const cap = Math.max(1, Math.round(base * this.mode.gloam));
+    if (this.enemies.filter((e) => e.def.shade).length >= cap) return;
+    if (Math.random() > 0.35 * this.mode.gloam) return;
+    const pt = this.playerTile();
+    const w = this.world;
+    for (let tries = 0; tries < 12; tries++) {
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 9 + Math.random() * 6;
+      const tx = Math.floor(pt.x + Math.cos(ang) * dist);
+      const ty = Math.floor(pt.y + Math.sin(ang) * dist * 0.75);
+      if (!w.inside(tx, ty) || ty < 2) continue;
+      if (this.light.at(tx, ty) > 0.18) continue;
+      if (this.inWickLight(tx * TILE, ty * TILE) || this.torchLightNear(tx, ty)) continue;
+      this.enemies.push(new Enemy(ENEMIES.gloamling, tx * TILE + TILE / 2, ty * TILE + TILE / 2 + 9));
+      return;
     }
   }
 
@@ -2802,7 +2880,7 @@ export class Game {
     if (this.boss) return;
     const pl = this.player;
     const night = isNight(this.p.clock);
-    const near = this.enemies.filter((e) => Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 46 * TILE);
+    const near = this.enemies.filter((e) => !e.def.shade && Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 46 * TILE);
     // the first night is gentler
     const cap = night ? (this.p.stats.days <= 1 ? 3 : 4) : 4;
     if (near.length >= cap) return;
@@ -2848,7 +2926,7 @@ export class Game {
     if (this.boss) return;
     const bm = biomeAt(pt.y);
     if (!bm.enemies.length) return;
-    const nearby = this.enemies.filter((e) => Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 30 * TILE).length;
+    const nearby = this.enemies.filter((e) => !e.def.shade && Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 30 * TILE).length;
     if (nearby >= bm.enemyCap) return;
     for (let tries = 0; tries < 14; tries++) {
       const ang = Math.random() * Math.PI * 2;
@@ -3145,7 +3223,7 @@ export class Game {
 
     // hunger
     const p = this.p;
-    p.food = Math.max(0, p.food - dt * 0.075);
+    p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger);
     if (p.food <= 0) {
       pl.starveT += dt;
       if (pl.starveT > 3) {
@@ -3181,13 +3259,7 @@ export class Game {
     if (!underground && this.st.oilMax > 0) pl.oil = Math.min(this.st.oilMax, pl.oil + dt * 2);
     if (pl.oil > this.st.oilMax * 0.25) this.lowOilWarned = false;
 
-    // the Sunless Vault's gloom bites anyone standing in the dark
-    const lightHere = this.light.at(pt.x, pt.y);
-    if (this.biome >= 4 && !this.st.lens && lightHere < 0.3) {
-      pl.darkT += dt;
-      if (pl.darkT > 3 && Math.floor(pl.darkT * 2) !== Math.floor((pl.darkT - dt) * 2)) this.sap(4, 'The dark bites', '#a07aff');
-      this.hint('dark', 'The Sunless Vault eats light and the dark bites. Stay near torches, or forge a Sunglass Lens.');
-    } else pl.darkT = 0;
+    this.updateNerve(dt, underground);
 
     // heat
     if (this.biome === 3 && !this.st.heatWard) {
@@ -3222,6 +3294,66 @@ export class Game {
       this.boss = null;
       this.toast('The Gloamheart slumbers again...', '#a05aff');
     }
+  }
+
+  /** the dark wears on you; light, a campfire and above all the Wick steady you */
+  private updateNerve(dt: number, underground: boolean): void {
+    const pl = this.player;
+    const p = this.p;
+    const lit = this.light.at(Math.floor(pl.cx / TILE), Math.floor((pl.y + 10) / TILE));
+    this.litHere = lit;
+    const before = p.nerve;
+    let rate: number;
+    if (this.inWickLight(pl.cx, pl.cy)) rate = 12 + this.flame * 3;
+    else if (this.nearObj(Obj.CAMPFIRE, 3)) rate = 9;
+    else if (!underground && !isNight(p.clock)) rate = 5;
+    else if (lit >= STEADY) rate = 2.5;
+    else if (lit >= LIT) rate = 0;
+    else {
+      // the deeper and blacker it is, the faster it frays you
+      let drain = underground ? 1.2 + this.biome * 0.3 : 0.7;
+      if (lit < 0.3) drain *= 1.5;
+      if (underground && this.biome >= 4) drain *= 1.6;
+      if (this.st.lens) drain *= 0.5;
+      rate = -drain * this.mode.nerve;
+    }
+    p.nerve = Math.max(0, Math.min(NERVE_MAX, p.nerve + rate * dt));
+    const n = p.nerve;
+    if (n < NERVE_FRAYED && before >= NERVE_FRAYED) this.hint('nerve', 'Your nerve frays in the dark (the purple bar). Light steadies it: hold a torch, keep your lantern fed, sit by a campfire, or go home to the Wick.');
+    if (n < NERVE_SHAKEN && before >= NERVE_SHAKEN) {
+      this.toast('You are shaken. Something in the dark has noticed you.', '#c8a0ff');
+      audio.play('whisper', { vol: 0.6, vary: 0 });
+      this.hint('shaken', 'Gloamlings hunt a shaken delver who stands in the dark. Step into the light and they cannot reach you: light burns them.');
+    }
+    if (n >= NERVE_SHAKEN + 5 && before < NERVE_SHAKEN + 5 && rate > 0) this.toast('Your nerve steadies.', '#e8d8ff');
+    // a heartbeat you can hear
+    if (n < NERVE_SHAKEN) {
+      this.beatT -= dt;
+      if (this.beatT <= 0) {
+        this.beatT = 0.75 + (n / NERVE_SHAKEN) * 0.9;
+        audio.play('heartbeat', { vol: 0.3 + (1 - n / NERVE_SHAKEN) * 0.5, vary: 0 });
+      }
+    } else this.beatT = 0;
+    // and voices you would rather not
+    if (n < 30) {
+      this.whisperT -= dt;
+      if (this.whisperT <= 0) {
+        this.whisperT = 6 + Math.random() * 9;
+        audio.play('whisper', { vol: 0.3 + Math.random() * 0.25, pitch: 0.85 + Math.random() * 0.3, vary: 0 });
+        const side = Math.random() < 0.5 ? -1 : 1;
+        this.text(pl.cx + side * (60 + Math.random() * 80), pl.y - 10 - Math.random() * 50, this.rng.pick(WHISPERS), '#b490e8');
+      }
+    } else this.whisperT = Math.max(this.whisperT, 4);
+    // with nothing left, the dark bites
+    if (n <= 0) {
+      pl.darkT += dt;
+      if (pl.darkT > 1.6) {
+        pl.darkT = 0;
+        this.sap(Math.max(1, Math.round(3 * this.mode.dmg)), 'The dark bites', '#a07aff');
+      }
+      this.hint('broken', 'Your nerve is gone and the dark is biting. Light a torch or get back to the light, now.');
+    } else pl.darkT = 0;
+    if (underground && this.biome >= 4 && !this.st.lens) this.hint('dark', 'The Sunless Vault drinks light and frays nerve twice as fast. Keep torches lit, or forge a Sunglass Lens.');
   }
 
   nearObj(o: Obj, r: number): boolean {
@@ -3492,8 +3624,9 @@ export class Game {
     const p = JSON.parse(JSON.stringify(this.p)) as Progress;
     if (cursor) give(p.inv, cursor.id, cursor.n);
     if (this.player.dead) {
-      p.coins -= Math.floor(p.coins * 0.1);
+      p.coins -= Math.floor(p.coins * this.mode.coinLoss);
       p.food = Math.max(p.food, 50);
+      p.nerve = Math.max(p.nerve, 70);
     }
     if (this.ride) give(p.inv, 'minecart', 1);
     return p;

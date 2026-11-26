@@ -37,6 +37,9 @@ const SFX = [
   'cart_bump',
   'splash',
   'reel',
+  'heartbeat',
+  'whisper',
+  'gloam_hiss',
 ] as const;
 export type SfxId = (typeof SFX)[number];
 

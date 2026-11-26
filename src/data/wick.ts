@@ -44,6 +44,7 @@ export const KINDLING: Record<string, number> = { wood: 15, coal: 3 };
 /** Lumen each glowing thing gives when offered: anything that holds light feeds the flame */
 export const LUMEN: Record<string, number> = {
   sporecap: 5,
+  gloammote: 6,
   glowfin: 12,
   jade: 12,
   gold: 10,

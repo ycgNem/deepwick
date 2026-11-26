@@ -1,4 +1,4 @@
-export type Behavior = 'flyer' | 'hopper' | 'walker' | 'shooter' | 'phaser' | 'roller' | 'critter' | 'charger';
+export type Behavior = 'flyer' | 'hopper' | 'walker' | 'shooter' | 'phaser' | 'roller' | 'critter' | 'charger' | 'lurker';
 
 export interface DropRule {
   id: string;
@@ -30,6 +30,8 @@ export interface EnemyDef {
   passive?: boolean;
   /** burns away in daylight */
   nocturnal?: boolean;
+  /** a creature of the dark itself: no sprite, drawn as living shadow, burned by any light */
+  shade?: boolean;
 }
 
 const d = (id: string, chance: number, a = 1, b = a): DropRule => ({ id, chance, n: [a, b] });
@@ -47,6 +49,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   imp: { id: 'imp', name: 'Cinder Imp', hp: 38, dmg: 20, speed: 85, xp: 32, drops: [d('horn', 0.6)], coins: [8, 18], behavior: 'shooter', size: 48, box: [24, 26], facesRight: true, fps: 12, glow: [0.5, 0.2, 0.05], shot: '#ff8a2a' },
   slug: { id: 'slug', name: 'Magma Roller', hp: 55, dmg: 24, speed: 55, xp: 34, drops: [d('magmacore', 0.6)], coins: [8, 20], behavior: 'roller', size: 48, box: [32, 30], facesRight: true, fps: 10, glow: [0.45, 0.15, 0.02] },
   wraith: { id: 'wraith', name: 'Gloam Wraith', hp: 62, dmg: 28, speed: 55, xp: 46, drops: [d('ecto', 0.6)], coins: [14, 30], behavior: 'phaser', size: 48, box: [24, 34], facesRight: true, fps: 9, glow: [0.15, 0.05, 0.3] },
+  gloamling: { id: 'gloamling', name: 'Gloamling', hp: 9, dmg: 6, speed: 74, xp: 6, drops: [d('gloammote', 0.6)], coins: [0, 2], behavior: 'lurker', size: 32, box: [18, 18], facesRight: true, fps: 8, shade: true },
   sentinel: { id: 'sentinel', name: 'Vault Sentinel', hp: 120, dmg: 36, speed: 45, xp: 64, drops: [d('gear', 0.7)], coins: [20, 45], behavior: 'walker', size: 64, box: [34, 46], facesRight: true, fps: 8, glow: [0.05, 0.15, 0.35] },
 };
 

@@ -14,6 +14,7 @@
         <div class="bar hp"><div class="fill" id="hpFill"></div><span id="hpText"></span><em>HP</em></div>
         <div class="bar food"><div class="fill" id="foodFill"></div><span id="foodText"></span><em>FOOD</em></div>
         <div class="bar oil" id="oilBar"><div class="fill" id="oilFill"></div><span id="oilText"></span><em>OIL</em></div>
+        <div class="bar nerve" id="nerveBar"><div class="fill" id="nerveFill"></div><span id="nerveText"></span><em>NERVE</em></div>
         <div class="chips">
           <div class="chip coin"><img src="" data-icon="coin" alt="" /><span id="coins"></span></div>
           <div class="chip clock" id="clock"></div>
@@ -56,8 +57,14 @@
       <div class="intro-card">
         <h2>You wake beside the cold Wick.</h2>
         <p>For a hundred years the great lantern of Deepwick kept the dark inside the mountain. Then something far below began <em>drinking the light</em>. The Wick went cold, the town emptied, and now when the sun sets the Hollows climb out to look for more.</p>
-        <p>Punch a tree, dig for coal, and <b>kindle the Wick</b> before the first night falls: nothing from the dark survives in its light. Then go down. Everything that glows down there, glowcaps, jade, amethyst and stranger things, is light you can bring home to feed the flame.</p>
-        <p>As the Wick grows, the townsfolk come back: Pell to trade, Brannoc to sharpen your steel, Wren to read the relics. And somewhere under five layers of rock, the <b>Gloamheart</b> is beating.</p>
+        <p>Punch a tree, dig for coal, and <b>kindle the Wick</b> before the first night falls: nothing from the dark survives in its light. Then go down, and <b>carry light</b>. The dark wears on your nerve, and the things that live in it come for a delver who has lost theirs. Everything that glows down there is light you can bring home to feed the flame.</p>
+        <p>As the Wick grows, the townsfolk come back. And somewhere under five layers of rock, the <b>Gloamheart</b> is beating.</p>
+        <div class="modes" id="modePick">
+          <button class="mode" data-mode="hearth"><b>Hearth</b><span>A gentler dark</span></button>
+          <button class="mode on" data-mode="delver"><b>Delver</b><span>As intended</span></button>
+          <button class="mode" data-mode="gloam"><b>Gloam</b><span>For the brave</span></button>
+        </div>
+        <p class="modeblurb" id="modeBlurb"></p>
         <button id="btnBegin" class="big">Wake up</button>
       </div>
     </div>

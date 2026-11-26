@@ -126,6 +126,7 @@ const LIST: Record<string, Partial2> = {
   ecto: { name: 'Gloam Ectoplasm', icon: i16(19), kind: 'material', value: 55, desc: 'Darkness, thickened.', glow: '#a05aff' },
   gear: { name: 'Sentinel Gear', icon: i16(20), kind: 'material', value: 70, desc: 'Bronze, older than the town.' },
   hide: { name: 'Animal Hide', icon: n32(28), kind: 'material', value: 3, desc: 'From rabbits and boars. Beds, bows and leather.' },
+  gloammote: { name: 'Gloam Mote', icon: cv(4), kind: 'material', value: 4, desc: 'A scrap of living dark, still twitching. The Wick burns it clean.', glow: '#b48aff' },
   ash: { name: 'Hollow Ash', icon: n32(44), kind: 'material', value: 6, desc: 'What is left of a Hollow at dawn.' },
   wheat: { name: 'Wheat', icon: n32(51), kind: 'material', value: 1, desc: 'Bake three into bread.' },
 

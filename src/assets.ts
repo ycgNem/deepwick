@@ -206,6 +206,27 @@ function buildCvIcons(): void {
   // its pixels sit in x 5..29, y 17..61; scale that 24x44 box to 17x31
   wc.drawImage(A.camp.wickpost, 5, 17, 24, 44, 8, 0, 17, 31);
   A.cvIcons.push(w);
+  // a Gloam Mote: a scrap of shadow with a violet rim and two pale eyes
+  const [gm, gc] = makeCanvas(32, 32);
+  const disc = (x: number, y: number, r: number): void => {
+    for (let dy = -r; dy <= r; dy++) {
+      const hw = Math.floor(Math.sqrt(r * r - dy * dy) + 0.35);
+      gc.fillRect(x - hw, y + dy, hw * 2 + 1, 1);
+    }
+  };
+  const blobs: [number, number, number][] = [[16, 15, 8], [12, 12, 5], [20, 21, 4], [11, 22, 3], [23, 11, 3]];
+  gc.fillStyle = '#8a5ad8';
+  for (const [x, y, r] of blobs) disc(x, y, r + 2);
+  gc.fillStyle = '#3a1d66';
+  for (const [x, y, r] of blobs) disc(x, y, r + 1);
+  gc.fillStyle = '#0b0614';
+  for (const [x, y, r] of blobs) disc(x, y, r);
+  gc.fillStyle = '#24123e';
+  disc(13, 11, 2);
+  gc.fillStyle = '#f2deff';
+  gc.fillRect(12, 15, 2, 2);
+  gc.fillRect(18, 15, 2, 2);
+  A.cvIcons.push(gm);
 }
 
 function measurePads(): void {
