@@ -193,6 +193,13 @@ export const CHAPTERS: Chapter[] = [
         coins: 260,
       },
       {
+        id: 'tide',
+        text: 'Hold the Wick through a Gloam Tide',
+        how: 'Every fourth night from the third (once the Wick is Glowing) the dark rises against the town. Be there at nightfall, keep the Gloamlings off the flame, and ring the Wick with torches: light burns them.',
+        progress: (g) => flag((g.p.tidesHeld ?? 0) > 0),
+        coins: 200,
+      },
+      {
         id: 'heart',
         text: 'Still the Gloamheart',
         how: 'It beats at the bottom of the world, drinking the light. Go down ready.',

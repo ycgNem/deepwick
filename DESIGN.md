@@ -68,4 +68,14 @@ the flame) decides how far the light reaches tomorrow.
       below while holding down), triggers to use, an on-screen pointer that
       clicks through every menu and the title, button latching across menu
       changes, and a controller section in the pause menu.
-- [ ] Cycle 5+: review cycles: balance, polish, audio, performance, content.
+- [x] Cycle 5: Gloam Tides. Every fourth night from the third (once the Wick
+      is Glowing) the dark rises against the town: a bruised sky and a red
+      moon, the Wick gutters to half its reach, and tide-born Gloamlings come
+      over the hills from both sides to gnaw at its roots, draining its ward
+      (HUD bar). The guttering Wick cannot burn them, but torches and lamps on
+      the approaches can, so the town wants a lit perimeter. Hold until dawn
+      for Lumen and coins (scaled by the ward left and the tide cut down); let
+      the ward break and the Gloam eats some of the Lumen toward the next flame
+      (never a whole level). No sleeping through a tide; a dawn warning and a
+      "Tide tonight" chip; its own siege music (PixelLab). Journal goal added.
+- [ ] Cycle 6+: review cycles: balance, polish, audio, performance, content.

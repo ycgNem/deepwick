@@ -87,7 +87,7 @@ export class UI implements UIHooks {
     this.miniCtx = mc;
     [this.mapCanvas, this.mapCtx] = makeCanvas(WORLD_W, WORLD_H);
     this.mapImg = this.mapCtx.createImageData(WORLD_W, WORLD_H);
-    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill']) {
+    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill', 'bossName', 'tideChip']) {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -238,6 +238,9 @@ export class UI implements UIHooks {
     const hours = Math.floor(((c * 24 + 6) % 24) * 1);
     const mins = Math.floor((((c * 24 + 6) % 1) * 60) / 10) * 10;
     h.clock.innerHTML = `<i class="${isNight(c) ? 'moon' : 'sun'}"></i>Day ${g.p.stats.days} · ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    const tideNote = g.p.tide ? 'Gloam Tide' : g.tideTonight() && !isNight(c) ? 'Tide tonight' : '';
+    h.tideChip.textContent = tideNote;
+    h.tideChip.style.display = tideNote ? '' : 'none';
     h.clock.classList.toggle('night', daylight(c) < 0.5);
     const fl = g.flame;
     const nextNeed = fl > 0 && fl < MAX_FLAME ? FLAME[fl + 1].need : 0;
@@ -258,8 +261,16 @@ export class UI implements UIHooks {
     }
     h.skills.innerHTML = sk;
     const bossOn = !!g.boss && !g.boss.dead;
-    h.bossBar.classList.toggle('show', bossOn);
-    if (bossOn) h.bossFill.style.width = `${g.bossHpFrac() * 100}%`;
+    const tide = g.p.tide;
+    h.bossBar.classList.toggle('show', bossOn || !!tide);
+    h.bossBar.classList.toggle('tide', !bossOn && !!tide);
+    if (bossOn) {
+      h.bossName.textContent = 'THE GLOAMHEART';
+      h.bossFill.style.width = `${g.bossHpFrac() * 100}%`;
+    } else if (tide) {
+      h.bossName.textContent = `GLOAM TIDE \u00b7 THE WICK'S WARD${tide.kills ? ` \u00b7 ${tide.kills} DRIVEN OFF` : ''}`;
+      h.bossFill.style.width = `${tide.ward}%`;
+    }
     this.drawMinimap();
   }
 

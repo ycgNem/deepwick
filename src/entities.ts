@@ -191,6 +191,8 @@ export class Enemy implements Body {
   age = 0;
   /** how hard the light is burning it (shades only) */
   burn = 0;
+  /** sent by a Gloam Tide: it goes for the Wick, not for you */
+  tide = false;
 
   constructor(
     public def: EnemyDef,

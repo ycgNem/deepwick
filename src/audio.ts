@@ -43,13 +43,14 @@ const SFX = [
 ] as const;
 export type SfxId = (typeof SFX)[number];
 
-export type MusicId = 'camp' | 'cave' | 'cave2' | 'deep' | 'boss' | 'none';
+export type MusicId = 'camp' | 'cave' | 'cave2' | 'deep' | 'boss' | 'tide' | 'none';
 const MUSIC_FILES: Record<Exclude<MusicId, 'none'>, string> = {
   camp: 'music_camp.mp3',
   cave: 'music_cave.mp3',
   cave2: 'music_cave2.mp3',
   deep: 'music_deep.mp3',
   boss: 'music_boss.mp3',
+  tide: 'music_tide.mp3',
 };
 
 class AudioSystem {

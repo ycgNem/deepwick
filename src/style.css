@@ -160,6 +160,7 @@ button.ghost {
 }
 .chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .chip {
@@ -347,6 +348,25 @@ button.ghost {
   height: 100%;
   background: linear-gradient(#ff7aa0, #c0204a);
   transition: width 0.2s;
+}
+#bossBar.tide {
+  color: #d8b8ff;
+}
+#bossBar.tide .track {
+  background: #120a1c;
+  box-shadow: 0 0 0 2px #4a2a78, 0 0 14px rgba(150, 90, 230, 0.45);
+}
+#bossBar.tide #bossFill {
+  background: linear-gradient(#fff0b0, #ffc84a 50%, #c07a1a);
+}
+.chip.tide {
+  padding: 3px 8px;
+  font-family: 'Silkscreen', monospace;
+  font-size: 11px;
+  color: #e0c0ff;
+  border-color: #6a3aa8;
+  box-shadow: 0 0 10px rgba(150, 90, 230, 0.4);
+  animation: pulse 0.9s infinite alternate;
 }
 #padCursor {
   position: fixed;

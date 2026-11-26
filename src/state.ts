@@ -82,6 +82,10 @@ export interface Progress {
   mode: ModeId;
   /** how far through the Journal's goals you are */
   journal: number;
+  /** a Gloam Tide in progress: the Wick's ward (0..100) and what you have cut down */
+  tide?: { day: number; ward: number; kills: number } | null;
+  /** Gloam Tides the Wick has held through */
+  tidesHeld?: number;
   /** time of day 0..1 (0 = dawn) */
   clock: number;
   spawn: { x: number; y: number };

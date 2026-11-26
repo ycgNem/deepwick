@@ -251,6 +251,8 @@ export class Game {
   /** light at the delver's head, from the last light pass */
   litHere = 1;
   private journalT = 0;
+  /** seconds to the next Gloam Tide spawn */
+  private tideT = 0;
 
   constructor(
     public input: Input,
@@ -397,6 +399,7 @@ export class Game {
       this.updateFishing(dt);
       this.flowWater(dt);
       this.updateEnemies(dt);
+      this.updateTide(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
     }
@@ -453,15 +456,144 @@ export class Game {
       p.clock -= 1;
       p.stats.days++;
       this.toast(`Day ${p.stats.days}`, '#ffe9a8');
+      this.tideWarning();
     }
     const night = isNight(p.clock);
-    if (night && !this.wasNight) {
+    if (night && !this.wasNight && !p.tide && this.tideTonight()) this.startTide();
+    else if (night && !this.wasNight) {
       this.toast('Night falls. The Hollows are rising...', '#b09aff');
       if (this.flame > 0) this.hint('night', 'At night Hollows roam the surface. Nothing from the dark survives inside the Wick’s light: stay in the warm glow, or sleep in a bed to skip the night.');
       else this.hint('nightcold', 'At night Hollows roam the surface, and the Wick is cold. Kindle it, or wall yourself in with a door and torches until dawn.');
       audio.play('groan', { vol: 0.5, vary: 0 });
-    } else if (!night && this.wasNight) this.toast('Dawn breaks.', '#ffd79a');
+    } else if (!night && this.wasNight) {
+      if (p.tide) this.endTide(p.tide.ward > 0);
+      else this.toast('Dawn breaks.', '#ffd79a');
+    }
     this.wasNight = night;
+  }
+
+  // ------------------------------------------------------------------ Gloam Tides
+  /**
+   * Every fourth night from the third, once the Wick is Glowing, the dark rises against it.
+   * The Wick gutters to half its reach, and Gloamlings come over the hills for its flame.
+   */
+  tideTonight(): boolean {
+    const d = this.p.stats.days;
+    return this.flame >= 2 && d >= 3 && (d - 3) % 4 === 0;
+  }
+
+  /** at dawn of a tide day */
+  private tideWarning(): void {
+    if (this.tideTonight()) {
+      this.toast('The birds have gone quiet. A Gloam Tide will rise tonight.', '#c8a0ff');
+      this.hint('tidewarn', 'On a Gloam Tide the Wick gutters to half its reach and the dark comes for its flame. Ring the town with torches and lamps (light burns Gloamlings) and be there at nightfall to drive them off the Wick.');
+    }
+  }
+
+  private startTide(): void {
+    const p = this.p;
+    p.tide = { day: p.stats.days, ward: 100, kills: 0 };
+    this.tideT = 4;
+    this.shake = Math.max(this.shake, 6);
+    audio.play('roar', { pitch: 0.55, vol: 0.8, vary: 0 });
+    audio.play('whisper', { vol: 0.7, vary: 0 });
+    this.toast('A GLOAM TIDE RISES. Defend the Wick until dawn!', '#d0a0ff');
+  }
+
+  /** dawn, or the Wick's ward broken */
+  private endTide(held: boolean): void {
+    const p = this.p;
+    const t = p.tide;
+    if (!t) return;
+    p.tide = null;
+    for (const e of this.enemies) {
+      if (!e.tide || e.dead) continue;
+      e.dead = true;
+      this.burst(e.cx, e.cy, 8, ['#2a1446', '#5a2e8f', '#ffd75a'], 70);
+    }
+    if (held) {
+      // the Wick drinks the dawn: the more of its ward left and the more of the tide you cut down, the more
+      const there = t.kills >= 3;
+      if (there) p.tidesHeld = (p.tidesHeld ?? 0) + 1;
+      const lumen = Math.round((12 + this.flame * 10) * (t.ward / 100)) + Math.min(60, t.kills * 2);
+      const coins = there ? 15 * this.flame + t.kills * 3 : 0;
+      const before = this.flame;
+      p.wick.lumen += lumen;
+      p.coins += coins;
+      this.toast(there ? `Dawn. The Wick held! +${lumen} Lumen, +${coins} coins` : `Dawn. The Wick held on its own, barely. +${lumen} Lumen`, '#ffe08a');
+      if (lumen) this.text(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE - 30, `+${lumen} Lumen`, '#ffe08a', true);
+      this.burst(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE, 70, ['#ffe08a', '#ffb84a', '#fff6d0'], 220, true);
+      audio.play('relic', { vol: 0.7, vary: 0 });
+      if (this.flame > before) this.flameUp(this.flame);
+    } else {
+      // the Gloam fed: some of the Lumen you were building toward the next flame is gone (never a whole level)
+      const floor = FLAME[this.flame].need;
+      const lost = Math.round(Math.max(0, p.wick.lumen - floor) * 0.3);
+      p.wick.lumen -= lost;
+      this.shake = Math.max(this.shake, 10);
+      audio.play('death', { pitch: 1.4, vol: 0.6, vary: 0 });
+      this.toast(`The Gloam fed on the Wick${lost ? ` (-${lost} Lumen)` : ''}. It gutters, but it lives.`, '#ff9ab0');
+    }
+    this.onSave?.();
+  }
+
+  /** run a tide: send the dark at the Wick, and let it feed on whatever reaches the flame */
+  private updateTide(dt: number): void {
+    const t = this.p.tide;
+    if (!t) return;
+    const pl = this.player;
+    const away = Math.abs(pl.cx / TILE - WICK_X) > 60 || pl.y / TILE > WICK_Y + 25;
+    if (away) {
+      // with nobody there the Wick holds its own, worn thin
+      t.ward = Math.max(5, t.ward - 0.15 * dt);
+      return;
+    }
+    // the tide swells to midnight and ebbs toward dawn
+    const k = Math.max(0, Math.min(1, (this.p.clock - 0.6) / 0.36));
+    const swell = 0.45 + 0.55 * Math.sin(k * Math.PI);
+    const cap = Math.max(2, Math.round((3 + this.flame * 1.5) * swell * this.mode.gloam));
+    this.tideT -= dt;
+    if (this.tideT <= 0) {
+      this.tideT = (2.8 + Math.random() * 1.6) / Math.max(0.6, this.mode.gloam);
+      const alive = this.enemies.filter((e) => e.tide).length;
+      if (alive < cap) this.spawnTide(Math.min(cap - alive, Math.random() < 0.35 ? 2 : 1));
+    }
+    // whatever reaches the flame drinks the ward
+    let feeding = 0;
+    for (const e of this.enemies) {
+      if (!e.tide || e.dead || e.mode !== 2) continue;
+      feeding++;
+      if (Math.random() < dt * 14) {
+        const sx = WICK_GLOW.x * TILE + (Math.random() - 0.5) * 16;
+        const sy = WICK_GLOW.y * TILE + (Math.random() - 0.5) * 16;
+        this.parts.push({ x: sx, y: sy, vx: (e.cx - sx) * 1.6, vy: (e.cy - sy) * 1.6, life: 0.6, max: 0.6, color: Math.random() < 0.5 ? '#ffd75a' : '#c8a0ff', size: 1, grav: 0, glow: true });
+      }
+    }
+    if (feeding) {
+      t.ward = Math.max(0, t.ward - 2.4 * feeding * dt * (0.6 + 0.4 * this.mode.dmg));
+      if (Math.random() < dt * 1.5) audio.play('sizzle', { vol: 0.35, pitch: 0.7 });
+      this.hint('tidefeed', 'Gloamlings are feeding on the Wick! Cut them off it before its ward (the bar below) runs out.');
+      if (t.ward <= 0) this.endTide(false);
+    }
+  }
+
+  /** Gloamlings (and the odd Hollow) come over the hills from both sides */
+  private spawnTide(n: number): void {
+    const w = this.world;
+    for (let i = 0; i < n; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const tx = Math.max(4, Math.min(w.w - 5, WICK_X + side * this.rng.int(22, 30)));
+      const gy = w.skyline[tx];
+      if (Math.random() < 0.2) {
+        const e = new Enemy(ENEMIES.hollow, tx * TILE + TILE / 2, gy * TILE - 1);
+        e.tide = true;
+        this.enemies.push(e);
+        continue;
+      }
+      const e = new Enemy(ENEMIES.gloamling, tx * TILE + TILE / 2, (gy - 2 - Math.random() * 3) * TILE);
+      e.tide = true;
+      this.enemies.push(e);
+    }
   }
 
   skyColor(): [number, number, number] {
@@ -474,6 +606,7 @@ export class Game {
     // warm sunsets and sunrises
     const warm = c > 0.5 && c < 0.66 ? 1 - Math.abs(c - 0.58) / 0.08 : c < 0.08 ? 1 - c / 0.08 : c > 0.95 ? (c - 0.95) / 0.05 : 0;
     const k = Math.max(0, warm) * 0.5;
+    if (this.p.tide) return [r + k * 0.25 + 0.05, (g - k * 0.15) * 0.75, b - k * 0.35 + 0.1];
     return [r + k * 0.25, g - k * 0.15, b - k * 0.35];
   }
 
@@ -1585,6 +1718,7 @@ export class Game {
     e.dead = true;
     this.p.stats.kills++;
     this.p.seen['kill_' + e.def.id] = true;
+    if (e.tide && this.p.tide) this.p.tide.kills++;
     this.p.nerve = Math.min(NERVE_MAX, this.p.nerve + (e.def.shade ? 6 : 3));
     if (e.def.shade) {
       audio.play('gloam_hiss', { vol: 0.7 });
@@ -2226,6 +2360,8 @@ export class Game {
   private migrateNerve(): void {
     if (typeof this.p.nerve !== 'number' || !Number.isFinite(this.p.nerve)) this.p.nerve = NERVE_MAX;
     if (!MODES[this.p.mode]) this.p.mode = 'delver';
+    // a tide saved mid-night that the clock has since carried past
+    if (this.p.tide && !isNight(this.p.clock)) this.p.tide = null;
   }
 
   get flame(): number {
@@ -2238,8 +2374,8 @@ export class Game {
   }
 
   /** is this point (px) inside the Wick's light? */
-  inWickLight(x: number, y: number): boolean {
-    const r = this.wickRadius();
+  inWickLight(x: number, y: number, full = false): boolean {
+    const r = this.wickRadius() * (this.p.tide && !full ? 0.45 : 1);
     if (r <= 0) return false;
     const dx = x / TILE - WICK_GLOW.x;
     const dy = y / TILE - WICK_GLOW.y;
@@ -2584,6 +2720,10 @@ export class Game {
     const p = this.p;
     const changed = p.spawn.x !== tx || p.spawn.y !== ty;
     p.spawn = { x: tx, y: ty };
+    if (p.tide || (this.tideTonight() && p.clock > 0.5 && p.clock < 0.96)) {
+      this.toast('No one sleeps through a Gloam Tide. The Wick needs you.', '#c8a0ff');
+      return;
+    }
     if (isNight(p.clock) || p.clock > 0.56) {
       const danger = this.enemies.some((e) => !e.def.passive && Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) < 10 * TILE);
       if (danger) {
@@ -2599,6 +2739,7 @@ export class Game {
         this.enemies = this.enemies.filter((e) => !e.def.nocturnal && !e.def.shade);
         this.wasNight = false;
         this.toast(`You sleep soundly. Day ${p.stats.days}.`, '#ffd79a');
+        this.tideWarning();
         this.onSave?.();
       });
     } else if (changed) {
@@ -2870,7 +3011,7 @@ export class Game {
         }
       }
       // Hollows crumble in daylight; nothing hostile (bar a boar) survives in the Wick's light
-      const wickBurn = !e.def.passive && e.def.behavior !== 'charger' && this.inWickLight(e.cx, e.cy);
+      const wickBurn = !e.def.passive && e.def.behavior !== 'charger' && !(e.tide && e.def.shade) && this.inWickLight(e.cx, e.cy);
       if (wickBurn || (e.def.nocturnal && !night)) {
         const tx = Math.floor(e.cx / TILE);
         const ty = Math.floor(e.y / TILE);
@@ -2898,13 +3039,15 @@ export class Game {
   /** Gloamlings: light burns them, and once your nerve is back they let go and melt into the dark */
   private updateShade(e: Enemy, dt: number): void {
     const lit = this.light.at(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
-    e.burn = lit > LIT ? lit : 0;
+    // the guttering Wick cannot burn the tide-born: only light you set out on the approaches can
+    const sheltered = e.tide && this.inWickLight(e.cx, e.cy, true);
+    e.burn = lit > LIT && !sheltered ? lit : 0;
     if (e.burn > 0) {
-      e.hp -= dt * 16 * lit;
+      e.hp -= dt * 16 * lit * (e.tide ? 0.5 : 1);
       if (Math.random() < dt * 25) this.parts.push({ x: e.cx + (Math.random() - 0.5) * 14, y: e.cy + (Math.random() - 0.5) * 14, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, life: 0.5, max: 0.5, color: Math.random() < 0.5 ? '#c08aff' : '#ff9a4a', size: 1, grav: -10, glow: true });
       if (Math.random() < dt * 2) audio.play('sizzle', { vol: 0.2, pitch: 1.6 });
       if (e.hp <= 0) this.killEnemy(e);
-    } else if (this.p.nerve > 75 && e.age > 3 && Math.random() < dt * 0.6) {
+    } else if (!e.tide && this.p.nerve > 75 && e.age > 3 && Math.random() < dt * 0.6) {
       e.dead = true;
       this.burst(e.cx, e.cy, 10, ['#2a1446', '#5a2e8f'], 60);
     }
@@ -2919,7 +3062,7 @@ export class Game {
     if (!underground && !isNight(p.clock)) return;
     const base = p.nerve < 12 ? 4 : p.nerve < NERVE_SHAKEN ? 2 : 1;
     const cap = Math.max(1, Math.round(base * this.mode.gloam));
-    if (this.enemies.filter((e) => e.def.shade).length >= cap) return;
+    if (this.enemies.filter((e) => e.def.shade && !e.tide).length >= cap) return;
     if (Math.random() > 0.35 * this.mode.gloam) return;
     const pt = this.playerTile();
     const w = this.world;
@@ -3495,6 +3638,7 @@ export class Game {
     if (this.player.dead) return;
     let m: MusicId;
     if (this.boss && !this.boss.dead) m = 'boss';
+    else if (this.p.tide && this.onSurface()) m = 'tide';
     else if (this.biome === 0 && this.onSurface()) m = isNight(this.p.clock) ? 'cave' : 'camp';
     else if (this.biome >= 3) m = 'deep';
     else m = this.biome === 2 ? 'cave2' : 'cave';

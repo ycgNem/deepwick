@@ -3,6 +3,7 @@ import { Enemy, moveBody, applyGravity } from './entities';
 import { TILE } from './constants';
 import { audio } from './audio';
 import { LIT, NERVE_SHAKEN } from './data/nerve';
+import { WICK_GLOW, WICK_Y } from './data/wick';
 
 function los(g: Game, ax: number, ay: number, bx: number, by: number): boolean {
   const dx = bx - ax;
@@ -213,7 +214,29 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
       let ty = 0;
       const d = dist || 1;
       e.stateT -= dt;
-      if (lit > LIT) {
+      if (e.tide) {
+        // tide-born: it pushes through the light to gnaw at the Wick's roots, and only turns on you up close
+        const near = !pl.dead && dist < 3 * TILE;
+        const gx = near ? pl.cx : WICK_GLOW.x * TILE + Math.cos(e.t * 1.7) * 34;
+        const gy = near ? pl.cy : WICK_Y * TILE - 24 + Math.sin(e.t * 2.3) * 8;
+        const ox = gx - e.cx;
+        const oy = gy - e.cy;
+        const od = Math.hypot(ox, oy) || 1;
+        if (!near && od < 1.6 * TILE) {
+          e.mode = 2;
+          tx = (ox / od) * sp * 0.4;
+          ty = (oy / od) * sp * 0.4;
+        } else {
+          e.mode = near ? 1 : 0;
+          tx = (ox / od) * sp * 0.9;
+          ty = (oy / od) * sp * 0.9 + Math.sin(e.t * 3) * 20;
+          if (near && e.stateT <= 0 && e.knock <= 0) {
+            e.vx = (dx / d) * sp * 3;
+            e.vy = (dy / d) * sp * 3;
+            e.stateT = 1.4 + Math.random();
+          }
+        }
+      } else if (lit > LIT) {
         // scatter from the light
         tx = -(dx / d) * sp * 1.5;
         ty = -(dy / d) * sp * 1.5;

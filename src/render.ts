@@ -319,13 +319,19 @@ export class Renderer {
         ctx.fillRect(Math.round(x), Math.round(y), s.b > 0.85 ? 2 : 1, s.b > 0.85 ? 2 : 1);
       }
     }
-    // the moon
+    // a Gloam Tide bruises the sky
+    const tide = !!g.p.tide;
+    if (tide) {
+      ctx.fillStyle = `rgba(70,14,90,${0.28 + Math.sin(g.time * 0.8) * 0.06})`;
+      ctx.fillRect(0, 0, vw, vh);
+    }
+    // the moon (red on a tide night)
     if (isNight(c)) {
       const t = (c - 0.6) / 0.36;
       const mx = vw * (0.15 + t * 0.7);
       const my = 70 - Math.sin(t * Math.PI) * 40;
-      this.glowAt(ctx, mx, my, 34, 'rgba(200,210,255,0.18)');
-      ctx.fillStyle = '#e8ecff';
+      this.glowAt(ctx, mx, my, tide ? 48 : 34, tide ? 'rgba(255,80,110,0.3)' : 'rgba(200,210,255,0.18)');
+      ctx.fillStyle = tide ? '#ff9a9a' : '#e8ecff';
       ctx.beginPath();
       ctx.arc(Math.round(mx), Math.round(my), 9, 0, Math.PI * 2);
       ctx.fill();
@@ -571,8 +577,11 @@ export class Renderer {
     ctx.drawImage(cold, x, y);
     const lvl = g.flame;
     if (lvl > 0) {
-      const flick = 0.92 + Math.sin(g.time * 9.1) * 0.04 + Math.sin(g.time * 14.7) * 0.04;
-      ctx.globalAlpha = Math.min(1, (0.62 + lvl * 0.08) * flick);
+      let flick = 0.92 + Math.sin(g.time * 9.1) * 0.04 + Math.sin(g.time * 14.7) * 0.04;
+      const tide = g.p.tide;
+      // on a tide night the flame gutters, worse as its ward goes
+      if (tide) flick *= 0.45 + 0.4 * (tide.ward / 100) + (Math.sin(g.time * 23) > 0.6 ? -0.15 : 0.05);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (0.62 + lvl * 0.08) * flick));
       ctx.drawImage(A.camp.wick_lit, x, y);
       ctx.globalAlpha = 1;
     }
@@ -1184,8 +1193,11 @@ export class Renderer {
     if (lvl > 0) {
       const gx = WICK_GLOW.x * TILE - camX;
       const gy = WICK_GLOW.y * TILE - camY;
-      const pulse = Math.sin(g.time * 2.2) * 3 + Math.sin(g.time * 9.3) * 1.5;
-      this.glowAt(ctx, gx, gy, 34 + lvl * 7 + pulse, 'rgba(255,190,90,0.55)');
+      const tide = g.p.tide;
+      const gut = tide ? 0.5 + 0.5 * (tide.ward / 100) : 1;
+      const pulse = Math.sin(g.time * 2.2) * 3 + Math.sin(g.time * 9.3) * 1.5 + (tide ? Math.sin(g.time * 17) * 4 : 0);
+      if (tide) this.glowAt(ctx, gx, gy, 46 + pulse, 'rgba(150,70,220,0.3)');
+      this.glowAt(ctx, gx, gy, (34 + lvl * 7) * gut + pulse, 'rgba(255,190,90,0.55)');
       this.glowAt(ctx, gx, gy, 16 + lvl * 2 + pulse * 0.5, 'rgba(255,240,190,0.7)');
       if (lvl >= MAX_FLAME) this.glowAt(ctx, gx, gy, 90 + pulse * 2, 'rgba(255,220,140,0.18)');
       // after dark, a warm pool on the ground marks how far the flame keeps you safe
@@ -1282,7 +1294,7 @@ export class Renderer {
       const ex = Math.round(x + e.facing * 2);
       const ey = Math.round(y - 1 + Math.sin(t * 5) * 0.5);
       ctx.globalAlpha = Math.min(1, e.age / 0.4);
-      ctx.fillStyle = hunting ? '#ff8ab4' : '#f0dcff';
+      ctx.fillStyle = e.tide ? '#ff6a4a' : hunting ? '#ff8ab4' : '#f0dcff';
       if (blink) {
         ctx.fillRect(ex - 4, ey, 2, 1);
         ctx.fillRect(ex + 2, ey, 2, 1);
@@ -1291,7 +1303,7 @@ export class Renderer {
         ctx.fillRect(ex + 2, ey - 1, 2, 2);
       }
       ctx.globalCompositeOperation = 'lighter';
-      const eg = hunting ? 'rgba(255,80,150,0.6)' : 'rgba(180,130,255,0.5)';
+      const eg = e.tide ? 'rgba(255,90,60,0.65)' : hunting ? 'rgba(255,80,150,0.6)' : 'rgba(180,130,255,0.5)';
       this.glowAt(ctx, ex - 3, ey, 6, eg);
       this.glowAt(ctx, ex + 3, ey, 6, eg);
       if (form > 0) this.glowAt(ctx, x, y, 20, 'rgba(90,40,160,0.18)');
