@@ -14,6 +14,27 @@ import { heldDef } from './state';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
+/** the miner breathes on the calm idle frames only (the rest of that clip raises a fist) */
+const IDLE_FRAMES = [0, 1, 2, 2, 1, 0] as const;
+/**
+ * Where the swung tool sits on each frame of the swing row, facing right: the grip in the 68px
+ * cell, and the angle the handle points from the grip toward the head (radians, y down).
+ * Frames 1-2 wind up over the shoulder, 3-4 strike, 5-8 recover.
+ */
+const SWING_POSE: readonly (readonly [number, number, number])[] = [
+  [31, 42, 1.0],
+  [40, 27, -1.9],
+  [38, 27, -2.8],
+  [40, 40, -0.9],
+  [38, 41, 0.5],
+  [41, 42, 0.35],
+  [41, 42, 0.3],
+  [41, 42, 0.25],
+  [40, 41, 0.3],
+];
+/** every tool icon has its grip near the bottom left and its head toward the top right */
+const TOOL_GRIP = [5, 27] as const;
+const TOOL_SIZE = 28;
 const TREE_SPRITES = ['oak', 'pine1', 'birch', 'pine2'];
 
 interface Ambient {
@@ -899,7 +920,7 @@ export class Renderer {
     let frame = 0;
     switch (pl.anim) {
       case 'idle':
-        frame = 1 + (Math.floor(pl.animT * 6) % 6);
+        frame = IDLE_FRAMES[Math.floor(pl.animT * 4) % IDLE_FRAMES.length];
         break;
       case 'walk':
         frame = 1 + (Math.floor(pl.animT * 12) % 8);
@@ -918,14 +939,19 @@ export class Renderer {
     }
     if (pl.dead) {
       row = ROW.hurt;
-      frame = Math.min(5, 2 + Math.floor(pl.deadT * 4));
+      frame = Math.min(4, 2 + Math.floor(pl.deadT * 4));
     } else if (pl.hurtT > 0.12 && !pl.swinging) {
       row = ROW.hurt;
-      frame = 2;
+      frame = 3;
     }
     const footY = Math.round(pl.y + pl.h - camY);
     const cx = Math.round(pl.cx - camX);
     const flip = pl.facing < 0 && pl.anim !== 'climb';
+    // the miner's hands are empty: a tool only comes out for the swing that uses it
+    const swingDef = !pl.dead && row === ROW.mine && pl.swingTool ? ITEMS[pl.swingTool] : undefined;
+    const pose = swingDef ? this.swingPose(pl.swingT) : null;
+    // on the wind-up the tool is over the shoulder, behind the miner
+    if (swingDef && pose && pose.a < -1.3) this.drawSwingTool(ctx, swingDef, pose, cx, footY, pl.facing);
     ctx.save();
     if (pl.dead) ctx.globalAlpha = Math.max(0, 1 - pl.deadT * 0.3);
     if (flip) {
@@ -934,8 +960,9 @@ export class Renderer {
       ctx.drawImage(A.miner, frame * CELL, row * CELL, CELL, CELL, 0, 0, CELL, CELL);
     } else ctx.drawImage(A.miner, frame * CELL, row * CELL, CELL, CELL, cx - 33, footY - 57, CELL, CELL);
     ctx.restore();
+    if (swingDef && pose && pose.a >= -1.3) this.drawSwingTool(ctx, swingDef, pose, cx, footY, pl.facing);
     if (pl.dead || pl.climbing) return;
-    // held item: torches are carried, weapons swing in an arc
+    // held items that stay visible: the torch you carry, the rod you fish with, the bow you draw
     const hd = heldDef(g.p);
     if (!hd) return;
     if (hd.kind === 'rod' && !pl.swinging) {
@@ -955,16 +982,6 @@ export class Renderer {
       const f = Math.floor(g.time * 12) % 3;
       ctx.fillStyle = ['#ffd75a', '#ffb02a', '#fff0a0'][f];
       ctx.fillRect(hx + 7 + (f === 1 ? -1 : 0), hy - 2, 3, 3);
-    } else if (pl.swinging && (hd.kind === 'sword' || hd.kind === 'hammer')) {
-      const s = iconSrc(hd.icon);
-      const t = Math.min(1, pl.swingT);
-      const a = (-2.2 + t * 2.9) * pl.facing;
-      ctx.save();
-      ctx.translate(cx + pl.facing * 4, footY - 24);
-      ctx.rotate(a + (pl.facing < 0 ? Math.PI / 2 : 0));
-      if (pl.facing < 0) ctx.scale(-1, 1);
-      ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -2, -26, 28, 28);
-      ctx.restore();
     } else if (hd.kind === 'bow' && pl.swinging) {
       const s = iconSrc(hd.icon);
       ctx.save();
@@ -973,6 +990,50 @@ export class Renderer {
       ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -10, -12, 24, 24);
       ctx.restore();
     }
+  }
+
+  /** the tool's grip and angle at a point in the swing, eased between the drawn frames */
+  private swingPose(swingT: number): { x: number; y: number; a: number; f: number } {
+    const f = Math.max(0, Math.min(8, swingT * 9));
+    const i = Math.min(7, Math.floor(f));
+    const k = f - i;
+    const p0 = SWING_POSE[i];
+    const p1 = SWING_POSE[i + 1];
+    return { x: p0[0] + (p1[0] - p0[0]) * k, y: p0[1] + (p1[1] - p0[1]) * k, a: p0[2] + (p1[2] - p0[2]) * k, f };
+  }
+
+  private drawSwingTool(
+    ctx: CanvasRenderingContext2D,
+    def: { icon: IconRef; glow?: string },
+    pose: { x: number; y: number; a: number; f: number },
+    cx: number,
+    footY: number,
+    facing: number,
+  ): void {
+    const s = iconSrc(def.icon);
+    const k = TOOL_SIZE / 32;
+    ctx.save();
+    ctx.translate(cx, footY);
+    if (facing < 0) ctx.scale(-1, 1);
+    ctx.translate(Math.round(pose.x - 33), Math.round(pose.y - 57));
+    // the strike leaves a smear along the head's path
+    if (pose.f > 2.3 && pose.f < 4.8) {
+      const back = this.swingPose(Math.max(0, pose.f - 1.1) / 9).a;
+      const fade = 1 - Math.abs(pose.f - 3.4) / 1.5;
+      ctx.globalAlpha = Math.max(0, fade) * 0.45;
+      ctx.strokeStyle = def.glow ?? '#f4f0e6';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      // the head sits about 22px from the grip on a 32px icon
+      ctx.arc(0, 0, 22 * k, back, pose.a, false);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // icons point their handle at -45 degrees; turn it to the pose's angle about the grip
+    ctx.rotate(pose.a + Math.PI / 4);
+    ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -TOOL_GRIP[0] * k, -TOOL_GRIP[1] * k, TOOL_SIZE, TOOL_SIZE);
+    ctx.restore();
   }
 
   // ------------------------------------------------------------------ ambient motes, drips, fireflies

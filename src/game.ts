@@ -23,6 +23,7 @@ import {
   takeItems,
   hasAll,
   heldDef,
+  bestHotbarPick,
   itemValue,
   nextRelic,
   bestPick,
@@ -1425,6 +1426,8 @@ export class Game {
       pl.swingHit = false;
       pl.swingTarget = null;
       const sword = kind === 'sword';
+      // the tool comes out of your pack for the swing: the one in hand, or your best pickaxe
+      pl.swingTool = tool && hd ? hd.id : (bestHotbarPick(this.p)?.id ?? null);
       pl.attack = sword || this.enemyNearCursor() || !h.ok;
       if (!pl.attack) {
         pl.swingTarget = { x: h.x, y: h.ty };
@@ -1934,6 +1937,7 @@ export class Game {
     pl.swinging = true;
     pl.swingT = 0.4;
     pl.swingHit = true;
+    pl.swingTool = null;
   }
 
   private placeObj(o: Obj, x: number, y: number): boolean {
@@ -2125,6 +2129,7 @@ export class Game {
     pl.attack = true;
     pl.swingT = 0.3;
     pl.swingHit = true;
+    pl.swingTool = null;
     audio.play('bow');
   }
 

@@ -136,6 +136,8 @@ export class Player implements Body {
   swinging = false;
   swingHit = false;
   swingTarget: { x: number; y: number } | null = null;
+  /** the item drawn in hand for this swing (null: bare fists, or placing something) */
+  swingTool: string | null = null;
   attack = false;
   invuln = 0;
   hurtT = 0;
