@@ -182,9 +182,16 @@ export const CHAPTERS: Chapter[] = [
       {
         id: 'blazing',
         text: 'Raise the Wick to Blazing',
-        how: `Offer ${FLAME[4].need} Lumen in all. A Blazing Wick hardens you: +20 health.`,
+        how: `Offer ${FLAME[4].need} Lumen in all. A Blazing Wick hardens you (+20 health), and its light reaches the ${BIOMES[2].name}.`,
         progress: (g) => flameTo(g, 4),
         coins: 150,
+      },
+      {
+        id: 'hesper',
+        text: 'Bring Hesper home',
+        how: `Hesper the apothecary is singing by a fire in the ${BIOMES[2].name}, ${LOST.stillroom.depth[0]}-${LOST.stillroom.depth[1]}m down. Bring her home and she brews draughts for your nerve, tonics for your eyes and salve against the Gloam.`,
+        progress: (g) => flag(g.p.buildings.some((b) => b.kind === 'stillroom')),
+        coins: 180,
       },
       {
         id: 'ember',

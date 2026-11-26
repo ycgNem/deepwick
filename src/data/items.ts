@@ -171,6 +171,9 @@ const LIST: Record<string, Partial2> = {
 
   // ---- usable
   tonic: { name: 'Red Tonic', icon: i16(25), kind: 'use', value: 12, desc: 'Restores half your health.', stack: 20 },
+  steadydraught: { name: 'Steady Draught', icon: { sheet: 'f32', idx: 10 }, kind: 'use', value: 10, desc: 'Hesper\u2019s calming brew. Restores 60 nerve at once.', stack: 10 },
+  nightglass: { name: 'Nightglass Tonic', icon: { sheet: 'f32', idx: 11 }, kind: 'use', value: 16, desc: 'For three minutes you see further in the dark, and it frays you half as fast.', stack: 10 },
+  gloamward: { name: 'Gloamward Salve', icon: { sheet: 'f32', idx: 12 }, kind: 'use', value: 20, desc: 'For three minutes Gloamlings will not hunt you or rise near you, and the tide-born pass you by.', stack: 10 },
   oil: { name: 'Lamp Oil', icon: i16(24), kind: 'use', value: 8, desc: 'Refills 60% of your lantern.', stack: 20 },
   recall: { name: 'Recall Charm', icon: i16(26), kind: 'use', value: 15, desc: 'Returns you to your bed after a short channel.', stack: 10 },
   bomb: { name: 'Blast Charge', icon: i16(23), kind: 'use', value: 10, desc: 'Thrown toward the cursor. Breaks rock up to one tier above your pick.', stack: 30 },

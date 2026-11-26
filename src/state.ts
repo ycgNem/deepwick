@@ -36,7 +36,7 @@ export interface Equipment {
 }
 export type EquipKey = keyof Equipment;
 
-export type BuildingKind = 'trade' | 'forge' | 'archive';
+export type BuildingKind = 'trade' | 'forge' | 'archive' | 'stillroom';
 export interface Building {
   kind: BuildingKind;
   /** centre column (tiles) */

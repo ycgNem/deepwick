@@ -11,6 +11,7 @@ import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, WICK_GLOW, WICK_X, WICK_Y, flameLevel } from './data/wick';
 import { GOALS, CHAPTERS, ROMAN, OLD_GOAL_IDS, goalDone } from './data/journal';
 import { LOST, LostKind, LostSoul, isLostKind } from './data/lost';
+import { BREWS, BREW_TIME } from './data/brews';
 import { prefs } from './prefs';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
@@ -73,6 +74,7 @@ export const BUILDING_INFO: Record<BuildingKind, { sprite: string; npc: string; 
   trade: { sprite: 'shop', npc: 'npc_merchant', panel: 'shop', label: 'Trade with Pell', name: 'Trading Post' },
   forge: { sprite: 'forge', npc: 'npc_smith', panel: 'smith', label: "Visit Brannoc's Forge", name: 'Forge' },
   archive: { sprite: 'archive', npc: 'npc_archivist', panel: 'archive', label: 'Talk to Wren (Archive)', name: 'Lantern Archive' },
+  stillroom: { sprite: 'stillroom', npc: 'npc_herbalist', panel: 'still', label: "Visit Hesper's Stillroom", name: 'Stillroom' },
 };
 
 /** item you get back when you break a placed object */
@@ -276,6 +278,8 @@ export class Game {
   flare: { t: number; level: number; from: number } | null = null;
   /** the lost townsfolk in the world (rebuilt from the save) */
   souls: Soul[] = [];
+  /** seconds left on Hesper's brews */
+  buffs = { nightglass: 0, ward: 0 };
   /** townsfolk just home, walking from the Wick to their door */
   homing: (Soul & { tx: number })[] = [];
   /** where you have walked while someone follows you: they keep to it */
@@ -430,6 +434,7 @@ export class Game {
       this.updateEnemies(dt);
       this.updateTide(dt);
       this.updateSouls(dt);
+      this.tickBuffs(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
     }
@@ -2290,7 +2295,11 @@ export class Game {
       if (!kind || this.p.buildings.some((b) => b.kind === kind)) continue;
       // the smith and the archivist are down in the dark: they have to be fetched
       if (isLostKind(kind)) {
-        if (!(this.p.lost ?? []).some((l) => l.kind === kind)) this.hideSoul(kind);
+        if (!(this.p.lost ?? []).some((l) => l.kind === kind)) {
+          this.hideSoul(kind);
+          // a save that was already this bright hears them on load
+          if (!announce && this.p.lost?.some((l) => l.kind === kind)) this.toast(LOST[kind].call, '#ffd890');
+        }
         continue;
       }
       const best = this.findPlot();
@@ -2360,6 +2369,7 @@ export class Game {
       trade: 'Old Pell saw the light and came home. His Trading Post is open beside the Wick (E to talk).',
       forge: 'Brannoc is back and his forge is roaring. He sharpens picks and hones blades.',
       archive: 'Wren has reopened the Lantern Archive. Bring relics home, take bounties.',
+      stillroom: 'Hesper has opened her Stillroom. Bring her what grows in the dark.',
     };
     this.toast(msg[kind], '#9af0a0');
     return true;
@@ -2590,7 +2600,7 @@ export class Game {
   private hideSoul(kind: LostKind): void {
     const def = LOST[kind];
     const w = this.world;
-    const r = new Rng(w.seed ^ (kind === 'forge' ? 0x51ed1 : 0xa7c3b));
+    const r = new Rng(w.seed ^ (kind === 'forge' ? 0x51ed1 : kind === 'archive' ? 0xa7c3b : 0x3e5be));
     for (let tries = 0; tries < 160; tries++) {
       const side = r.chance(0.5) ? -1 : 1;
       const x = Math.round(WICK_X + side * r.int(22, 62));
@@ -2739,6 +2749,30 @@ export class Game {
       if (s.y <= (WICK_Y + 1) * TILE && this.inWickLight(s.x, s.y - 20, true)) home.push(s.kind);
     }
     for (const k of home) this.bringHome(k);
+  }
+
+  private tickBuffs(dt: number): void {
+    for (const k of ['nightglass', 'ward'] as const) {
+      if (this.buffs[k] <= 0) continue;
+      this.buffs[k] = Math.max(0, this.buffs[k] - dt);
+      if (this.buffs[k] === 0) this.toast(k === 'ward' ? 'The Gloamward Salve has worn off.' : 'The Nightglass Tonic has worn off.', '#c8b8e8');
+    }
+  }
+
+  /** Hesper brews it from your coin and what you carry */
+  brew(id: string): boolean {
+    const b = BREWS.find((x) => x.id === id);
+    const p = this.p;
+    if (!b || p.coins < b.coins || !hasAll(p, b.needs)) return false;
+    if (roomFor(p.inv, id) < 1) {
+      this.toast('No room in your pack.');
+      return false;
+    }
+    p.coins -= b.coins;
+    for (const [k, n] of Object.entries(b.needs)) takeItems(p, k, n);
+    give(p.inv, id, 1);
+    audio.play('drink', { pitch: 0.75, vol: 0.7 });
+    return true;
   }
 
   /** a point along your trail */
@@ -2899,6 +2933,28 @@ export class Game {
         if (this.hook) this.releaseHook(false);
         else this.fireGrapple();
         return;
+      case 'steadydraught':
+        if (this.p.nerve >= NERVE_MAX - 1) {
+          this.text(pl.cx, pl.y - 6, 'Already steady', '#e8d8ff');
+          return;
+        }
+        this.p.nerve = Math.min(NERVE_MAX, this.p.nerve + 60);
+        audio.play('drink', { pitch: 0.9 });
+        this.text(pl.cx, pl.y - 4, '+60 nerve', '#c8a0ff');
+        this.burst(pl.cx, pl.cy, 14, ['#c8a0ff', '#fff0c0'], 80, true);
+        break;
+      case 'nightglass':
+        this.buffs.nightglass = BREW_TIME;
+        audio.play('drink', { pitch: 1.15 });
+        this.text(pl.cx, pl.y - 6, 'Your eyes open to the dark', '#a8c8ff');
+        this.burst(pl.cx, pl.y + 8, 16, ['#a8c8ff', '#e0e8ff'], 90, true);
+        break;
+      case 'gloamward':
+        this.buffs.ward = BREW_TIME;
+        audio.play('relic', { pitch: 1.3, vol: 0.5, vary: 0 });
+        this.text(pl.cx, pl.y - 6, 'The Gloam shies from you', '#ffd890');
+        this.burst(pl.cx, pl.cy, 24, ['#ffd890', '#fff6d0', '#c8a0ff'], 120, true);
+        break;
       case 'heartcrystal':
         if (this.p.hearts >= 10) {
           this.toast('Your heart can hold no more crystals.');
@@ -3365,7 +3421,7 @@ export class Game {
   private trySpawnGloam(): void {
     const p = this.p;
     const pl = this.player;
-    if (this.boss || pl.dead || p.nerve >= NERVE_FRAYED) return;
+    if (this.boss || pl.dead || p.nerve >= NERVE_FRAYED || this.buffs.ward > 0) return;
     const underground = !this.onSurface();
     if (!underground && !isNight(p.clock)) return;
     const base = p.nerve < 12 ? 4 : p.nerve < NERVE_SHAKEN ? 2 : 1;
@@ -3834,8 +3890,9 @@ export class Game {
       if (lit < 0.3) drain *= 1.5;
       if (underground && this.biome >= 4) drain *= 1.6;
       if (this.st.lens) drain *= 0.5;
-      // company in the dark steadies you
+      // company in the dark steadies you, and so does a Nightglass Tonic
       if (this.souls.some((s) => this.soulFollowing(s.kind))) drain *= 0.5;
+      if (this.buffs.nightglass > 0) drain *= 0.5;
       rate = -drain * this.mode.nerve;
     }
     p.nerve = Math.max(0, Math.min(NERVE_MAX, p.nerve + rate * dt));
@@ -3922,7 +3979,8 @@ export class Game {
     const lx = pl.cx / TILE;
     // your own eyes adjust a little to the dark
     const bonus = this.st.light - (this.st.oilMax > 0 ? (ITEMS[this.p.equip.lantern?.id ?? '']?.radius ?? 0) : 0);
-    lights.push({ x: lx, y: ly, r: 0.44, g: 0.4, b: 0.46, radius: (4.2 + Math.max(0, bonus)) * vault, cast: true });
+    const ng = this.buffs.nightglass > 0;
+    lights.push({ x: lx, y: ly, r: ng ? 0.5 : 0.44, g: ng ? 0.52 : 0.4, b: ng ? 0.64 : 0.46, radius: (4.2 + Math.max(0, bonus) + (ng ? 3.5 : 0)) * vault, cast: true });
     const hd = heldDef(this.p);
     if (hd?.id === 'torch' && !pl.dead) lights.push({ x: lx + pl.facing * 0.4, y: ly, r: 1.1, g: 0.74, b: 0.38, radius: 7 * flick * vault * dim, cast: true });
     if (this.st.oilMax > 0 && pl.oil > 0 && !pl.dead) {

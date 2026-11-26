@@ -12,9 +12,10 @@ import { WICK_X, WICK_Y } from './data/wick';
 import { audio } from './audio';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, lumenToNext } from './data/wick';
 import { MODES, MODE_IDS, ModeId, NERVE_FRAYED, NERVE_SHAKEN } from './data/nerve';
-import { CHAPTERS, GOALS, ROMAN } from './data/journal';
+import { CHAPTERS, GOALS, ROMAN, goalDone } from './data/journal';
 import { prefs, HUD_SIZES } from './prefs';
 import { LOST } from './data/lost';
+import { BREWS } from './data/brews';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -49,7 +50,10 @@ const EQUIP_SLOTS: { key: EquipKey; label: string; slot: string }[] = [
   { key: 'charm2', label: 'Charm', slot: 'charm' },
 ];
 
-type Panel = 'inv' | 'chest' | 'shop' | 'smith' | 'archive' | 'wick' | 'map' | 'pause' | 'victory' | 'journal' | null;
+/** Journal pages for bringing the lost home */
+const LOST_GOALS = { brannoc: 1, wren: 1, hesper: 1 };
+
+type Panel = 'inv' | 'chest' | 'shop' | 'smith' | 'archive' | 'still' | 'wick' | 'map' | 'pause' | 'victory' | 'journal' | null;
 
 export class UI implements UIHooks {
   game!: Game;
@@ -91,7 +95,7 @@ export class UI implements UIHooks {
     this.miniCtx = mc;
     [this.mapCanvas, this.mapCtx] = makeCanvas(WORLD_W, WORLD_H);
     this.mapImg = this.mapCtx.createImageData(WORLD_W, WORLD_H);
-    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill', 'bossName', 'tideChip', 'seek']) {
+    for (const k of ['hpFill', 'hpText', 'foodFill', 'foodText', 'oilFill', 'oilText', 'oilBar', 'nerveFill', 'nerveText', 'nerveBar', 'goal', 'hudHelp', 'coins', 'clock', 'wickChip', 'depth', 'biome', 'hotbar', 'heldName', 'skills', 'bossBar', 'bossFill', 'bossName', 'tideChip', 'seek', 'buffChip']) {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -273,6 +277,13 @@ export class UI implements UIHooks {
     const tideNote = g.p.tide ? 'Gloam Tide' : g.tideTonight() && !isNight(c) ? 'Tide tonight' : '';
     h.tideChip.textContent = tideNote;
     h.tideChip.style.display = tideNote ? '' : 'none';
+    const mmss = (t: number): string => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    const bf: string[] = [];
+    if (g.buffs.nightglass > 0) bf.push(`<i class="bn"></i>Nightglass ${mmss(g.buffs.nightglass)}`);
+    if (g.buffs.ward > 0) bf.push(`<i class="bw"></i>Gloamward ${mmss(g.buffs.ward)}`);
+    const bfHtml = bf.join('<b class="sep"></b>');
+    if (h.buffChip.innerHTML !== bfHtml) h.buffChip.innerHTML = bfHtml;
+    h.buffChip.style.display = bfHtml ? '' : 'none';
     h.clock.classList.toggle('night', daylight(c) < 0.5);
     const fl = g.flame;
     const nextNeed = fl > 0 && fl < MAX_FLAME ? FLAME[fl + 1].need : 0;
@@ -472,6 +483,9 @@ export class UI implements UIHooks {
         break;
       case 'archive':
         html = this.archiveHtml();
+        break;
+      case 'still':
+        html = this.stillHtml();
         break;
       case 'wick':
         html = this.wickHtml();
@@ -683,6 +697,28 @@ export class UI implements UIHooks {
     return html;
   }
 
+  private stillHtml(): string {
+    const g = this.game;
+    const p = g.p;
+    const lines = ['Breathe slow. The dark feeds on a racing heart.', 'Bring me what grows in the dark and I will brew you the nerve to face it.', 'Gloam motes make the best salve. Spite is a fine ingredient too.'];
+    let html = this.header("Hesper's Stillroom", 'Hesper Vell, apothecary', lines[Math.floor(g.time / 20) % lines.length], 'npc_herbalist');
+    html += '<div class="list brews">';
+    for (const b of BREWS) {
+      const def = ITEMS[b.id];
+      const have = count(p, b.id);
+      let ok = p.coins >= b.coins;
+      let costs = `<span class="cost ${p.coins >= b.coins ? 'ok' : 'no'}">${img(UI_ICON.coin)}${b.coins}</span>`;
+      for (const [id, n] of Object.entries(b.needs)) {
+        const c = count(p, id);
+        if (c < n) ok = false;
+        costs += `<span class="cost ${c >= n ? 'ok' : 'no'}" title="${esc(ITEMS[id]?.name ?? id)}">${img(ITEMS[id].icon)}${c}/${n}</span>`;
+      }
+      html += `<div class="li">${img(def.icon)}<div class="nm"><b>${esc(def.name)}</b>${have ? ` <span class="dim">\u00d7${have}</span>` : ''}<small>${esc(def.desc)}</small></div><div class="costs">${costs}</div><button data-a="brew" data-id="${b.id}" ${ok ? '' : 'disabled'}>Brew</button></div>`;
+    }
+    html += '</div><p class="hint">Hold a brew in your hotbar and click to drink it. Glowcaps grow in the tunnels, jade in the Grotto, and Gloam Motes are what Gloamlings leave behind.</p>';
+    return html;
+  }
+
   private archiveHtml(): string {
     const g = this.game;
     const p = g.p;
@@ -841,7 +877,9 @@ export class UI implements UIHooks {
       for (const goal of c.goals) {
         const i = k++;
         if (!open) continue;
-        if (i < at) html += `<div class="jg done"><i>\u2713</i><span>${goal.text}</span><small>+${goal.coins}</small></div>`;
+        // a page added after you had passed it (someone the Wick called in an older save) stays open until it is done
+        if (i < at && goal.id in LOST_GOALS && !goalDone(g, goal)) html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${goal.how}</p></div><small>still to do</small></div>`;
+        else if (i < at) html += `<div class="jg done"><i>\u2713</i><span>${goal.text}</span><small>+${goal.coins}</small></div>`;
         else if (i === at) {
           const [have, need] = goal.progress(g);
           html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${goal.how}</p>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><small>${fmt(have)} / ${fmt(need)}</small>` : ''}</div><small>+${goal.coins}</small></div>`;
@@ -1139,6 +1177,11 @@ export class UI implements UIHooks {
       case 'hone':
         g.sharpen(a);
         break;
+      case 'brew': {
+        const id = t.dataset.id ?? '';
+        if (g.brew(id)) this.toast(`Hesper brews you a ${ITEMS[id]?.name ?? id}.`, '#c8f0a0');
+        break;
+      }
       case 'cat': {
         const id = t.dataset.id ?? '';
         g.catalogue(id);

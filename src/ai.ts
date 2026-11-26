@@ -209,14 +209,14 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
       // lamp until your nerve goes; then it hunts you, but only while you stand in the dark
       const lit = g.light.at(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
       const plLit = g.litHere;
-      const hunting = !pl.dead && g.p.nerve < NERVE_SHAKEN && plLit < LIT && e.age > 1.2;
+      const hunting = !pl.dead && g.p.nerve < NERVE_SHAKEN && plLit < LIT && e.age > 1.2 && g.buffs.ward <= 0;
       let tx = 0;
       let ty = 0;
       const d = dist || 1;
       e.stateT -= dt;
       if (e.tide) {
         // tide-born: it pushes through the light to gnaw at the Wick's roots, and only turns on you up close
-        const near = !pl.dead && dist < 3 * TILE;
+        const near = !pl.dead && dist < 3 * TILE && g.buffs.ward <= 0;
         const gx = near ? pl.cx : WICK_GLOW.x * TILE + Math.cos(e.t * 1.7) * 34;
         const gy = near ? pl.cy : WICK_Y * TILE - 24 + Math.sin(e.t * 2.3) * 8;
         const ox = gx - e.cx;

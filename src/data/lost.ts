@@ -5,7 +5,7 @@
  */
 import type { BuildingKind } from '../state';
 
-export type LostKind = Extract<BuildingKind, 'forge' | 'archive'>;
+export type LostKind = Extract<BuildingKind, 'forge' | 'archive' | 'stillroom'>;
 
 export interface LostDef {
   name: string;
@@ -72,10 +72,30 @@ export const LOST: Record<LostKind, LostDef> = {
     home: "The Lantern Archive is open: relics, bounties and the delver's log.",
     arrive: 'Oh, the Wick! It is so much bigger than I remembered. Thank you.',
   },
+  stillroom: {
+    name: 'Hesper',
+    sprite: 'npc_herbalist',
+    walk: 'walk_herbalist',
+    depth: [150, 168],
+    call: 'A voice sings in the Crystal Hollows to keep the dark off. Hesper the apothecary is alive.',
+    found: "Oh, a living face! I've been brewing courage out of crystal-moss and spite. Get me home and I'll brew you better.",
+    lines: [
+      'Breathe slow. The dark feeds on a racing heart.',
+      'That glowcap there? Lovely in a draught.',
+      "Gloamlings can't abide salve made from their own motes. Poetic, isn't it.",
+      'My knees were not built for this many ladders.',
+      "When we're home I'm making soup. Proper soup.",
+      'Every crystal down here hums, if you listen.',
+    ],
+    dark: ['Steady now. Steady. Find us a light.', "I've no draught left for this. Light, love. Please."],
+    calls: ['Is that a lantern? Oh, please be a lantern.', 'Over here, by the fire!', "Hello-o? I'm not a ghost, I promise!"],
+    home: 'Her Stillroom is open: draughts for your nerve, tonics for your eyes, salve against the Gloam.',
+    arrive: "Fresh air and the Wick! I could weep. I'll put the kettle on.",
+  },
 };
 
 export function isLostKind(k: BuildingKind | undefined): k is LostKind {
-  return k === 'forge' || k === 'archive';
+  return k === 'forge' || k === 'archive' || k === 'stillroom';
 }
 
 /** someone waiting by a fire in the dark (x, y: the tile they stand on), or following you home */

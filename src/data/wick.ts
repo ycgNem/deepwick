@@ -33,7 +33,7 @@ export const FLAME: FlameLevel[] = [
   { name: 'Kindled', need: 0, radius: 9, settler: 'trade', perk: 'Old Pell comes home and opens his Trading Post. At night, nothing from the dark survives inside the flame.' },
   { name: 'Glowing', need: 80, radius: 12, settler: 'forge', perk: 'A hammer answers from the tunnels: find Brannoc the smith and lead him home to relight his forge. You can build Wickposts to light the way down and travel home.' },
   { name: 'Bright', need: 260, radius: 15, settler: 'archive', perk: 'A lantern answers from the Grotto: bring Wren home to reopen the Lantern Archive (relics, bounties and the delver’s log).' },
-  { name: 'Blazing', need: 650, radius: 18, perk: 'The Wick’s warmth stays with you: +20 max health.' },
+  { name: 'Blazing', need: 650, radius: 18, settler: 'stillroom', perk: 'The Wick’s warmth stays with you: +20 max health. A voice answers from the Crystal Hollows: bring Hesper the apothecary home to open her Stillroom.' },
   { name: 'Radiant', need: 1500, radius: 22, perk: 'Its light reaches the deep: your lantern burns half as much oil.' },
 ];
 export const MAX_FLAME = FLAME.length - 1;

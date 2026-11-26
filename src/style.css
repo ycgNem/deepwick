@@ -477,6 +477,34 @@ button.ghost {
   height: 100%;
   background: linear-gradient(#ffe08a, #d9a441);
 }
+.chip.buff {
+  color: #d8e4ff;
+  font-size: 12px;
+}
+.chip.buff i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+.chip.buff i.bn {
+  background: #8ab0ff;
+  box-shadow: 0 0 6px #8ab0ff;
+}
+.chip.buff i.bw {
+  background: #ffd070;
+  box-shadow: 0 0 6px #ffd070;
+}
+.chip.buff b.sep {
+  display: inline-block;
+  width: 8px;
+}
+.brews .li .costs {
+  margin: 0 8px 0 auto;
+  flex-wrap: nowrap;
+}
 #seek {
   margin-top: 6px;
   margin-left: auto;
