@@ -47,6 +47,7 @@ export const LUMEN: Record<string, number> = {
   gloammote: 6,
   glowfin: 12,
   jade: 12,
+  pearl: 15,
   gold: 10,
   essence: 18,
   amethyst: 18,

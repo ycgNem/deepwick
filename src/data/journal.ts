@@ -93,6 +93,13 @@ export const CHAPTERS: Chapter[] = [
         coins: 30,
       },
       {
+        id: 'canary',
+        text: 'Carry a canary',
+        how: 'Below about 22m, firedamp (mine gas) waits sealed in the rock, and an open flame sets it off. Old Pell sells a canary: in your pack it smells gas through rock and sings faster the closer it is. Your lantern never lights the gas; a torch does.',
+        progress: (g) => flag(!!g.p.seen.had_canary || count(g.p, 'canary') > 0),
+        coins: 40,
+      },
+      {
         id: 'offer',
         text: 'Feed the Wick something that glows',
         how: 'Glowcaps, jade, amethyst, glowfin and Gloam Motes all hold light. Press E at the Wick to offer them.',
@@ -131,6 +138,13 @@ export const CHAPTERS: Chapter[] = [
         how: 'A Furnace (16 Stone, 4 Wood, 3 Torches at a Workbench) turns 2 Copper ore into a bar. Copper is the orange-flecked rock.',
         progress: (g) => flag(!!g.p.seen.made_copperbar || count(g.p, 'copperbar') > 0 || g.st.pickTier >= 2),
         coins: 50,
+      },
+      {
+        id: 'prop',
+        text: 'Shore up bad ground',
+        how: 'Cracked rock is loose: dig out what holds it up and it comes down on you. Make Timber Props by hand (3 Wood makes 2) and stand one under a bad roof; its cap board holds two tiles either side. Wet, weeping rock means water behind it.',
+        progress: (g) => flag(!!g.p.seen.prop_placed),
+        coins: 35,
       },
       {
         id: 'lantern',

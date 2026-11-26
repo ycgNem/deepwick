@@ -81,14 +81,17 @@ export function loadGame(): { p: Progress; world: World } | null {
     const sk = data.p.skills as Partial<Progress['skills']>;
     if (!sk.fishing) sk.fishing = { lvl: 1, xp: 0 };
     const world = generateWorld(data.p.seed);
+    const aquifers = data.flood ? [] : world.aquifers;
+    const pocketTile = new Set(world.aquifers);
     // worlds saved before there was water get the cave pools wherever that space is still open
+    // (pools only: the sealed pockets are handled on their own below)
     const pools: number[] = [];
-    if (!data.water) for (let i = 0; i < world.fg.length; i++) if (world.fg[i] === B.WATER) pools.push(i);
+    if (!data.water) for (let i = 0; i < world.fg.length; i++) if (world.fg[i] === B.WATER && !pocketTile.has(i)) pools.push(i);
     const gassy: number[] = [];
     if (!data.gas) for (let i = 0; i < world.gas.length; i++) if (world.gas[i]) gassy.push(i);
-    // worlds from before bad ground keep the generated loose rock only where the rock is untouched
-    const genFg = data.loose ? null : world.fg.slice();
-    const aquifers = data.flood ? [] : world.aquifers;
+    // the world as it was made, for the migrations that ask "is this still untouched?"
+    const made = data.loose && data.gas ? null : world.fg.slice();
+    const genFg = data.loose ? null : made;
     unrle(data.fg, world.fg);
     if (data.wall) unrle(data.wall, world.wall);
     unrle(data.obj, world.obj);
@@ -99,31 +102,37 @@ export function loadGame(): { p: Progress; world: World } | null {
     if (data.placed) unrle(data.placed, world.placed);
     for (const i of pools) if (world.fg[i] === B.AIR && !world.obj[i] && !world.rail[i]) world.fg[i] = B.WATER;
     if (data.gas) unrle(data.gas, world.gas);
-    else {
-      // a world from before firedamp: open its seams where the rock is still as it was made
-      // (but never right beside a torch or fire the player has put up since, nor in their buildings)
-      for (const i of gassy) {
-        const x = i % world.w;
-        const y = (i - x) / world.w;
-        const def = BLOCKS[world.fg[i]];
-        if (!farFromFlame(world, x, y, 8) || world.placed[i] || world.placed[i - world.w]) world.gas[i] = 0;
-        else if (def.solid && !def.unbreakable && !world.obj[i] && !world.rail[i]) world.fg[i] = B.AIR;
-        else if (def.solid || world.fg[i] === B.WATER || world.fg[i] === B.LAVA) world.gas[i] = 0;
+    else if (made) {
+      // a world from before firedamp, one cloud at a time. A sealed seam opens only if it and the
+      // rock all round it are still as they were made; gas under a cave roof stays only where that
+      // air is still open, away from any fire you have lit, your buildings and where you stood.
+      for (const cloud of groups(gassy, world.w)) {
+        const set = new Set(cloud);
+        const seam = cloud.every((i) => ring4(i, world.w).every((j) => set.has(j) || BLOCKS[made[j]].solid));
+        if (seam) {
+          const whole = cloud.every((i) => untouchedRock(world, i)) && cloud.every((i) => ring8(i, world.w).every((j) => set.has(j) || untouchedRock(world, j)));
+          for (const i of cloud) {
+            if (whole) world.fg[i] = B.AIR;
+            else world.gas[i] = 0;
+          }
+          continue;
+        }
+        for (const i of cloud) {
+          const x = i % world.w;
+          const y = (i - x) / world.w;
+          const nearYou = Math.abs(x * 32 - data.p.px) < 12 * 32 && Math.abs(y * 32 - data.p.py) < 10 * 32;
+          if (world.fg[i] !== B.AIR || world.placed[i] || world.placed[i - world.w] || nearYou || !farFromFlame(world, x, y, 8)) world.gas[i] = 0;
+        }
       }
     }
     if (aquifers.length) {
-      // a world from before floodwater: fill its pockets where the rock all round is still whole
-      const pocket = new Set(aquifers);
-      for (const i of aquifers) {
-        const def = BLOCKS[world.fg[i]];
-        if (!def.solid || def.unbreakable || def.liquid || world.placed[i] || world.obj[i] || world.rail[i]) continue;
-        let sealed = true;
-        for (const j of [i - 1, i + 1, i - world.w, i + world.w, i - world.w - 1, i - world.w + 1, i + world.w - 1, i + world.w + 1]) {
-          if (pocket.has(j)) continue;
-          const d = BLOCKS[world.fg[j]];
-          if (!d.solid || d.liquid) sealed = false;
-        }
-        if (sealed) {
+      // a world from before floodwater: fill a pocket only if it and the rock all round it are
+      // still whole (never into a tunnel you have dug, never onto where you stand)
+      for (const pocket of groups(aquifers, world.w)) {
+        const set = new Set(pocket);
+        const whole = pocket.every((i) => untouchedRock(world, i)) && pocket.every((i) => ring8(i, world.w).every((j) => set.has(j) || untouchedRock(world, j)));
+        if (!whole) continue;
+        for (const i of pocket) {
           world.fg[i] = B.WATER;
           world.gas[i] = 0;
         }
@@ -143,6 +152,41 @@ export function loadGame(): { p: Progress; world: World } | null {
     console.warn('save load failed', e);
     return null;
   }
+}
+
+/** the given tiles, in 4-connected groups */
+function groups(tiles: number[], W: number): number[][] {
+  const set = new Set(tiles);
+  const seen = new Set<number>();
+  const out: number[][] = [];
+  for (const s of tiles) {
+    if (seen.has(s)) continue;
+    const g: number[] = [];
+    const q = [s];
+    seen.add(s);
+    while (q.length) {
+      const i = q.pop() as number;
+      g.push(i);
+      for (const j of [i - 1, i + 1, i - W, i + W]) {
+        if (set.has(j) && !seen.has(j)) {
+          seen.add(j);
+          q.push(j);
+        }
+      }
+    }
+    out.push(g);
+  }
+  return out;
+}
+
+const ring4 = (i: number, W: number): number[] => [i - 1, i + 1, i - W, i + W];
+const ring8 = (i: number, W: number): number[] => [i - 1, i + 1, i - W, i + W, i - W - 1, i - W + 1, i + W - 1, i + W + 1];
+
+/** natural rock nobody has touched: solid, not built, nothing standing in it */
+function untouchedRock(w: World, i: number): boolean {
+  if (i < 0 || i >= w.fg.length) return false;
+  const def = BLOCKS[w.fg[i]];
+  return def.solid && !def.liquid && !def.unbreakable && !w.placed[i] && !w.obj[i] && !w.rail[i];
 }
 
 export function deleteSave(): void {

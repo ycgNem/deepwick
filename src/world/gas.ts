@@ -79,6 +79,28 @@ export function stepGas(w: World, x0: number, y0: number, x1: number, y1: number
       const k = y * ww + x;
       if (!open[k]) continue;
       const v = cur[k];
+      // at the top of the window, gas still rises out of it into open air above
+      if (y === 0 && v > 0) {
+        const ai = (y0 - 1) * WORLD_W + x + x0;
+        if (gasOpen(w, ai) && v > g[ai]) {
+          const f = Math.floor((v - g[ai]) * 0.4);
+          if (f) {
+            nxt[k] -= f;
+            g[ai] = Math.min(255, g[ai] + f);
+          }
+        }
+      }
+      // and spreads out of its sides
+      if ((x === 0 || x === ww - 1) && v > 0) {
+        const si = (y + y0) * WORLD_W + x + x0 + (x === 0 ? -1 : 1);
+        if (gasOpen(w, si) && v > g[si]) {
+          const f = Math.trunc((v - g[si]) * 0.16);
+          if (f) {
+            nxt[k] -= f;
+            g[si] = Math.min(255, g[si] + f);
+          }
+        }
+      }
       // with the tile above: gas rises
       if (y > 0 && open[k - ww]) {
         const u = cur[k - ww];

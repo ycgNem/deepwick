@@ -68,6 +68,8 @@ export interface Progress {
   bossDefeated: boolean;
   /** the boss died but its reward was not handed over yet (saved so it can't be lost) */
   bossRewardPending?: boolean;
+  /** sealed water pockets that have already washed out their pearls (keyed by their first tile) */
+  pearled?: number[];
   /** you have owned a lantern before (a new one comes full, a re-equipped one does not) */
   hadLantern?: boolean;
   seen: Record<string, boolean>;

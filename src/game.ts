@@ -307,6 +307,9 @@ export class Game {
   private drownT = 0;
   private gaspReady = false;
   private gushT = 0;
+  /** the tiles of this world's sealed water pockets, as a set (built when first needed) */
+  private aqSet: Set<number> | null = null;
+  private aqWorld: World | null = null;
   parts: Particle[] = [];
   texts: FloatText[] = [];
   boss: Boss | null = null;
@@ -1369,7 +1372,7 @@ export class Game {
     this.wakeWater(x1, y1);
     // water further along the row was looking for a way out through the gap just left behind
     for (const d of [-1, 1]) {
-      for (let k = 2; k <= 12; k++) {
+      for (let k = 1; k <= 12; k++) {
         const b2 = w.get(x0 + d * k, y0);
         if (b2 === B.WATER) this.waterQ.add(w.idx(x0 + d * k, y0));
         else if (b2 !== B.AIR) break;
@@ -2379,6 +2382,7 @@ export class Game {
         }
         w.setObj(x, y, Obj.BEAM);
         w.decor[w.idx(x, y)] = 0;
+        this.p.seen.prop_placed = true;
         audio.play('door', { pitch: 0.75, vol: 0.55 });
         this.burst(x * TILE + 16, (propRoof(w, x, y) + 1) * TILE + 2, 8, ['#8a7f72', '#5a4a3a'], 50);
         this.hint('prop', 'The prop holds the roof over it, two tiles either side: loose rock it holds stays put while it stands. Knock it out and the roof is free to fall.');
@@ -3407,7 +3411,7 @@ export class Game {
     // beds are two tiles wide and you wake standing over the middle of them
     const bed = w.getObj(s.x, s.y) === Obj.BED;
     const cols = bed ? [s.x, s.x + 1] : [s.x];
-    const blocked = cols.some((x) => w.solid(x, s.y) || w.solid(x, s.y - 1));
+    const blocked = cols.some((x) => w.solid(x, s.y) || w.solid(x, s.y - 1) || w.get(x, s.y) === B.WATER || w.get(x, s.y - 1) === B.WATER);
     if (blocked) {
       const sp = worldSpawn(w);
       this.placePlayer(sp.x * TILE + TILE / 2, (sp.y + 1) * TILE);
@@ -3965,7 +3969,7 @@ export class Game {
       tiles++;
       mass += w.gas[i];
       for (const j of [i - 1, i + 1, i - W, i + W]) {
-        if (j < 0 || j >= w.gas.length || seen.has(j) || w.gas[j] < GAS_BURN) continue;
+        if (j < 0 || j >= w.gas.length || seen.has(j) || w.gas[j] < GAS_BURN || !gasOpen(w, j)) continue;
         seen.add(j);
         q.push(j);
       }
@@ -3991,7 +3995,7 @@ export class Game {
       for (const i of f.front) {
         this.burnTile(i, f);
         for (const j of [i - 1, i + 1, i - W, i + W]) {
-          if (j < 0 || j >= w.gas.length || f.seen.has(j) || w.gas[j] < GAS_BURN) continue;
+          if (j < 0 || j >= w.gas.length || f.seen.has(j) || w.gas[j] < GAS_BURN || !gasOpen(w, j)) continue;
           f.seen.add(j);
           next.push(j);
         }
@@ -4131,6 +4135,7 @@ export class Game {
       c.mood = 'none';
       return;
     }
+    this.p.seen.had_canary = true;
     const w = this.world;
     c.smell = sniff(w, tx, ty, 7);
     const here = w.inside(tx, ty) ? w.gas[w.idx(tx, ty)] : 0;
@@ -4239,6 +4244,7 @@ export class Game {
           } else if (!BLOCKS[b].solid) sealed = false;
         }
       }
+      if (seen.size >= 160) sealed = false;
       if (!sealed) continue;
       const cx = (x + 0.5) * TILE;
       const cy = (y + 0.5) * TILE;
@@ -4254,8 +4260,28 @@ export class Game {
         this.parts.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40, life, max: life, color: Math.random() < 0.5 ? '#9fd8ff' : '#e8f6ff', size: 2, grav: 600, glow: false });
       }
       this.hint('flood', 'Water bursts from the rock! A tunnel can fill over your head: climb out, or swim up with Space. Rock that looks dark and wet is weeping: there is water close behind it.');
+      this.washPearls(seen, cx, cy);
       return;
     }
+  }
+
+  /** a pocket that has never been broken into washes out the pearls that grew in it */
+  private washPearls(body: Set<number>, cx: number, cy: number): void {
+    const w = this.world;
+    if (this.aqWorld !== w || !this.aqSet) {
+      this.aqSet = new Set(w.aquifers);
+      this.aqWorld = w;
+    }
+    let key = -1;
+    for (const i of body) if (this.aqSet.has(i) && (key < 0 || i < key)) key = i;
+    if (key < 0) return;
+    const done = (this.p.pearled ??= []);
+    if (done.includes(key)) return;
+    done.push(key);
+    const n = 1 + Math.min(2, Math.floor(body.size / 20));
+    for (let k = 0; k < n; k++) this.drops.push(new Drop('pearl', 1, cx + (Math.random() - 0.5) * 16, cy + (Math.random() - 0.5) * 10));
+    this.burst(cx, cy, 10, ['#e8f4ff', '#cfe8ff', '#ffffff'], 90, true);
+    this.hint('pearl', 'Cave pearls! They grow in water sealed in the rock and hold a soft light: the Wick takes them as Lumen. Weeping rock is worth breaking into, if you are ready for the flood.');
   }
 
   /** your head under water: you hold your breath, then you drown */
@@ -4368,7 +4394,8 @@ export class Game {
     // rubble buries rails and knocks small things flat; it will not land on anything bigger
     const o = w.obj[i];
     const crushable = !o || CRUSHABLE.has(o);
-    const room = !BLOCKS[fg].solid && fg !== B.LAVA && crushable && !onPlayer && !this.isProtected(x, y);
+    const onEnemy = this.enemies.some((e) => !e.dead && Math.abs(e.cx - cx) < 16 + e.w / 2 && e.y < (y + 1) * TILE && e.y + e.h > y * TILE);
+    const room = fg === B.AIR && crushable && !onPlayer && !onEnemy && !this.isProtected(x, y);
     if (room && !def.ore && !def.light) {
       if (o) this.breakObj(x, y, true);
       if (w.rail[i]) {
