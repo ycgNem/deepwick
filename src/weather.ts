@@ -41,6 +41,8 @@ export class Weather {
   private boltT = 8;
   private thunder: { t: number; near: boolean }[] = [];
   private lastClock = -1;
+  /** where the last bolt came down, for the thunder's caption */
+  private lastStrike: { x: number; y: number } | undefined;
 
   load(s: WeatherSave | undefined): void {
     if (!s || !(s.kind in RAIN)) return;
@@ -171,6 +173,7 @@ export class Weather {
     } else this.flash = Math.max(this.flash, 0.35);
     // the sound comes after the light, later the further off it is
     const d = Math.abs(x - pl.cx) / TILE;
+    this.lastStrike = { x, y: ground };
     this.thunder.push({ t: 0.15 + Math.min(2.5, d / 40), near: near && d < 50 });
   }
 
@@ -180,7 +183,7 @@ export class Weather {
     const under = Math.floor(pl.cy / TILE) - g.world.surface[tx];
     if (under > 30) return;
     const muffle = under > 2 ? 0.35 : 1;
-    audio.play(near && under <= 2 ? 'thunder' : 'thunderfar', { vol: (near ? 0.9 : 0.6) * muffle, pitch: under > 2 ? 0.8 : 1 });
+    audio.play(near && under <= 2 ? 'thunder' : 'thunderfar', { vol: (near ? 0.9 : 0.6) * muffle, pitch: under > 2 ? 0.8 : 1, at: this.lastStrike });
     if (near && under <= 2) {
       g.shake = Math.max(g.shake, 4);
       // out in a storm at night, a crack like that frays you

@@ -131,7 +131,12 @@ class AudioSystem {
     if (el) el.volume = music;
   }
 
-  play(id: SfxId, opts: { vol?: number; pitch?: number; vary?: number } = {}): void {
+  /** told of every sound as it plays (even with the volume down), for the on-screen captions */
+  onCue: ((id: SfxId, vol: number, at?: { x: number; y: number }) => void) | null = null;
+
+  /** `at` is where in the world the sound comes from, for the caption's arrow */
+  play(id: SfxId, opts: { vol?: number; pitch?: number; vary?: number; at?: { x: number; y: number } } = {}): void {
+    this.onCue?.(id, opts.vol ?? 1, opts.at);
     const ctx = this.ctx;
     const buf = this.buffers.get(id);
     if (!ctx || !buf || !this.sfxGain) return;

@@ -359,7 +359,7 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
         const chase = !pl.dead && dist < 26 * TILE;
         if (e.mode === 0 && chase && e.age > 0.3 && dist < 16 * TILE) {
           // it moves, and you hear it before you see it
-          audio.play('lurch', { vol: Math.max(0.15, 0.65 - dist / (30 * TILE)) });
+          audio.play('lurch', { vol: Math.max(0.15, 0.65 - dist / (30 * TILE)), at: { x: e.cx, y: e.cy } });
           e.shootT = 0.9;
         }
         e.mode = 1;
@@ -371,7 +371,7 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
         e.shootT -= dt;
         if (chase && e.shootT <= 0 && Math.abs(e.vx) > 30 && dist < 14 * TILE) {
           e.shootT = 0.9;
-          audio.play('lurch', { vol: Math.max(0.08, 0.45 - dist / (30 * TILE)), pitch: 0.9 + Math.random() * 0.2 });
+          audio.play('lurch', { vol: Math.max(0.08, 0.45 - dist / (30 * TILE)), pitch: 0.9 + Math.random() * 0.2, at: { x: e.cx, y: e.cy } });
         }
         // no way through (it has not gained on you in three seconds)? it steps out of the dark
         // somewhere else, nearer you

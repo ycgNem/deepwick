@@ -321,8 +321,53 @@ export class UI implements UIHooks {
     }
   }
 
+  // ------------------------------------------------------------------ captions
+  private caps = new Map<string, { el: HTMLElement; t: number }>();
+
+  /** write a sound out above the hotbar: refreshed if it is already showing, oldest dropped past four */
+  caption(key: string, text: string, warn: boolean, dir: string): void {
+    const box = document.getElementById('captions');
+    if (!box) return;
+    let c = this.caps.get(key);
+    if (c) this.caps.delete(key);
+    else {
+      const el = document.createElement('div');
+      c = { el, t: 0 };
+    }
+    const arrow = (d: string): string => `<i class="ar ${d}"></i>`;
+    const html = `${dir === 'l' ? arrow('l') : ''}<span>${text}</span>${dir && dir !== 'l' ? arrow(dir) : ''}`;
+    if (c.el.innerHTML !== html) c.el.innerHTML = html;
+    c.el.className = `cap${warn ? ' warn' : ''}`;
+    box.appendChild(c.el);
+    c.t = 2.6;
+    this.caps.set(key, c);
+    while (this.caps.size > 4) {
+      const first = this.caps.keys().next().value;
+      if (first === undefined) break;
+      this.caps.get(first)?.el.remove();
+      this.caps.delete(first);
+    }
+  }
+
+  clearCaptions(): void {
+    for (const c of this.caps.values()) c.el.remove();
+    this.caps.clear();
+  }
+
+  private tickCaptions(dt: number): void {
+    for (const [k, c] of this.caps) {
+      c.t -= dt;
+      if (c.t < 0.5) c.el.classList.add('fade');
+      if (c.t <= 0) {
+        c.el.remove();
+        this.caps.delete(k);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ HUD
   update(dt: number): void {
+    if (this.caps.size) this.tickCaptions(dt);
     this.hudT -= dt;
     if (this.hudT > 0) return;
     this.hudT = 0.1;
@@ -1023,7 +1068,7 @@ export class UI implements UIHooks {
     const s = Math.round(audio.sfxVolume * 100);
     return `<div class="hd"><div><h2>Paused</h2><p class="line">The mountain will wait.</p></div></div>
       <div class="settings"><label>Music <input type="range" min="0" max="100" value="${m}" data-set="music"></label><label>Sound <input type="range" min="0" max="100" value="${s}" data-set="sfx"></label></div>
-      <div class="settings diff"><span>Options</span><button class="${prefs.shake ? 'on' : ''}" data-a="pref" data-id="shake">Screen shake &amp; flashes: ${prefs.shake ? 'On' : 'Off'}</button><button class="${prefs.hints ? 'on' : ''}" data-a="pref" data-id="hints">Tutorial hints: ${prefs.hints ? 'On' : 'Off'}</button><button data-a="hudsize">HUD size: ${Math.round(prefs.hud * 100)}%</button><button data-a="fullscreen">${document.fullscreenElement ? 'Leave fullscreen' : 'Fullscreen'}</button></div>
+      <div class="settings diff"><span>Options</span><button class="${prefs.shake ? 'on' : ''}" data-a="pref" data-id="shake">Screen shake &amp; flashes: ${prefs.shake ? 'On' : 'Off'}</button><button class="${prefs.hints ? 'on' : ''}" data-a="pref" data-id="hints">Tutorial hints: ${prefs.hints ? 'On' : 'Off'}</button><button class="${prefs.captions ? 'on' : ''}" data-a="pref" data-id="captions">Sound captions: ${prefs.captions ? 'On' : 'Off'}</button><button data-a="hudsize">HUD size: ${Math.round(prefs.hud * 100)}%</button><button data-a="fullscreen">${document.fullscreenElement ? 'Leave fullscreen' : 'Fullscreen'}</button></div>
       <div class="settings diff"><span>Difficulty</span>${MODE_IDS.map((id) => `<button class="${this.game.p.mode === id ? 'on' : ''}" data-a="mode" data-id="${id}">${MODES[id].name}</button>`).join('')}<small>${MODES[this.game.mode.id].blurb}</small></div>
       <div class="controls">${this.controlsHtml()}</div>
       <div class="row-actions"><button class="big" data-a="close">Resume</button><button data-a="journal">Journal</button><button data-a="save">Save now</button><button class="ghost" data-a="quit">Save &amp; quit to title</button></div>`;
@@ -1444,6 +1489,10 @@ export class UI implements UIHooks {
         const id = t.dataset.id;
         if (id === 'shake') prefs.shake = !prefs.shake;
         else if (id === 'hints') prefs.hints = !prefs.hints;
+        else if (id === 'captions') {
+          prefs.captions = !prefs.captions;
+          if (!prefs.captions) this.clearCaptions();
+        }
         this.onPrefs?.();
         break;
       }

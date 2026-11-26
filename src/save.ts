@@ -289,11 +289,12 @@ export interface Settings {
   shake?: boolean;
   hints?: boolean;
   hud?: number;
+  captions?: boolean;
 }
 export function loadSettings(): Settings {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
-    return { music: s.music ?? 0.45, sfx: s.sfx ?? 0.7, shake: s.shake ?? true, hints: s.hints ?? true, hud: s.hud ?? 1 };
+    return { music: s.music ?? 0.45, sfx: s.sfx ?? 0.7, shake: s.shake ?? true, hints: s.hints ?? true, hud: s.hud ?? 1, captions: s.captions };
   } catch {
     return { music: 0.45, sfx: 0.7 };
   }

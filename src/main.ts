@@ -53,6 +53,8 @@ async function boot(): Promise<void> {
   prefs.shake = s.shake ?? true;
   prefs.hints = s.hints ?? true;
   prefs.hud = s.hud ?? 1;
+  // phones are so often played with the sound off that captions start on there
+  prefs.captions = s.captions ?? window.matchMedia('(pointer: coarse)').matches;
   applyPrefs();
   ui.onSettings = (music, sfx) => {
     audio.setVolumes(music, sfx);
@@ -66,6 +68,8 @@ async function boot(): Promise<void> {
     if (game && ui) saveGame(game.saveSnapshot(ui.cursorStack()), game.world, metaOf(game));
     if (game) game.retired = true;
     game = null;
+    audio.onCue = null;
+    ui?.clearCaptions();
     document.body.classList.remove('cine');
     hud.classList.remove('show');
     audio.music('none');
@@ -253,6 +257,7 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   document.body.classList.remove('cine');
   const g = new Game(input, ui, loaded.p, loaded.world);
   game = g;
+  audio.onCue = (id, vol, at) => g.cue(id, vol, at);
   input.touchUse = (x, y): boolean => g.touchWantsUse(x, y);
   if (import.meta.env.DEV) Object.assign(window as object, { __game: g, __renderer: renderer, __audio: audio });
   ui.attach(g);

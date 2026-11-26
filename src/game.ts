@@ -21,6 +21,8 @@ import { GUTTER_NEAR, GUTTER_WARN, GUTTER_LEN, GUTTER_DIM, LAMPLESS_CAP, MINERS,
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import { Ending, DAWN_RADIUS, DAWN_FROM, DAWN_TO } from './ending';
 import { Weather } from './weather';
+import { CAPTIONS } from './captions';
+import type { SfxId } from './audio';
 import {
   Progress,
   Stats,
@@ -106,6 +108,8 @@ export interface UIHooks {
   victory(): void;
   /** a big centred title card */
   banner?(title: string, sub: string): void;
+  /** a sound written out on screen; dir is where it comes from ('l', 'r', 'u', 'd' or '') */
+  caption?(key: string, text: string, warn: boolean, dir: string): void;
 }
 
 export type HoverKind = 'none' | 'block' | 'tree' | 'obj' | 'decor' | 'wall' | 'rail';
@@ -3703,7 +3707,7 @@ export class Game {
       }
       if (e.def.shade && !e.dead) this.updateShade(e, dt);
       if (e.def.behavior === 'still' && e.mode === 0 && !e.seen) this.seeLampless(e);
-      if (e.def.id === 'hollow' && Math.random() < dt * 0.08 && Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 12 * TILE) audio.play('groan', { vol: 0.35 });
+      if (e.def.id === 'hollow' && Math.random() < dt * 0.08 && Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 12 * TILE) audio.play('groan', { vol: 0.35, at: { x: e.cx, y: e.cy } });
       if (Math.hypot(e.cx - pl.cx, e.cy - pl.cy) > 46 * TILE) e.dead = true;
     }
     this.enemies = this.enemies.filter((e) => !e.dead);
@@ -3725,7 +3729,7 @@ export class Game {
     const onScreen = e.cx > this.camX && e.cx < this.camX + this.viewW && e.y < this.camY + this.viewH && e.y + e.h > this.camY;
     if (d > 11 * TILE || !onScreen || pl.dead) return;
     e.seen = true;
-    audio.play('moan', { vol: Math.max(0.25, 0.7 - d / (24 * TILE)) });
+    audio.play('moan', { vol: Math.max(0.25, 0.7 - d / (24 * TILE)), at: { x: e.cx, y: e.cy } });
     this.hint(
       'lampless',
       'A Lampless: a miner whose lamp went out. Light holds it still, but in the dark it comes for you, and near one your own flame gutters. Pin it with a torch on the wall, or strike it while it cowers.',
@@ -4314,7 +4318,7 @@ export class Game {
     // how much gas there was, not how far it had spread, is how hard it goes up
     const size = Math.round(mass / 120);
     this.flash = { front: [i0], seen: new Set([i0]), n: 0, size, t: 0, ox: (tx + 0.5) * TILE, oy: (ty + 0.5) * TILE, hitPlayer: false, hit: new Set() };
-    audio.play('whoomph', { pitch: size > 80 ? 0.8 : size > 30 ? 0.95 : 1.15, vol: Math.min(1, 0.55 + size / 120), vary: 0.05 });
+    audio.play('whoomph', { pitch: size > 80 ? 0.8 : size > 30 ? 0.95 : 1.15, vol: Math.min(1, 0.55 + size / 120), vary: 0.05, at: { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE } });
     if (size > 60) audio.play('explosion', { pitch: 0.6, vol: 0.6 });
     this.shake = Math.max(this.shake, Math.min(16, 4 + size / 7));
     this.hint('firedamp_boom', 'Firedamp! An open flame set the gas off. Keep torches, campfires and lamps away from the haze: your lantern is a safety lamp and will not light it.');
@@ -4417,7 +4421,7 @@ export class Game {
     }
     if (most < 100) return;
     if (this.hissT <= 0) {
-      audio.play('hiss', { vol: 0.7 });
+      audio.play('hiss', { vol: 0.7, at: { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE } });
       this.hissT = 1.5;
     }
     for (let k = 0; k < 10; k++) {
@@ -4534,6 +4538,8 @@ export class Game {
     const tx = Math.floor(pl.cx / TILE);
     const ty = Math.floor(pl.cy / TILE);
     let nearest = 1e9;
+    let nx = tx;
+    let ny = ty;
     for (let y = Math.max(1, ty - 26); y < Math.min(w.h - 1, ty + 26); y++) {
       for (let x = Math.max(0, tx - 40); x < Math.min(W, tx + 40); x++) {
         const i = y * W + x;
@@ -4548,11 +4554,16 @@ export class Game {
         }
         if (supported(w, x, y)) continue;
         this.working.set(i, 0.9 + Math.random() * 0.7);
-        nearest = Math.min(nearest, Math.hypot(x - tx, y - ty));
+        const d = Math.hypot(x - tx, y - ty);
+        if (d < nearest) {
+          nearest = d;
+          nx = x;
+          ny = y;
+        }
       }
     }
     if (nearest < 18 && this.creakT <= 0) {
-      audio.play('creak', { vol: Math.max(0.3, 0.9 - nearest * 0.035), pitch: 0.9 + Math.random() * 0.2 });
+      audio.play('creak', { vol: Math.max(0.3, 0.9 - nearest * 0.035), pitch: 0.9 + Math.random() * 0.2, at: { x: (nx + 0.5) * TILE, y: (ny + 0.5) * TILE } });
       this.creakT = 1.4;
       if (nearest < 10) this.shake = Math.max(this.shake, 1.5);
     }
@@ -4586,7 +4597,7 @@ export class Game {
       const cx = (x + 0.5) * TILE;
       const cy = (y + 0.5) * TILE;
       if (this.gushT <= 0) {
-        audio.play('gush', { vol: Math.min(1, 0.5 + seen.size / 60) });
+        audio.play('gush', { vol: Math.min(1, 0.5 + seen.size / 60), at: { x: cx, y: cy } });
         this.gushT = 1.5;
       }
       this.shake = Math.max(this.shake, 3);
@@ -4754,7 +4765,7 @@ export class Game {
     this.burst(cx, cy + 10, 14, [def.color, '#8a7f72', '#3a3030'], 120);
     const d = Math.hypot(pl.cx - cx, pl.cy - cy) / TILE;
     if (d < 26) {
-      audio.play('rockfall', { vol: Math.max(0.15, 1 - d * 0.04), pitch: 0.85 + Math.random() * 0.3 });
+      audio.play('rockfall', { vol: Math.max(0.15, 1 - d * 0.04), pitch: 0.85 + Math.random() * 0.3, at: { x: cx, y: cy } });
       this.shake = Math.max(this.shake, Math.max(0, 6 - d * 0.4));
     }
     if (d < 12 && !this.p.seen.cavein) {
@@ -5161,6 +5172,19 @@ export class Game {
     const wx = this.weather;
     audio.bed('meadow_day', out * day * (1 - 0.9 * wx.rain) * (1 - 0.5 * wx.fog), 0.34);
     audio.bed('meadow_night', out * (1 - day) * (1 - 0.8 * wx.rain) * (this.p.tide ? 0.15 : 1), 0.32);
+  }
+
+  /** a sound as it plays: if it means something, write it out on screen, pointing where it came from */
+  cue(id: SfxId, vol: number, at?: { x: number; y: number }): void {
+    const c = CAPTIONS[id];
+    if (!c || vol < 0.1 || !prefs.captions || !this.ui.caption) return;
+    let dir = '';
+    if (at) {
+      const dx = at.x - this.player.cx;
+      const dy = at.y - this.player.cy;
+      if (Math.abs(dx) > 3 * TILE || Math.abs(dy) > 3 * TILE) dir = Math.abs(dx) >= Math.abs(dy) * 0.8 ? (dx < 0 ? 'l' : 'r') : dy < 0 ? 'u' : 'd';
+    }
+    this.ui.caption(id, c.text, !!c.warn, dir);
   }
 
   /** how much of the open valley you can hear: all of it up top, a little near it, none deep down */

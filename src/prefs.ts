@@ -6,9 +6,11 @@ export interface Prefs {
   hints: boolean;
   /** HUD and menu size */
   hud: number;
+  /** important sounds written out on screen */
+  captions: boolean;
 }
 
-export const prefs: Prefs = { shake: true, hints: true, hud: 1 };
+export const prefs: Prefs = { shake: true, hints: true, hud: 1, captions: false };
 
 export const HUD_SIZES = [0.85, 1, 1.15, 1.3];
 
