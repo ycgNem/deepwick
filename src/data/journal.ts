@@ -194,6 +194,13 @@ export const CHAPTERS: Chapter[] = [
         coins: 120,
       },
       {
+        id: 'lampless',
+        text: 'Lay a Lampless to rest',
+        how: 'From the Crystal Hollows down, the Lampless walk: lost miners who move only in the dark. Light holds one where it stands; near one, your own flame gutters and it lurches closer. Pin it with a torch on the wall and strike it while it cowers, then take its Cold Lamp home to the Wick.',
+        progress: (g) => flag(!!g.p.seen.kill_lampless),
+        coins: 60,
+      },
+      {
         id: 'blazing',
         text: 'Raise the Wick to Blazing',
         how: `Offer ${FLAME[4].need} Lumen in all. A Blazing Wick hardens you (+20 health), and its light reaches the ${BIOMES[2].name}.`,

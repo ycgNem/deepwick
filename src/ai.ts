@@ -4,8 +4,10 @@ import { TILE } from './constants';
 import { audio } from './audio';
 import { LIT, NERVE_SHAKEN } from './data/nerve';
 import { WICK_GLOW, WICK_Y } from './data/wick';
+import { HELD } from './data/lampless';
+import { BLOCKS } from './data/blocks';
 
-function los(g: Game, ax: number, ay: number, bx: number, by: number): boolean {
+export function los(g: Game, ax: number, ay: number, bx: number, by: number): boolean {
   const dx = bx - ax;
   const dy = by - ay;
   const steps = Math.ceil(Math.hypot(dx, dy) / (TILE / 3));
@@ -14,6 +16,57 @@ function los(g: Game, ax: number, ay: number, bx: number, by: number): boolean {
     if (g.world.solidAtPx(ax + dx * t, ay + dy * t)) return false;
   }
   return true;
+}
+
+/**
+ * A Lampless that cannot reach you walks out of the dark somewhere else: open floor in the same
+ * cave as you (found by feeling out through the open air from where you stand), well out of any
+ * light, and no further from you than it was.
+ */
+function stepThroughDark(g: Game, e: Enemy, now: number): boolean {
+  const pl = g.player;
+  const w = g.world;
+  const ptx = Math.floor(pl.cx / TILE);
+  const pty = Math.floor((pl.y + pl.h - 1) / TILE);
+  const open = (x: number, y: number): boolean => w.inside(x, y) && !w.solid(x, y) && !BLOCKS[w.get(x, y)].liquid;
+  const spots: [number, number][] = [];
+  if (open(ptx, pty)) {
+    const seen = new Set<number>([w.idx(ptx, pty)]);
+    const q: [number, number][] = [[ptx, pty]];
+    for (let h = 0; h < q.length && q.length < 1600; h++) {
+      const [x, y] = q[h];
+      const ddx = x - ptx;
+      const ddy = y - pty;
+      const d = Math.hypot(ddx, ddy);
+      if (d >= 6 && w.solid(x, y + 1) && open(x, y - 1) && g.light.at(x, y) < 0.2 && g.light.at(x, y - 1) < 0.2 && !g.inWickLight(x * TILE, y * TILE)) spots.push([x, y]);
+      for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+        if (Math.abs(nx - ptx) > 14 || Math.abs(ny - pty) > 10 || !open(nx, ny)) continue;
+        const k = w.idx(nx, ny);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        q.push([nx, ny]);
+      }
+    }
+  }
+  for (let tries = 0; tries < 12 && spots.length; tries++) {
+    const [tx, ty] = spots[Math.floor(Math.random() * spots.length)];
+    const nx = tx * TILE + TILE / 2;
+    const ny = (ty + 1) * TILE - 1 - e.h / 2;
+    const d = Math.hypot(nx - pl.cx, ny - pl.cy);
+    if (d > now) continue;
+    e.x = nx - e.w / 2;
+    e.y = (ty + 1) * TILE - 1 - e.h;
+    e.vx = 0;
+    e.vy = 0;
+    e.best = d;
+    e.stuck = 0;
+    e.lost = 0;
+    return true;
+  }
+  // nowhere yet: try again a little later; after long enough it gives up and goes back to the dark
+  e.stuck = 1.5;
+  if (++e.lost > 10) e.dead = true;
+  return false;
 }
 
 export function updateEnemy(g: Game, e: Enemy, dt: number): void {
@@ -272,6 +325,62 @@ export function updateEnemy(g: Game, e: Enemy, dt: number): void {
       e.x += e.vx * dt * thick;
       e.y += e.vy * dt * thick;
       e.facing = Math.sign(dx) || 1;
+      break;
+    }
+    case 'still': {
+      // a Lampless: light on it holds it rooted, cowering; in the dark it comes for you, fast,
+      // climbing whatever it cannot step over and up the sides of a shaft after you
+      applyGravity(e, dt);
+      const tx = Math.floor(e.cx / TILE);
+      const lit = Math.max(g.light.at(tx, Math.floor((e.y + 10) / TILE)), g.light.at(tx, Math.floor(e.cy / TILE)));
+      const held = lit >= HELD || g.inWickLight(e.cx, e.cy);
+      if (held) {
+        if (e.mode !== 0) {
+          e.mode = 0;
+          e.stateT = 0;
+        }
+        e.stateT += dt;
+        // still held with your flame at its lowest: a torch, a lamp or the cave's own glow has it
+        if (g.gutter > 0 && g.flameReach() <= 0.35) e.pinned = true;
+        if (e.knock <= 0) e.vx = 0;
+        if (Math.abs(dx) > 4) e.facing = Math.sign(dx);
+      } else {
+        const chase = !pl.dead && dist < 26 * TILE;
+        if (e.mode === 0 && chase && e.age > 0.3 && dist < 16 * TILE) {
+          // it moves, and you hear it before you see it
+          audio.play('lurch', { vol: Math.max(0.15, 0.65 - dist / (30 * TILE)) });
+          e.shootT = 0.9;
+        }
+        e.mode = 1;
+        e.pinned = false;
+        const dir = chase && Math.abs(dx) > 6 ? Math.sign(dx) : 0;
+        const speed = sp * (g.gutter > 0 ? 1.3 : 1);
+        if (e.knock <= 0) e.vx += (dir * speed - e.vx) * Math.min(1, dt * 10);
+        if (dir) e.facing = dir;
+        e.shootT -= dt;
+        if (chase && e.shootT <= 0 && Math.abs(e.vx) > 30 && dist < 14 * TILE) {
+          e.shootT = 0.9;
+          audio.play('lurch', { vol: Math.max(0.08, 0.45 - dist / (30 * TILE)), pitch: 0.9 + Math.random() * 0.2 });
+        }
+        // no way through (it has not gained on you in three seconds)? it steps out of the dark
+        // somewhere else, nearer you
+        if (!chase || dist < e.best - 12) {
+          e.best = dist;
+          e.stuck = 0;
+        } else {
+          e.stuck += dt;
+          if (e.stuck > 3) {
+            e.best = dist;
+            if (stepThroughDark(g, e, dist)) return;
+          }
+        }
+      }
+      const r = moveBody(g.world, e, dt);
+      if (!held && e.knock <= 0 && !pl.dead) {
+        const ty = Math.floor(e.cy / TILE);
+        const shaft = dy < -1.5 * TILE && Math.abs(dx) < 1.5 * TILE && (g.world.solid(tx - 1, ty) || g.world.solid(tx + 1, ty));
+        if (r.hitX || shaft) e.vy = Math.min(e.vy, -210);
+      }
       break;
     }
     case 'phaser': {

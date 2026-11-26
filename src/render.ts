@@ -373,6 +373,12 @@ export class Renderer {
       ctx.fillStyle = `rgba(20,0,30,${Math.min(0.5, g.gloom * 0.25)})`;
       ctx.fillRect(0, 0, vw, vh);
     }
+    // near a Lampless your flame gutters: the whole cave sinks for a moment
+    const reach = g.flameReach();
+    if (reach < 1) {
+      ctx.fillStyle = `rgba(3,2,8,${((1 - reach) * 0.55).toFixed(3)})`;
+      ctx.fillRect(0, 0, vw, vh);
+    }
     const pl = g.player;
     if (pl.hurtT > 0) {
       ctx.fillStyle = `rgba(160,0,0,${pl.hurtT * (prefs.shake ? 0.8 : 0.3)})`;
@@ -1058,9 +1064,17 @@ export class Renderer {
       const fs = e.def.size;
       const frames = Math.floor(img.width / fs);
       const moving = Math.abs(e.vx) > 8 || !e.onGround || e.def.behavior === 'flyer';
-      const f = moving || e.def.behavior !== 'critter' ? 1 + (Math.floor(e.animT * e.def.fps) % (frames - 1)) : 0;
+      let f = moving || e.def.behavior !== 'critter' ? 1 + (Math.floor(e.animT * e.def.fps) % (frames - 1)) : 0;
+      let jx = 0;
+      if (e.def.behavior === 'still') {
+        if (e.mode === 0) {
+          // caught in the light: it flinches, arm over its eyes, and trembles where it stands
+          f = 0;
+          jx = e.stateT < 0.3 ? Math.round(Math.sin(g.time * 70) * 1.5) : Math.random() < 0.06 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+        } else if (Math.abs(e.vx) < 10 && e.onGround) f = 1;
+      }
       const grounded = e.def.behavior !== 'flyer' && e.def.behavior !== 'shooter' && e.def.behavior !== 'phaser';
-      const x = Math.round(e.cx - fs / 2 - camX);
+      const x = Math.round(e.cx - fs / 2 - camX) + jx;
       const y = grounded ? Math.round(e.y + e.h - fs + 2 - camY) : Math.round(e.y + e.h - fs + (fs - e.h) * 0.25 - camY);
       const flip = e.def.facesRight ? e.facing < 0 : e.facing > 0;
       ctx.save();

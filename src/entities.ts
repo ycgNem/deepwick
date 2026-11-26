@@ -193,6 +193,17 @@ export class Enemy implements Body {
   burn = 0;
   /** sent by a Gloam Tide: it goes for the Wick, not for you */
   tide = false;
+  /** a Lampless has been seen in your light (it moans, once) */
+  seen = false;
+  /** how hard it hits, against its kind's usual (deeper ones hit harder) */
+  power = 1;
+  /** a Lampless on the hunt: the closest it has come, and how long since it last got closer */
+  best = Infinity;
+  stuck = 0;
+  /** times in a row it found nowhere to step out of the dark */
+  lost = 0;
+  /** a Lampless still held while your flame was at its lowest: another light has it pinned */
+  pinned = false;
 
   constructor(
     public def: EnemyDef,

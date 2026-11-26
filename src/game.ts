@@ -17,6 +17,7 @@ import { forTouch } from './touch';
 import { stepGas, sniff, gasOpen, isFlameObj, GAS_IGNITE, GAS_BURN, GAS_DENSE } from './world/gas';
 import { supported, propRoof, PROP_MAX, rockDamage } from './world/cavein';
 import { BREATH_MAX } from './world/flood';
+import { GUTTER_NEAR, GUTTER_WARN, GUTTER_LEN, GUTTER_DIM, LAMPLESS_CAP, MINERS, gutterGap } from './data/lampless';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
@@ -44,7 +45,7 @@ import {
 import { Player, Enemy, Drop, Projectile, Bomb, Particle, FloatText, moveBody, applyGravity, overlaps, inLiquid, touches } from './entities';
 import { Input } from './input';
 import { audio, MusicId } from './audio';
-import { updateEnemy } from './ai';
+import { updateEnemy, los } from './ai';
 import { Boss, BOSS_HP } from './boss';
 import { Rng } from './rng';
 
@@ -307,6 +308,12 @@ export class Game {
   private drownT = 0;
   private gaspReady = false;
   private gushT = 0;
+  /** the Lampless: seconds your flame has left low, the time until it next gutters, and whether it has started to sputter */
+  gutter = 0;
+  private gutterT = 4;
+  private gutterWarned = false;
+  /** seconds before another Lampless may come out of the dark */
+  private lamplessT = 25;
   /** the tiles of this world's sealed water pockets, as a set (built when first needed) */
   private aqSet: Set<number> | null = null;
   private aqWorld: World | null = null;
@@ -520,6 +527,7 @@ export class Game {
       this.updateFishing(dt);
       this.flowWater(dt);
       this.updateEnemies(dt);
+      this.updateGutter(dt);
       this.updateTide(dt);
       this.updateSouls(dt);
       this.tickBuffs(dt);
@@ -1870,6 +1878,10 @@ export class Game {
       if (e.mode === 0) e.mode = 1;
     }
     if (e.def.behavior === 'critter') e.mode = 1;
+    if (e.def.behavior === 'still') {
+      e.vx *= e.mode === 0 ? 0.1 : 0.4;
+      e.vy = Math.min(0, e.vy) * 0.3;
+    }
     this.text(e.cx, e.y - 4, String(Math.max(1, Math.round(dmg))), crit ? '#ffd75a' : '#ffffff', crit);
     this.burst(e.cx, e.cy, 6, ['#ffffff', '#ffb0b0'], 120);
     audio.play('enemy_hit');
@@ -1886,6 +1898,15 @@ export class Game {
     if (e.def.shade) {
       audio.play('gloam_hiss', { vol: 0.7 });
       this.burst(e.cx, e.cy, 22, ['#2a1446', '#5a2e8f', '#c8a0ff'], 110);
+    } else if (e.def.behavior === 'still') {
+      // laid to rest: a long sigh, and what is left of it rises away as pale dust
+      audio.play('moan', { vol: 0.6, pitch: 0.8 });
+      audio.play('enemy_die', { vol: 0.5, pitch: 0.7 });
+      for (let k = 0; k < 26; k++) {
+        this.parts.push({ x: e.cx + (Math.random() - 0.5) * 18, y: e.y + Math.random() * e.h, vx: (Math.random() - 0.5) * 30, vy: -20 - Math.random() * 50, life: 1.2 + Math.random() * 0.8, max: 2, color: Math.random() < 0.6 ? '#d8dccf' : '#8a8f86', size: Math.random() < 0.3 ? 2 : 1, grav: -16, glow: Math.random() < 0.3 });
+      }
+      this.text(e.cx, e.y - 10, 'at rest', '#d8dccf');
+      this.hint('lampless_rest', 'At rest. It leaves its Cold Lamp: dead glass now, but the Wick can light it again.');
     } else {
       audio.play('enemy_die');
       this.burst(e.cx, e.cy, 18, ['#ffffff', '#c8c0d8', e.def.shot ?? '#a09080'], 150);
@@ -2671,6 +2692,7 @@ export class Game {
     if (!this.p.wick.kindled) return 0;
     const before = this.flame;
     let gained = 0;
+    let lamps = 0;
     for (let i = 0; i < this.p.inv.length; i++) {
       const s = this.p.inv[i];
       if (!s) continue;
@@ -2679,6 +2701,7 @@ export class Game {
       // anything a bounty still asks for stays in your pack when offering everything
       if (!only && this.p.bounties.some((b) => b.kind === 'deliver' && b.target === s.id && b.have < b.need)) continue;
       gained += v * s.n;
+      if (s.id === 'coldlamp') lamps += s.n;
       this.p.inv[i] = null;
     }
     if (gained <= 0) return 0;
@@ -2687,10 +2710,22 @@ export class Game {
     this.text(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE - 30, `+${gained} Lumen`, '#ffe08a', true);
     this.burst(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE, Math.min(60, 12 + gained / 4), ['#ffe08a', '#ffb84a', '#fff6d0'], 160, true);
     audio.play('relic', { vol: 0.55, pitch: 1.2, vary: 0 });
+    if (lamps > 0) this.lampsHome(lamps);
     void pl;
     if (this.flame > before) this.flameUp(this.flame);
     this.refresh();
     return gained;
+  }
+
+  /** every Cold Lamp was somebody's: the Wick lights it again and says whose */
+  private lampsHome(n: number): void {
+    const first = this.p.lampsHome ?? 0;
+    this.p.lampsHome = first + n;
+    const names: string[] = [];
+    for (let k = 0; k < Math.min(n, 3); k++) names.push(MINERS[(first + k) % MINERS.length]);
+    if (n > 3) names.push(`${n - 3} more`);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    this.toast(n === 1 ? `The Wick lights ${list}'s lamp again. Rest now.` : `The Wick lights the lamps of ${list} again. Rest now.`, '#ffe08a');
   }
 
   private flameUp(level: number): void {
@@ -3524,8 +3559,8 @@ export class Game {
     for (const e of this.enemies) {
       if (e.dead) continue;
       updateEnemy(this, e, dt);
-      if (!pl.dead && !e.def.passive && e.knock <= 0 && overlaps(pl, e)) {
-        this.hurtPlayer(e.def.dmg, e.cx);
+      if (!pl.dead && !e.def.passive && e.knock <= 0 && !(e.def.behavior === 'still' && e.mode === 0) && overlaps(pl, e)) {
+        this.hurtPlayer(Math.round(e.def.dmg * e.power), e.cx);
         e.vx = -Math.sign(pl.cx - e.cx || 1) * 160;
         e.knock = 0.25;
         if (e.def.shade) {
@@ -3535,6 +3570,12 @@ export class Game {
           e.vy = -Math.sign(pl.cy - e.cy || 1) * 140;
           e.knock = 0.9;
           e.stateT = 2;
+        }
+        if (e.def.behavior === 'still') {
+          // its cold hands take your nerve, and it shrinks back from your light
+          this.p.nerve = Math.max(0, this.p.nerve - 6);
+          e.knock = 0.6;
+          audio.play('moan', { vol: 0.45, pitch: 1.3 });
         }
         // a boar that lands a hit usually trots off and calms down
         if (e.def.behavior === 'charger') {
@@ -3556,6 +3597,7 @@ export class Game {
         }
       }
       if (e.def.shade && !e.dead) this.updateShade(e, dt);
+      if (e.def.behavior === 'still' && e.mode === 0 && !e.seen) this.seeLampless(e);
       if (e.def.id === 'hollow' && Math.random() < dt * 0.08 && Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < 12 * TILE) audio.play('groan', { vol: 0.35 });
       if (Math.hypot(e.cx - pl.cx, e.cy - pl.cy) > 46 * TILE) e.dead = true;
     }
@@ -3567,6 +3609,106 @@ export class Game {
       if (this.onSurface()) this.trySurfaceSpawn();
       else this.trySpawn();
       this.trySpawnGloam();
+      this.trySpawnLampless();
+    }
+  }
+
+  /** the first time your light falls on a Lampless, close enough to see it */
+  private seeLampless(e: Enemy): void {
+    const pl = this.player;
+    const d = Math.hypot(e.cx - pl.cx, e.cy - pl.cy);
+    const onScreen = e.cx > this.camX && e.cx < this.camX + this.viewW && e.y < this.camY + this.viewH && e.y + e.h > this.camY;
+    if (d > 11 * TILE || !onScreen || pl.dead) return;
+    e.seen = true;
+    audio.play('moan', { vol: Math.max(0.25, 0.7 - d / (24 * TILE)) });
+    this.hint(
+      'lampless',
+      'A Lampless: a miner whose lamp went out. Light holds it still, but in the dark it comes for you, and near one your own flame gutters. Pin it with a torch on the wall, or strike it while it cowers.',
+    );
+  }
+
+  /** near a Lampless your flame sputters, then drops low for a moment: then it moves */
+  private updateGutter(dt: number): void {
+    const pl = this.player;
+    if (this.gutter > 0) {
+      this.gutter = Math.max(0, this.gutter - dt);
+      return;
+    }
+    // only one your light is on, or one that could see you (never one behind rock)
+    const near =
+      !pl.dead &&
+      !this.onSurface() &&
+      !this.inWickLight(pl.cx, pl.cy) &&
+      this.enemies.some(
+        (e) =>
+          e.def.behavior === 'still' &&
+          !e.dead &&
+          Math.hypot(e.cx - pl.cx, e.cy - pl.cy) < GUTTER_NEAR * TILE &&
+          (e.mode === 0 || los(this, e.cx, e.y + 12, pl.cx, pl.cy)) &&
+          // one pinned by another light (a torch on the wall) leans on your flame no more
+          !e.pinned,
+      );
+    if (!near) {
+      this.gutterT = Math.max(this.gutterT, 2.5);
+      this.gutterWarned = false;
+      return;
+    }
+    this.gutterT -= dt;
+    if (this.gutterT <= GUTTER_WARN && !this.gutterWarned) {
+      this.gutterWarned = true;
+      audio.play('gutter', { vol: 0.75 });
+    }
+    if (this.gutterT <= 0) {
+      this.gutter = GUTTER_LEN;
+      this.gutterT = gutterGap();
+      this.gutterWarned = false;
+    }
+  }
+
+  /** how much of its usual reach your own flame (lantern or torch in hand) has right now */
+  flameReach(): number {
+    if (this.gutter > 0) {
+      // drops fast, comes back with a catch at the end
+      const t = 1 - this.gutter / GUTTER_LEN;
+      const k = t < 0.15 ? 1 - (t / 0.15) * (1 - GUTTER_DIM) : t > 0.85 ? GUTTER_DIM + ((t - 0.85) / 0.15) * (1 - GUTTER_DIM) : GUTTER_DIM;
+      return k;
+    }
+    // it sputters first (a steady dip instead, with screen flashes turned off)
+    if (this.gutterWarned) return prefs.shake ? 0.82 + Math.abs(Math.sin(this.time * 31)) * 0.18 - (Math.sin(this.time * 11) > 0.6 ? 0.2 : 0) : 0.85;
+    return 1;
+  }
+
+  /** the Lampless walk from the Crystal Hollows down, coming out of the dark well away from your light */
+  private trySpawnLampless(): void {
+    const pl = this.player;
+    if (this.boss || pl.dead || this.onSurface()) return;
+    const pt = this.playerTile();
+    const cap = LAMPLESS_CAP[biomeAt(pt.y).id] ?? 0;
+    if (!cap) return;
+    // they are met now and then, not all the time
+    if (this.lamplessT > 0) {
+      this.lamplessT -= 1.1;
+      return;
+    }
+    if (this.enemies.filter((e) => e.def.behavior === 'still').length >= cap) return;
+    if (Math.random() > 0.08) return;
+    const w = this.world;
+    for (let tries = 0; tries < 16; tries++) {
+      const tx = pt.x + (Math.random() < 0.5 ? -1 : 1) * this.rng.int(13, 22);
+      const ty = pt.y + this.rng.int(-6, 6);
+      if (!w.inside(tx, ty - 1) || !w.inside(tx, ty + 1)) continue;
+      if (!w.solid(tx, ty + 1) || w.solid(tx, ty) || w.solid(tx, ty - 1)) continue;
+      if (BLOCKS[w.get(tx, ty)].liquid || BLOCKS[w.get(tx, ty - 1)].liquid) continue;
+      if (LAMPLESS_CAP[biomeAt(ty).id] === 0) continue;
+      if (this.light.at(tx, ty) > 0.15 || this.light.at(tx, ty - 1) > 0.15 || this.torchLightNear(tx, ty)) continue;
+      // the deeper they were lost, the harder they are to lay to rest
+      const e = new Enemy(ENEMIES.lampless, tx * TILE + TILE / 2, (ty + 1) * TILE - 1);
+      const deep = Math.max(0, biomeAt(ty).id - 2);
+      e.hp = Math.round(e.def.hp * (1 + deep * 0.5));
+      e.power = 1 + deep * 0.25;
+      this.enemies.push(e);
+      this.lamplessT = 45 + Math.random() * 45;
+      return;
     }
   }
 
@@ -4702,11 +4844,14 @@ export class Game {
     const ng = this.buffs.nightglass > 0;
     lights.push({ x: lx, y: ly, r: ng ? 0.5 : 0.44, g: ng ? 0.52 : 0.4, b: ng ? 0.64 : 0.46, radius: (4.2 + Math.max(0, bonus) + (ng ? 3.5 : 0)) * vault, cast: true });
     const hd = heldDef(this.p);
-    if (hd?.id === 'torch' && !pl.dead) lights.push({ x: lx + pl.facing * 0.4, y: ly, r: 1.1, g: 0.74, b: 0.38, radius: 7 * flick * vault * dim, cast: true });
+    // a guttering flame shrinks and dims (dimmer than your eyes' own glow at its lowest, or the light would still spread)
+    const reach = this.flameReach();
+    const bright = Math.min(1, 0.35 + (0.65 * (reach - GUTTER_DIM)) / (1 - GUTTER_DIM));
+    if (hd?.id === 'torch' && !pl.dead) lights.push({ x: lx + pl.facing * 0.4, y: ly, r: 1.1 * bright, g: 0.74 * bright, b: 0.38 * bright, radius: 7 * flick * vault * dim * reach, cast: true });
     if (this.st.oilMax > 0 && pl.oil > 0 && !pl.dead) {
-      let rad = this.st.light * vault * dim;
+      let rad = this.st.light * vault * dim * reach;
       if (pl.oil < this.st.oilMax * 0.1) rad *= 0.6 + 0.4 * (pl.oil / (this.st.oilMax * 0.1));
-      lights.push({ x: lx, y: ly, r: 1.05, g: 0.86, b: 0.62, radius: rad * flick, cast: true });
+      lights.push({ x: lx, y: ly, r: 1.05 * bright, g: 0.86 * bright, b: 0.62 * bright, radius: rad * flick, cast: true });
     }
     for (const e of this.enemies) {
       const gl = e.def.glow;

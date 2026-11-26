@@ -101,6 +101,7 @@ const LIST: Record<string, Partial2> = {
   coal: { name: 'Coal', icon: i16(0), kind: 'material', value: 2, desc: 'Fuel for torches and furnaces.' },
   copper: { name: 'Copper Ore', icon: i16(1), kind: 'material', value: 3, desc: 'Smelt it into bars at a furnace.' },
   iron: { name: 'Iron Ore', icon: i16(2), kind: 'material', value: 8, desc: 'Smelt with coal for iron bars.' },
+  coldlamp: { name: 'Cold Lamp', icon: { sheet: 'f32', idx: 16 }, kind: 'material', value: 25, desc: 'The dead head-lamp of a miner who went down and never came back, left behind when a Lampless was laid to rest. The glass is cracked and the wick is ash. Bring it home: the Wick lights it again.', stack: 99 },
   pearl: { name: 'Cave Pearl', icon: { sheet: 'f32', idx: 15 }, kind: 'material', value: 30, desc: 'Grows layer on layer in still water sealed in the rock, and holds a soft light. It washes out when you break into the pocket. The Wick takes it gladly.', glow: '#cfe8ff', stack: 99 },
   jade: { name: 'Jade', icon: i16(3), kind: 'material', value: 18, desc: 'Grows in the damp of the grotto.', glow: '#5af08a' },
   silver: { name: 'Silver Ore', icon: i16(4), kind: 'material', value: 20, desc: 'Rings like a bell when struck.' },

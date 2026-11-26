@@ -70,6 +70,8 @@ export interface Progress {
   bossRewardPending?: boolean;
   /** sealed water pockets that have already washed out their pearls (keyed by their first tile) */
   pearled?: number[];
+  /** Cold Lamps brought home to the Wick (each was somebody's) */
+  lampsHome?: number;
   /** you have owned a lantern before (a new one comes full, a re-equipped one does not) */
   hadLantern?: boolean;
   seen: Record<string, boolean>;
