@@ -72,9 +72,20 @@ async function boot(): Promise<void> {
     if (game && renderer) renderer.resize(game);
     else if (scene && renderer) renderer.resize(scene.game);
   });
-  window.addEventListener('beforeunload', () => {
+  const saveNow = (): void => {
     if (game && ui && !(window as { __noSave?: boolean }).__noSave) saveGame(game.saveSnapshot(ui.cursorStack()), game.world);
+  };
+  window.addEventListener('beforeunload', saveNow);
+  // a phone rarely says goodbye: it hides the page and may close it later without a word, so save as it goes
+  window.addEventListener('pagehide', saveNow);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      saveNow();
+      audio.pause();
+    } else audio.resume();
   });
+  // a touch or a click wakes sound the browser put to sleep
+  window.addEventListener('pointerdown', () => audio.resume(), { capture: true });
   showTitle();
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('auto')) startGame(!hasSave());
   requestAnimationFrame(loop);

@@ -88,8 +88,14 @@ class AudioSystem {
     );
   }
 
+  /** quiet while the game is out of sight (another app, another tab, a locked phone) */
+  pause(): void {
+    if (this.ctx && this.ctx.state === 'running') void this.ctx.suspend();
+  }
+
   resume(): void {
-    if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
+    // Safari reports 'interrupted' after a call or Siri; anything but running wants a resume
+    if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') void this.ctx.resume();
   }
 
   setVolumes(music: number, sfx: number): void {

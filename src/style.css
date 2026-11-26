@@ -37,6 +37,13 @@ canvas#game {
   image-rendering: pixelated;
   cursor: crosshair;
 }
+/* sharp text over the pixel-scaled world */
+canvas#overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
 img.ic {
   width: 32px;
   height: 32px;

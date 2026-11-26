@@ -69,10 +69,18 @@ const OBJ_ICON: Partial<Record<Obj, IconRef>> = {
 };
 
 export class Renderer {
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
+  /**
+   * The world is drawn straight into the on-screen canvas at its own pixel size (one canvas
+   * pixel per art pixel) and the browser scales it up, crisp, by a whole number. Text that
+   * should stay sharp (numbers, speech, prompts) goes on a full-resolution overlay above it.
+   */
   scene: HTMLCanvasElement;
   sctx: CanvasRenderingContext2D;
+  private over: HTMLCanvasElement;
+  private octx: CanvasRenderingContext2D;
+  /** the part of the overlay drawn on last frame, wiped before the next */
+  private dirty: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  private overOpacity = '';
   scale = 2;
   dpr = 1;
   private backdrops: Backdrop[] = [];
@@ -93,11 +101,17 @@ export class Renderer {
   private skyDuskTop: SkyTop;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('no ctx');
-    this.ctx = ctx;
-    [this.scene, this.sctx] = makeCanvas(640, 360);
+    this.scene = canvas;
+    this.sctx = ctx;
+    const over = document.createElement('canvas');
+    over.id = 'overlay';
+    canvas.after(over);
+    const octx = over.getContext('2d');
+    if (!octx) throw new Error('no ctx');
+    this.over = over;
+    this.octx = octx;
     this.glowSprite = this.makeGlow();
     this.backdrops = buildBackdrops();
     this.buildCracks();
@@ -157,11 +171,15 @@ export class Renderer {
     this.scene.width = vw;
     this.scene.height = vh;
     this.sctx.imageSmoothingEnabled = false;
-    this.canvas.width = vw * s;
-    this.canvas.height = vh * s;
-    this.canvas.style.width = `${(vw * s) / this.dpr}px`;
-    this.canvas.style.height = `${(vh * s) / this.dpr}px`;
-    this.ctx.imageSmoothingEnabled = false;
+    const cssW = `${(vw * s) / this.dpr}px`;
+    const cssH = `${(vh * s) / this.dpr}px`;
+    this.scene.style.width = cssW;
+    this.scene.style.height = cssH;
+    this.over.width = vw * s;
+    this.over.height = vh * s;
+    this.over.style.width = cssW;
+    this.over.style.height = cssH;
+    this.dirty = null;
     game.viewW = vw;
     game.viewH = vh;
     game.scale = s / this.dpr;
@@ -261,13 +279,36 @@ export class Renderer {
       ctx.fillRect(0, 0, vw, vh);
     }
 
-    const out = this.ctx;
-    out.imageSmoothingEnabled = false;
-    out.drawImage(this.scene, 0, 0, vw * this.scale, vh * this.scale);
-    this.drawOverlayText(g, out, camX, camY);
     if (g.fade > 0) {
-      out.fillStyle = `rgba(0,0,0,${g.fade})`;
-      out.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.fillStyle = `rgba(0,0,0,${g.fade})`;
+      ctx.fillRect(0, 0, vw, vh);
+    }
+    // the overlay: wipe only what was drawn last frame, and fade it with the scene
+    const o = this.octx;
+    const d = this.dirty;
+    if (d) o.clearRect(d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0);
+    this.dirty = null;
+    const op = g.fade > 0 ? Math.max(0, 1 - g.fade).toFixed(2) : '';
+    if (op !== this.overOpacity) {
+      this.over.style.opacity = op;
+      this.overOpacity = op;
+    }
+    this.drawOverlayText(g, o, camX, camY);
+  }
+
+  /** grow the part of the overlay to wipe next frame */
+  private mark(x0: number, y0: number, x1: number, y1: number): void {
+    const d = this.dirty;
+    const a = Math.floor(x0) - 3;
+    const b = Math.floor(y0) - 3;
+    const c = Math.ceil(x1) + 3;
+    const e = Math.ceil(y1) + 3;
+    if (!d) this.dirty = { x0: a, y0: b, x1: c, y1: e };
+    else {
+      d.x0 = Math.min(d.x0, a);
+      d.y0 = Math.min(d.y0, b);
+      d.x1 = Math.max(d.x1, c);
+      d.y1 = Math.max(d.y1, e);
     }
   }
 
@@ -1500,6 +1541,8 @@ export class Renderer {
       out.fillText(t.text, x + s, y + s);
       out.fillStyle = t.color;
       out.fillText(t.text, x, y);
+      const hw = out.measureText(t.text).width / 2;
+      this.mark(x - hw, y - size, x + hw + s, y + size + s);
     }
     out.globalAlpha = 1;
     // what the lost say, in a speech bubble over their heads
@@ -1524,6 +1567,7 @@ export class Renderer {
       const x = Math.round((sl.x - camX) * s);
       const yb = Math.round((sl.y - 52 - camY) * s);
       out.globalAlpha = Math.min(1, sl.sayT * 2.5);
+      this.mark(x - bw / 2 - s, yb - bh - s, x + bw / 2 + s, yb + 7 * s);
       out.fillStyle = '#2a1c10';
       out.fillRect(x - bw / 2 - s, yb - bh - s, bw + 2 * s, bh + 2 * s);
       out.beginPath();
@@ -1553,6 +1597,7 @@ export class Renderer {
       const x = Math.round((pl.cx - camX) * s);
       const y = Math.round((pl.y - camY - 14) * s);
       const tw = out.measureText(label).width + 12 * s;
+      this.mark(x - tw / 2, y - size * 0.8, x + tw / 2, y + size * 0.8);
       out.fillStyle = 'rgba(14,10,20,0.8)';
       out.fillRect(x - tw / 2, y - size * 0.8, tw, size * 1.6);
       out.fillStyle = '#ffe9a8';
@@ -1562,6 +1607,7 @@ export class Renderer {
       const w = 40 * s;
       const x = Math.round((pl.cx - camX) * s - w / 2);
       const y = Math.round((pl.y - camY - 8) * s);
+      this.mark(x, y, x + w, y + 3 * s);
       out.fillStyle = 'rgba(0,0,0,0.7)';
       out.fillRect(x, y, w, 3 * s);
       out.fillStyle = '#7ac8ff';
