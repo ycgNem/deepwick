@@ -35,9 +35,25 @@ export class Input {
   private wasPadMouseL = false;
   private wasPadMouseR = false;
 
+  // ---- touchscreen
+  /** the last thing touched was the screen: the on-screen controls show and taps work the world */
+  usingTouch = false;
+  /** decides whether a tap at this screen point opens or uses what is there (the right button) rather than digging it */
+  touchUse: ((x: number, y: number) => boolean) | null = null;
+  /** the finger working the world, and which button it holds */
+  private touchId: number | null = null;
+  private touchRight = false;
+  /** keys the on-screen controls are holding down */
+  private touchKeys = new Set<string>();
+  /** counts every time a finger on the world lands or moves (a still finger stays on the same spot of the world) */
+  touchSeq = 0;
+
   constructor(target: HTMLElement) {
     window.addEventListener('keydown', (e) => {
-      if (e.isTrusted) this.usingPad = false;
+      if (e.isTrusted) {
+        this.usingPad = false;
+        this.usingTouch = false;
+      }
       if (e.repeat) return;
       const k = e.code;
       if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
@@ -51,7 +67,65 @@ export class Input {
       this.down.clear();
       this.mouseLeft = false;
       this.mouseRight = false;
+      this.touchId = null;
     });
+    // a real mouse moving (not the stand-in events a tap makes) puts the on-screen controls away
+    window.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse' && Math.abs(e.movementX) + Math.abs(e.movementY) > 2) this.usingTouch = false;
+    });
+    window.addEventListener(
+      'touchstart',
+      () => {
+        this.usingTouch = true;
+        this.usingPad = false;
+      },
+      { passive: true, capture: true },
+    );
+    // a finger on the world is the mouse: it points, and it holds a button down until lifted
+    const point = (t: Touch): void => {
+      const r = target.getBoundingClientRect();
+      this.mouseX = t.clientX - r.left;
+      this.mouseY = t.clientY - r.top;
+      this.touchSeq++;
+    };
+    target.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        if (this.touchId !== null) return;
+        const t = e.changedTouches[0];
+        if (!t) return;
+        this.touchId = t.identifier;
+        point(t);
+        this.touchRight = this.touchUse?.(this.mouseX, this.mouseY) ?? false;
+        if (this.touchRight) {
+          this.mouseRight = true;
+          this.mouseRightPressed = true;
+        } else {
+          this.mouseLeft = true;
+          this.mouseLeftPressed = true;
+        }
+      },
+      { passive: false },
+    );
+    target.addEventListener(
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+        for (const t of Array.from(e.changedTouches)) if (t.identifier === this.touchId) point(t);
+      },
+      { passive: false },
+    );
+    const lift = (e: TouchEvent): void => {
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier !== this.touchId) continue;
+        this.touchId = null;
+        if (this.touchRight) this.mouseRight = false;
+        else this.mouseLeft = false;
+      }
+    };
+    target.addEventListener('touchend', lift);
+    target.addEventListener('touchcancel', lift);
     window.addEventListener('mousemove', (e) => {
       if (e.isTrusted && Math.abs(e.movementX) + Math.abs(e.movementY) > 2) this.usingPad = false;
     });
@@ -99,6 +173,14 @@ export class Input {
   consume(code: string): void {
     this.pressed.delete(code);
   }
+  /** the on-screen controls press and let go of keys just as the keyboard does */
+  touchKey(code: string, down: boolean): void {
+    if (down === this.touchKeys.has(code)) return;
+    if (down) this.touchKeys.add(code);
+    else this.touchKeys.delete(code);
+    window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code, bubbles: true }));
+  }
+
   /** call at the end of each frame */
   endFrame(): void {
     this.pressed.clear();
@@ -131,7 +213,10 @@ export class Input {
       const v = gp?.axes[i] ?? 0;
       return Math.abs(v) < 0.2 ? 0 : v;
     };
-    if (raw.some(Boolean) || gp.axes.some((v) => Math.abs(v) > 0.4)) this.usingPad = true;
+    if (raw.some(Boolean) || gp.axes.some((v) => Math.abs(v) > 0.4)) {
+      this.usingPad = true;
+      this.usingTouch = false;
+    }
     if (!this.usingPad) {
       this.prevButtons = raw;
       return;

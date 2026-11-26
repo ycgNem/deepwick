@@ -13,6 +13,7 @@ import { GOALS, CHAPTERS, ROMAN, OLD_GOAL_IDS, goalDone } from './data/journal';
 import { LOST, LostKind, LostSoul, isLostKind } from './data/lost';
 import { BREWS, BREW_TIME } from './data/brews';
 import { prefs } from './prefs';
+import { forTouch } from './touch';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import {
   Progress,
@@ -82,6 +83,27 @@ export const BUILDING_INFO: Record<BuildingKind, { sprite: string; npc: string; 
 };
 
 /** item you get back when you break a placed object */
+/** things a tap opens or uses, on a touchscreen, rather than digs up */
+const TAP_USES = new Set<number>([
+  Obj.WICKPOST,
+  Obj.STORAGE,
+  Obj.CHEST,
+  Obj.BED,
+  Obj.BED_R,
+  Obj.DOOR,
+  Obj.DOOR_TOP,
+  Obj.DOOR_OPEN,
+  Obj.DOOR_OPEN_TOP,
+  Obj.BUSH_BERRY,
+  Obj.MINECART,
+  Obj.CROP3,
+  Obj.WORKBENCH,
+  Obj.FURNACE,
+  Obj.ANVIL,
+  Obj.ALCHEMY,
+  Obj.CAMPFIRE,
+]);
+
 const OBJ_ITEM: Partial<Record<Obj, string>> = {
   [Obj.TORCH]: 'torch',
   [Obj.LADDER]: 'ladder',
@@ -362,6 +384,7 @@ export class Game {
     // remembered even with hints off: the Journal reads some of them
     this.p.seen[key] = true;
     if (!prefs.hints) return;
+    if (this.input.usingTouch) msg = forTouch(msg);
     if (this.ui.hintCard) this.ui.hintCard(msg);
     else this.ui.toast(msg, '#ffe9a8');
   }
@@ -1451,9 +1474,37 @@ export class Game {
     this.burst(x * TILE + 16, y * TILE + 26, 6, ['#8a8a9a', '#6a4220'], 80);
   }
 
+  /**
+   * A finger coming down on the world at this screen point: true when it should open or use
+   * what is there (a door, a bed, a chest, a station), as the right mouse button would, rather
+   * than dig it up. A pick, hammer or sword in hand always means business.
+   */
+  touchWantsUse(sx: number, sy: number): boolean {
+    const hd = heldDef(this.p);
+    if (hd && (hd.kind === 'pick' || hd.kind === 'hammer' || hd.kind === 'sword')) return false;
+    const tx = Math.floor((sx / this.scale + this.camX) / TILE);
+    const ty = Math.floor((sy / this.scale + this.camY) / TILE);
+    const pl = this.player;
+    if (Math.hypot((tx + 0.5) * TILE - pl.cx, (ty + 0.5) * TILE - pl.cy) > this.st.reach * TILE) return false;
+    return TAP_USES.has(this.world.getObj(tx, ty));
+  }
+
+  /** the spot of the world a finger is on: it stays put while the camera drifts, until the finger moves */
+  private touchAnchor = { seq: -1, x: 0, y: 0 };
+
   mouseWorld(): { x: number; y: number } {
-    if (this.input.usingPad) return this.padAim();
-    return { x: this.input.mouseX / this.scale + this.camX, y: this.input.mouseY / this.scale + this.camY };
+    const inp = this.input;
+    if (inp.usingPad) return this.padAim();
+    if (inp.usingTouch) {
+      const a = this.touchAnchor;
+      if (a.seq !== inp.touchSeq) {
+        a.seq = inp.touchSeq;
+        a.x = inp.mouseX / this.scale + this.camX;
+        a.y = inp.mouseY / this.scale + this.camY;
+      }
+      return { x: a.x, y: a.y };
+    }
+    return { x: inp.mouseX / this.scale + this.camX, y: inp.mouseY / this.scale + this.camY };
   }
 
   /**

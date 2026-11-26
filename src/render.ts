@@ -1548,7 +1548,8 @@ export class Renderer {
     if (g.near && !g.ui.isOpen() && !pl.dead && !g.fishing) {
       const size = Math.round(8 * s);
       out.font = `${size}px "DW Digits", "Pixelify Sans", monospace`;
-      const label = `[E] ${g.near.label}`;
+      // on a touchscreen the Use button carries the same words
+      const label = g.input.usingTouch ? g.near.label : `[E] ${g.near.label}`;
       const x = Math.round((pl.cx - camX) * s);
       const y = Math.round((pl.y - camY - 14) * s);
       const tw = out.measureText(label).width + 12 * s;

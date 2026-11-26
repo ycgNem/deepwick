@@ -1289,11 +1289,15 @@ kbd {
 #intro {
   background: radial-gradient(circle at 50% 40%, rgba(30, 20, 38, 0.82), rgba(7, 5, 11, 0.94) 70%);
 }
+/* a card taller than the screen scrolls rather than hiding its button */
+#intro.show {
+  display: flex;
+  overflow-y: auto;
+  padding: 16px 0;
+}
 .intro-card {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  position: relative;
+  margin: auto;
   width: min(640px, 90vw);
   font-size: 18px;
   line-height: 1.5;
@@ -1700,4 +1704,460 @@ i.fl.big { width: 22px; height: 30px; margin: 0 6px; }
 .card.kindle button { align-self: flex-start; }
 @media (max-width: 760px) {
   .flames { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---------------- touch ---------------- */
+body {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+canvas#game {
+  touch-action: none;
+}
+#touch {
+  display: none;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+#touch.live {
+  display: block;
+}
+/* the left of the screen belongs to the thumbstick; the hotbar sits above it */
+#touch {
+  /* half the hotbar's width and its height, so the stick's zone stops short of it */
+  --hb-half: 272px;
+  --hb-h: 84px;
+}
+#tZone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 40vw;
+  height: 74vh;
+  pointer-events: auto;
+  touch-action: none;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - var(--hb-h)),
+    calc(50vw - var(--hb-half)) calc(100% - var(--hb-h)),
+    calc(50vw - var(--hb-half)) 100%,
+    0 100%
+  );
+}
+#tBase {
+  position: fixed;
+  left: calc(env(safe-area-inset-left, 0px) + 96px);
+  top: calc(100% - 96px);
+  width: 116px;
+  height: 116px;
+  margin: -58px 0 0 -58px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(20, 14, 28, 0.2) 0 52%, rgba(20, 14, 28, 0.5) 54% 100%);
+  border: 3px solid rgba(0, 0, 0, 0.7);
+  box-shadow: 0 0 0 2px rgba(232, 200, 120, 0.35);
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+#tBase.held {
+  opacity: 1;
+}
+#tKnob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 50px;
+  height: 50px;
+  margin: -25px 0 0 -25px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #fff1c0, #e0b860 45%, #8a6a2a 100%);
+  border: 3px solid #000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.tpad {
+  position: absolute;
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  bottom: 14px;
+  width: 200px;
+  height: 180px;
+}
+.tb {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 3px solid #000;
+  background: rgba(20, 14, 28, 0.6);
+  box-shadow: 0 0 0 2px rgba(232, 200, 120, 0.45), 0 4px 12px rgba(0, 0, 0, 0.45);
+  color: #f4ead6;
+  font-family: 'Silkscreen', monospace;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #000;
+  display: grid;
+  place-items: center;
+  transition: transform 0.06s;
+}
+.tb.on {
+  background: rgba(232, 200, 120, 0.5);
+  transform: scale(0.93);
+}
+.tb.jump {
+  right: 0;
+  bottom: 0;
+  width: 86px;
+  height: 86px;
+  font-size: 14px;
+}
+.tb.use {
+  right: 96px;
+  bottom: 4px;
+  width: 68px;
+  height: 68px;
+}
+.tb.use.ready {
+  box-shadow: 0 0 0 2px #ffd75a, 0 0 18px rgba(255, 210, 100, 0.8);
+  color: #fff3c0;
+  animation: usePulse 0.9s infinite alternate;
+}
+@keyframes usePulse {
+  to {
+    box-shadow: 0 0 0 3px #ffe9a8, 0 0 26px rgba(255, 220, 120, 0.95);
+  }
+}
+.tb.small {
+  width: 52px;
+  height: 52px;
+  font-size: 10px;
+}
+.tb.pack {
+  right: 17px;
+  bottom: 98px;
+}
+.tb.oil {
+  right: 104px;
+  bottom: 86px;
+}
+.tb.mini {
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin-left: -20px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 20px;
+  line-height: 1;
+}
+/* the HUD makes way for thumbs */
+body.touch .hud-help {
+  display: none;
+}
+body.touch #toasts {
+  top: 58px;
+}
+#goal,
+#minimap {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* phones held upright: ask for landscape */
+#rotate {
+  display: none;
+}
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate {
+    display: grid;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    place-items: center;
+    background: #07060b;
+    text-align: center;
+    padding: 24px;
+  }
+  #rotate div {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+  }
+  #rotate i {
+    width: 44px;
+    height: 72px;
+    border: 4px solid #e0b860;
+    border-radius: 8px;
+    animation: turnPhone 1.6s ease-in-out infinite;
+  }
+  #rotate b {
+    font-family: 'Silkscreen', monospace;
+    font-weight: 400;
+    font-size: 18px;
+    color: var(--gold);
+  }
+  #rotate span {
+    color: #cfc3b0;
+  }
+}
+@keyframes turnPhone {
+  0%,
+  25% {
+    transform: rotate(0deg);
+  }
+  60%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+
+/* short screens (phones on their side): a smaller HUD that leaves the middle to the game */
+@media (max-height: 560px) {
+  .hud-tl {
+    left: calc(env(safe-area-inset-left, 0px) + 10px);
+    top: 8px;
+    width: 196px;
+  }
+  .bar {
+    height: 15px;
+    margin-bottom: 6px;
+  }
+  .bar span {
+    font-size: 11px;
+    line-height: 12px;
+  }
+  .bar em {
+    font-size: 8px;
+    line-height: 15px;
+  }
+  .chips {
+    gap: 5px;
+  }
+  .chip {
+    font-size: 12px;
+    padding: 0 6px 0 1px;
+  }
+  .chip img {
+    width: 16px;
+    height: 16px;
+  }
+  #skills {
+    display: none;
+  }
+  .hud-tr {
+    right: calc(env(safe-area-inset-right, 0px) + 10px);
+    top: 8px;
+  }
+  #minimap {
+    width: 112px;
+    height: 80px;
+  }
+  .where {
+    margin-top: 2px;
+  }
+  .where b {
+    font-size: 15px;
+  }
+  .where span {
+    font-size: 10px;
+  }
+  .goal,
+  #seek {
+    width: 164px;
+  }
+  .goal {
+    margin-top: 5px;
+    padding: 4px 7px 5px;
+  }
+  .goal small {
+    font-size: 8px;
+  }
+  .goal b {
+    font-size: 12px;
+  }
+  .goal span {
+    font-size: 10px;
+  }
+  .gbar {
+    margin-top: 3px;
+  }
+  .seek {
+    padding: 3px 7px 4px 26px;
+  }
+  .seek b {
+    font-size: 11px;
+  }
+  .seek span {
+    font-size: 10px;
+  }
+  .hotwrap {
+    bottom: 6px;
+  }
+  #hotbar {
+    gap: 4px;
+  }
+  #hotbar .slot {
+    width: 36px;
+    height: 36px;
+  }
+  #hotbar .slot img.ic {
+    width: 24px;
+    height: 24px;
+  }
+  #hotbar .slot .k {
+    font-size: 9px;
+    left: 2px;
+    top: 0;
+  }
+  #hotbar .slot .n {
+    font-size: 11px;
+    right: 2px;
+    bottom: 0;
+  }
+  #heldName {
+    font-size: 12px;
+    margin-bottom: 3px;
+  }
+  #toasts {
+    width: min(440px, 50vw);
+  }
+  .toast {
+    font-size: 12px;
+    padding: 3px 9px;
+  }
+  #hintCard {
+    bottom: 60px;
+    width: min(270px, 34vw);
+    padding: 6px 9px 8px;
+  }
+  #hintCard p {
+    font-size: 12px;
+  }
+  #banner b {
+    font-size: clamp(22px, 5vw, 40px);
+  }
+  #banner span {
+    font-size: 13px;
+  }
+  #touch {
+    --hb-half: 208px;
+    --hb-h: 62px;
+  }
+  .tpad {
+    right: calc(env(safe-area-inset-right, 0px) + 10px);
+    bottom: 10px;
+    width: 172px;
+    height: 150px;
+  }
+  .tb.jump {
+    width: 72px;
+    height: 72px;
+    font-size: 12px;
+  }
+  .tb.use {
+    right: 82px;
+    width: 58px;
+    height: 58px;
+    font-size: 11px;
+  }
+  .tb.small {
+    width: 46px;
+    height: 46px;
+    font-size: 9px;
+  }
+  .tb.pack {
+    right: 13px;
+    bottom: 84px;
+  }
+  .tb.oil {
+    right: 88px;
+    bottom: 72px;
+  }
+  #tBase {
+    left: calc(env(safe-area-inset-left, 0px) + 82px);
+    top: calc(100% - 82px);
+    width: 100px;
+    height: 100px;
+    margin: -50px 0 0 -50px;
+  }
+  #tKnob {
+    width: 44px;
+    height: 44px;
+    margin: -22px 0 0 -22px;
+  }
+}
+/* on a touchscreen the tips sit under the bars, out of the thumbstick's way */
+body.touch #hintCard {
+  top: 150px;
+  bottom: auto;
+}
+@media (max-height: 560px) {
+  body.touch #hintCard {
+    top: 136px;
+  }
+}
+@media (max-height: 560px) {
+  .win {
+    max-height: calc(100vh - 16px);
+    width: min(900px, calc(100vw - 24px));
+    padding: 10px 14px 12px;
+  }
+}
+@media (max-height: 560px) {
+  #intro.show {
+    padding: 8px 0;
+  }
+  .intro-card {
+    width: min(780px, 92vw);
+    line-height: 1.35;
+  }
+  .modes .mode {
+    padding: 4px 8px 5px;
+  }
+  .modes .mode span {
+    margin-top: 0;
+    font-size: 12px;
+  }
+  .modeblurb {
+    font-size: 12px;
+    margin: 4px 0 8px;
+  }
+  .intro-card h2 {
+    font-size: 20px;
+    margin: 0 0 6px;
+  }
+  .intro-card p {
+    font-size: 13px;
+    margin: 6px 0;
+  }
+  .modes {
+    margin: 10px 0 2px;
+  }
+}
+/* small phones: the hotbar narrows to clear both thumbs */
+@media (max-height: 560px) and (max-width: 740px) {
+  #hotbar {
+    gap: 3px;
+  }
+  #hotbar .slot {
+    width: 32px;
+    height: 32px;
+  }
+  #hotbar .slot img.ic {
+    width: 22px;
+    height: 22px;
+  }
+  #touch {
+    --hb-half: 182px;
+  }
+  .hud-tl {
+    width: 176px;
+  }
+  .goal,
+  #seek {
+    width: 150px;
+  }
 }

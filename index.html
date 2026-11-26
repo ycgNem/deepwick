@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#07060b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
     <title>Deepwick</title>
     <link rel="icon" href="./assets/camp/pine1.png" />
   </head>
@@ -41,6 +47,17 @@
       <div class="hud-help" id="hudHelp">Tab pack &amp; craft · J journal · M map · Esc menu</div>
     </div>
 
+    <div id="touch">
+      <div id="tZone"><div id="tBase"><i id="tKnob"></i></div></div>
+      <div class="tpad">
+        <button class="tb jump" data-k="Space"><span>Jump</span></button>
+        <button class="tb use" data-k="KeyE"><span>Use</span></button>
+        <button class="tb small pack" data-k="Tab"><span>Pack</span></button>
+        <button class="tb small oil" data-k="KeyF"><span>Oil</span></button>
+      </div>
+      <button class="tb mini pause" data-k="Escape" aria-label="Pause">☰</button>
+    </div>
+
     <div id="panel" class="hidden"></div>
     <div id="cursorItem"><img src="" alt="" /><span></span></div>
     <div id="tip"></div>
@@ -54,7 +71,7 @@
           <button id="btnContinue" class="big">Continue</button>
           <button id="btnNew" class="big">New World</button>
         </div>
-        <p class="foot">Mouse + keyboard or controller · progress saves automatically</p>
+        <p class="foot">Mouse + keyboard, controller or touch · progress saves automatically</p>
       </div>
       <div class="title-caption" id="titleCaption"><b id="capLabel"></b><span id="capSub"></span></div>
     </div>
@@ -74,6 +91,8 @@
         <button id="btnBegin" class="big">Wake up</button>
       </div>
     </div>
+
+    <div id="rotate"><div><i></i><b>Turn your device sideways</b><span>Deepwick plays in landscape.</span></div></div>
 
     <div id="loading">
       <h1>DEEPWICK</h1>

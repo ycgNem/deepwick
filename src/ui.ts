@@ -99,6 +99,14 @@ export class UI implements UIHooks {
       this.hudEls[k] = $('#' + k);
     }
     this.panelEl.addEventListener('mousedown', (e) => this.onMouseDown(e));
+    this.bindTouchSlots();
+    // the Journal goal and the minimap open their pages when tapped or clicked
+    this.hudEls.goal.addEventListener('click', () => {
+      if (this.game && !this.panel) this.open('journal');
+    });
+    this.mini.addEventListener('click', () => {
+      if (this.game && !this.panel) this.open('map');
+    });
     this.panelEl.addEventListener('contextmenu', (e) => e.preventDefault());
     this.panelEl.addEventListener('mouseover', (e) => this.onHover(e));
     this.panelEl.addEventListener('mouseleave', () => this.tipEl.classList.remove('show'));
@@ -612,7 +620,10 @@ export class UI implements UIHooks {
     const g = this.game;
     const stations = g.stationsNear();
     const names = [...stations].filter((s) => s !== 'hand').map((s) => STATION_NAME[s]);
-    let html = `<div class="hd"><div><h2>Pack</h2><p class="line">Click to pick up, click to place. Right-click splits. Shift-click equips or quick-moves. Click outside to drop.</p></div><div class="purse">${img(UI_ICON.coin)} ${fmt(g.p.coins)}</div></div>`;
+    const how = g.input.usingTouch
+      ? 'Tap to pick up, tap to place. Hold a stack to split it. Double-tap equips or quick-moves. Tap outside to drop.'
+      : 'Click to pick up, click to place. Right-click splits. Shift-click equips or quick-moves. Click outside to drop.';
+    let html = `<div class="hd"><div><h2>Pack</h2><p class="line">${how}</p></div><div class="purse">${img(UI_ICON.coin)} ${fmt(g.p.coins)}</div></div>`;
     html += `<div class="invwrap"><div class="left">${this.equipHtml()}${this.gridHtml()}</div>`;
     html += `<div class="craft"><div class="craft-hd"><h3>Crafting</h3><small>${names.length ? 'Near: ' + names.join(', ') : 'By hand only. Build a Workbench for more.'}</small><label class="toggle"><input type="checkbox" data-a="showall" ${this.showAll ? 'checked' : ''}> all</label></div><div class="recipes">`;
     const list = this.showAll ? RECIPES : g.recipesFor(stations);
@@ -641,7 +652,7 @@ export class UI implements UIHooks {
   private chestHtml(): string {
     const g = this.game;
     const items = g.p.chests[String(g.openChest)] ?? [];
-    let html = `<div class="hd"><div><h2>Storage Chest</h2><p class="line">Shift-click moves a stack between the chest and your pack.</p></div><div class="row-actions"><button data-a="stashall">Store all (not hotbar)</button><button data-a="takeall">Take all</button></div></div>`;
+    let html = `<div class="hd"><div><h2>Storage Chest</h2><p class="line">${g.input.usingTouch ? 'Double-tap' : 'Shift-click'} moves a stack between the chest and your pack.</p></div><div class="row-actions"><button data-a="stashall">Store all (not hotbar)</button><button data-a="takeall">Take all</button></div></div>`;
     html += '<div class="grid chest-grid">';
     for (let i = 0; i < CHEST_SLOTS; i++) html += this.slotHtml(items[i] ?? null, `data-chest="${i}"`);
     html += '</div><h3 class="sub">Your pack</h3>' + this.gridHtml();
@@ -981,19 +992,30 @@ export class UI implements UIHooks {
       <div class="settings"><label>Music <input type="range" min="0" max="100" value="${m}" data-set="music"></label><label>Sound <input type="range" min="0" max="100" value="${s}" data-set="sfx"></label></div>
       <div class="settings diff"><span>Options</span><button class="${prefs.shake ? 'on' : ''}" data-a="pref" data-id="shake">Screen shake &amp; flashes: ${prefs.shake ? 'On' : 'Off'}</button><button class="${prefs.hints ? 'on' : ''}" data-a="pref" data-id="hints">Tutorial hints: ${prefs.hints ? 'On' : 'Off'}</button><button data-a="hudsize">HUD size: ${Math.round(prefs.hud * 100)}%</button><button data-a="fullscreen">${document.fullscreenElement ? 'Leave fullscreen' : 'Fullscreen'}</button></div>
       <div class="settings diff"><span>Difficulty</span>${MODE_IDS.map((id) => `<button class="${this.game.p.mode === id ? 'on' : ''}" data-a="mode" data-id="${id}">${MODES[id].name}</button>`).join('')}<small>${MODES[this.game.mode.id].blurb}</small></div>
-      <div class="controls"><h3 class="sub">Controls</h3>
-      <div><kbd>A</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>W</kbd><kbd>S</kbd> climb ladders, <kbd>S</kbd> drops through ladder tops</div>
+      <div class="controls">${this.controlsHtml()}</div>
+      <div class="row-actions"><button class="big" data-a="close">Resume</button><button data-a="journal">Journal</button><button data-a="save">Save now</button><button class="ghost" data-a="quit">Save &amp; quit to title</button></div>`;
+  }
+
+  /** every control, the way you are playing first */
+  private controlsHtml(): string {
+    const kb = `<h3 class="sub">Keyboard &amp; mouse</h3>      <div><kbd>A</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>W</kbd><kbd>S</kbd> climb ladders, <kbd>S</kbd> drops through ladder tops</div>
       <div><kbd>Left mouse</kbd> use the held item: dig, chop, attack, place, eat. Clicking rock with anything in hand digs with your best pickaxe</div>
       <div><kbd>Right mouse</kbd> open chests and doors, use beds and stations, pick berries, climb into carts; otherwise place or eat what you hold</div>
       <div><kbd>Left mouse</kbd> with a fishing rod: cast at water, click when the bobber dips, then click while the needle is in the green · <kbd>Space</kbd> swims up</div>
       <div><kbd>1</kbd>–<kbd>0</kbd> or wheel: hotbar · <kbd>Q</kbd> drop held stack</div>
       <div><kbd>E</kbd> talk / interact / ride a cart · <kbd>F</kbd> lamp oil · <kbd>H</kbd> tonic · <kbd>R</kbd> recall to bed · <kbd>G</kbd> grappling hook</div>
-      <div><kbd>Tab</kbd> pack &amp; crafting · <kbd>J</kbd> journal · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</div>
-      <h3 class="sub">Controller</h3>
+      <div><kbd>Tab</kbd> pack &amp; crafting · <kbd>J</kbd> journal · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</div>`;
+    const touch = `<h3 class="sub">Touch</h3>      
+      <div><kbd>Left thumb</kbd> anywhere on the left: walk, push up to climb, down to drop · <kbd>Jump</kbd> jump and swim · <kbd>Use</kbd> talk, travel, ride (it lights up when there is something to do)</div>
+      <div><kbd>Finger on the world</kbd> dig, chop, fight, place what you hold, eat; hold to keep digging · <kbd>Tap</kbd> a door, bed, chest or station to open it · tap the hotbar to choose</div>
+      <div><kbd>Pack</kbd> pack &amp; crafting (hold a stack to split it, double-tap to quick-move) · <kbd>Oil</kbd> refill the lantern · tap the Journal goal or the minimap to open them · <kbd>☰</kbd> pause</div>`;
+    const pad = `<h3 class="sub">Controller</h3>      
       <div><kbd>Left stick</kbd> move / climb · <kbd>A</kbd> jump · <kbd>RT</kbd> use the held item · <kbd>LT</kbd> or <kbd>X</kbd> open, place, eat · <kbd>Right stick</kbd> aim (let go to work the block in front of you)</div>
       <div><kbd>B</kbd> interact · <kbd>Y</kbd> pack · <kbd>LB</kbd><kbd>RB</kbd> hotbar · <kbd>L3</kbd> hook · <kbd>R3</kbd> drop · D-pad: <kbd>\u2190</kbd> oil <kbd>\u2191</kbd> tonic <kbd>\u2193</kbd> recall <kbd>\u2192</kbd> journal · <kbd>Back</kbd> map · <kbd>Start</kbd> pause</div>
-      <div>In menus the left stick moves a pointer: <kbd>A</kbd> click, <kbd>X</kbd> right-click, <kbd>B</kbd> back, right stick scrolls.</div></div>
-      <div class="row-actions"><button class="big" data-a="close">Resume</button><button data-a="journal">Journal</button><button data-a="save">Save now</button><button class="ghost" data-a="quit">Save &amp; quit to title</button></div>`;
+      <div>In menus the left stick moves a pointer: <kbd>A</kbd> click, <kbd>X</kbd> right-click, <kbd>B</kbd> back, right stick scrolls.</div>`;
+    const inp = this.game.input;
+    const order = inp.usingTouch ? [touch, kb, pad] : inp.usingPad ? [pad, kb, touch] : [kb, pad, touch];
+    return order.join('');
   }
 
   private victoryHtml(): string {
@@ -1017,11 +1039,83 @@ export class UI implements UIHooks {
     return null;
   }
 
+  /** a long press already split this stack: the tap the browser makes of it afterwards is swallowed */
+  private swallowTapUntil = 0;
+  /** the last slot tapped, for a double tap */
+  private lastTap: { key: string; t: number; picked: boolean } | null = null;
+
+  /**
+   * Fingers have no right button and no Shift: holding a finger on a stack splits it (the right
+   * button), and a quick double tap quick-moves or equips it (Shift-click).
+   */
+  private bindTouchSlots(): void {
+    let timer = 0;
+    let sx = 0;
+    let sy = 0;
+    let fired = false;
+    const cancel = (): void => window.clearTimeout(timer);
+    const lift = (): void => {
+      cancel();
+      if (fired) this.swallowTapUntil = performance.now() + 450;
+      fired = false;
+    };
+    const move = (e: TouchEvent): void => {
+      const t = e.changedTouches[0];
+      if (t && Math.hypot(t.clientX - sx, t.clientY - sy) > 10) cancel();
+    };
+    this.panelEl.addEventListener(
+      'touchstart',
+      (e) => {
+        const t = e.changedTouches[0];
+        const target = e.target as HTMLElement;
+        const slotEl = target.closest('.slot') as HTMLElement | null;
+        cancel();
+        fired = false;
+        if (!t || !slotEl || (slotEl.dataset.inv === undefined && slotEl.dataset.chest === undefined)) return;
+        sx = t.clientX;
+        sy = t.clientY;
+        // the split redraws the pack, so the finger's own element (no longer in the page) hears it lift
+        target.addEventListener('touchmove', move, { passive: true });
+        target.addEventListener('touchend', lift, { once: true });
+        target.addEventListener('touchcancel', lift, { once: true });
+        timer = window.setTimeout(() => {
+          fired = true;
+          this.lastTap = null;
+          this.slotClick(slotEl, true, false);
+          navigator.vibrate?.(12);
+        }, 430);
+      },
+      { passive: true },
+    );
+  }
+
   private onMouseDown(e: MouseEvent): void {
     const target = e.target as HTMLElement;
     const slotEl = target.closest('.slot') as HTMLElement | null;
     if (slotEl && (slotEl.dataset.inv !== undefined || slotEl.dataset.chest !== undefined || slotEl.dataset.equip !== undefined)) {
       e.preventDefault();
+      if (performance.now() < this.swallowTapUntil) return;
+      if (this.game.input.usingTouch && slotEl.dataset.equip === undefined) {
+        const key = slotEl.dataset.inv !== undefined ? `i${slotEl.dataset.inv}` : `c${slotEl.dataset.chest}`;
+        const now = performance.now();
+        const last = this.lastTap;
+        this.lastTap = null;
+        // a double tap: the first tap picked the stack up; put it back and quick-move it instead
+        if (last && last.key === key && last.picked && now - last.t < 340 && this.cursor) {
+          const ref = this.slotRef(slotEl);
+          if (ref && !ref.equip && !ref.arr[ref.i]) {
+            ref.arr[ref.i] = this.cursor;
+            this.cursor = null;
+            this.slotClick(slotEl, false, true);
+            this.updateCursor();
+            return;
+          }
+        }
+        const had = !!this.cursor;
+        this.slotClick(slotEl, false, false);
+        this.lastTap = { key, t: now, picked: !had && !!this.cursor };
+        return;
+      }
       this.slotClick(slotEl, e.button === 2, e.shiftKey);
       return;
     }

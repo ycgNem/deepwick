@@ -14,6 +14,7 @@ import { saveGame, loadGame, hasSave, deleteSave, loadSettings, storeSettings } 
 import { TitleScene } from './title';
 import { MODES, ModeId } from './data/nerve';
 import { prefs, applyPrefs } from './prefs';
+import { TouchControls, goFullscreenLandscape } from './touch';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const loading = document.getElementById('loading') as HTMLElement;
@@ -29,6 +30,7 @@ let game: Game | null = null;
 let renderer: Renderer | null = null;
 let input: Input | null = null;
 let ui: UI | null = null;
+let touch: TouchControls | null = null;
 /** the live scene behind the title menu */
 let scene: TitleScene | null = null;
 let last = 0;
@@ -39,6 +41,7 @@ async function boot(): Promise<void> {
   loading.classList.add('gone');
   renderer = new Renderer(canvas);
   input = new Input(canvas);
+  touch = new TouchControls(input);
   ui = new UI();
   ui.bindSettings();
   makeScene(0x5eed ^ Math.floor(Math.random() * 6));
@@ -65,6 +68,7 @@ async function boot(): Promise<void> {
     showTitle();
   };
   window.addEventListener('resize', () => {
+    applyPrefs();
     if (game && renderer) renderer.resize(game);
     else if (scene && renderer) renderer.resize(scene.game);
   });
@@ -102,6 +106,8 @@ function showTitle(): void {
 }
 
 async function startAudio(): Promise<void> {
+  // on a phone or tablet, play fills the screen
+  if (input?.usingTouch) goFullscreenLandscape();
   await audio.init();
   audio.resume();
 }
@@ -125,6 +131,7 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   }
   const g = new Game(input, ui, loaded.p, loaded.world);
   game = g;
+  input.touchUse = (x, y): boolean => g.touchWantsUse(x, y);
   if (import.meta.env.DEV) Object.assign(window as object, { __game: g, __renderer: renderer });
   ui.attach(g);
   renderer.resize(g);
@@ -186,6 +193,7 @@ function loop(t: number): void {
   // a controller drives play, or a pointer in menus and on the title
   const menu = !game || !ui || ui.isOpen() || title.classList.contains('show') || intro.classList.contains('show');
   input?.pollPad(dt, menu);
+  touch?.update({ play: !menu && !!game && !game.player.dead, near: game && !menu ? (game.near?.label ?? null) : null });
   if (game && renderer && ui && input) {
     game.update(dt);
     ui.update(dt);
