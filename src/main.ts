@@ -10,7 +10,9 @@ import { Game } from './game';
 import { Renderer } from './render';
 import { newProgress } from './state';
 import { generateWorld, worldSpawn } from './world/gen';
-import { saveGame, loadGame, hasSave, deleteSave, loadSettings, storeSettings } from './save';
+import { BIOMES } from './data/biomes';
+import { SURFACE_Y } from './constants';
+import { saveGame, loadGame, hasSave, deleteSave, loadSettings, storeSettings, SLOTS, SlotMeta, slotMeta, useSlot, lastSlot, anySave } from './save';
 import { TitleScene } from './title';
 import { MODES, ModeId } from './data/nerve';
 import { prefs, applyPrefs } from './prefs';
@@ -61,7 +63,7 @@ async function boot(): Promise<void> {
     storeSettings({ music: audio.musicVolume, sfx: audio.sfxVolume, ...prefs });
   };
   ui.onQuit = () => {
-    if (game && ui) saveGame(game.saveSnapshot(ui.cursorStack()), game.world);
+    if (game && ui) saveGame(game.saveSnapshot(ui.cursorStack()), game.world, metaOf(game));
     game = null;
     hud.classList.remove('show');
     audio.music('none');
@@ -73,7 +75,7 @@ async function boot(): Promise<void> {
     else if (scene && renderer) renderer.resize(scene.game);
   });
   const saveNow = (): void => {
-    if (game && ui && !(window as { __noSave?: boolean }).__noSave) saveGame(game.saveSnapshot(ui.cursorStack()), game.world);
+    if (game && ui && !(window as { __noSave?: boolean }).__noSave) saveGame(game.saveSnapshot(ui.cursorStack()), game.world, metaOf(game));
   };
   window.addEventListener('beforeunload', saveNow);
   // a phone rarely says goodbye: it hides the page and may close it later without a word, so save as it goes
@@ -87,7 +89,10 @@ async function boot(): Promise<void> {
   // a touch or a click wakes sound the browser put to sleep
   window.addEventListener('pointerdown', () => audio.resume(), { capture: true });
   showTitle();
-  if (import.meta.env.DEV && new URLSearchParams(location.search).has('auto')) startGame(!hasSave());
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('auto')) {
+    useSlot(lastSlot());
+    startGame(!hasSave());
+  }
   requestAnimationFrame(loop);
 }
 
@@ -108,13 +113,114 @@ function makeScene(seed: number): void {
 
 function showTitle(): void {
   title.classList.add('show');
+  title.classList.remove('picking');
   if (scene && renderer) {
     renderer.resize(scene.game);
     scene.caption();
   }
+  // a first visit has one thing to do; after that, the last world and the rest of them
+  const any = anySave();
   const cont = document.getElementById('btnContinue') as HTMLButtonElement;
-  cont.style.display = hasSave() ? '' : 'none';
+  cont.style.display = any ? '' : 'none';
+  if (any) {
+    const n = lastSlot();
+    const m = slotMeta(n);
+    cont.innerHTML = `Continue<small>World ${n}${m ? ` \u00b7 Day ${m.day}` : ''}</small>`;
+  }
+  (document.getElementById('btnNew') as HTMLElement).style.display = any ? 'none' : '';
+  (document.getElementById('btnWorlds') as HTMLElement).style.display = any ? '' : 'none';
 }
+
+/** a strip of the world's map for its card on the title */
+const thumb = document.createElement('canvas');
+thumb.width = 100;
+thumb.height = 230;
+function metaOf(g: Game): SlotMeta {
+  let map: string | undefined;
+  try {
+    const x = thumb.getContext('2d');
+    if (x && ui) {
+      // the valley in section: dusk sky, then each layer of the mountain, faint where you have not been
+      const k = thumb.height / g.world.h;
+      x.imageSmoothingEnabled = false;
+      x.fillStyle = '#2a2440';
+      x.fillRect(0, 0, thumb.width, thumb.height);
+      const bands = ['#3a2a1c', '#1f3324', '#2a2046', '#3a1a14', '#1c1428', '#3a0e18'];
+      BIOMES.forEach((bm, i) => {
+        const y0 = Math.round((i === 0 ? SURFACE_Y : bm.top) * k);
+        const y1 = Math.round((BIOMES[i + 1]?.top ?? g.world.h) * k);
+        x.fillStyle = bands[i] ?? '#14101c';
+        x.fillRect(0, y0, thumb.width, y1 - y0);
+      });
+      x.drawImage(ui.mapCanvas, 0, 0, thumb.width, thumb.height);
+      // the deepest you have been
+      x.fillStyle = '#ffd75a';
+      x.fillRect(0, Math.round((SURFACE_Y + g.p.maxDepth) * k), thumb.width, 1);
+      map = thumb.toDataURL('image/png');
+    }
+  } catch {
+    map = undefined;
+  }
+  return { day: g.p.stats.days, flame: g.p.wick.kindled ? g.flameName() : 'Cold', deepest: g.p.maxDepth, time: g.p.stats.time, mode: g.p.mode, stilled: g.p.bossDefeated, at: Date.now(), map };
+}
+
+function ago(at: number): string {
+  if (!at) return '';
+  const m = Math.floor((Date.now() - at) / 60000);
+  if (m < 2) return 'just now';
+  if (m < 60) return `${m} minutes ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return h === 1 ? 'an hour ago' : `${h} hours ago`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'yesterday' : `${d} days ago`;
+}
+
+/** the three worlds, each with its card */
+function showSlots(): void {
+  const list = document.getElementById('slotList') as HTMLElement;
+  let html = '';
+  for (let n = 1; n <= SLOTS; n++) {
+    const m = hasSave(n) ? slotMeta(n) : null;
+    if (m) {
+      const mins = Math.floor(m.time / 60);
+      const when = ago(m.at);
+      html += `<div class="wcard"><div class="wcard-map">${m.map ? `<img src="${m.map}" alt="">` : ''}</div><div class="wcard-info"><b>World ${n}</b><span>Day ${m.day} \u00b7 Wick <em>${m.flame}</em></span><span>Deepest ${m.deepest}m \u00b7 ${Math.floor(mins / 60)}h ${mins % 60}m played</span><span class="chips"><i>${MODES[m.mode as ModeId]?.name ?? 'Delver'}</i>${m.stilled ? '<i class="dawn">Heart stilled</i>' : ''}${when ? `<small>${when}</small>` : ''}</span></div><div class="wcard-btns"><button class="big" data-play="${n}">Play</button><button class="ghost" data-del="${n}">Delete</button></div></div>`;
+    } else html += `<div class="wcard empty"><div class="wcard-map"></div><div class="wcard-info"><b>World ${n}</b><span>An untouched valley, the Wick cold.</span></div><div class="wcard-btns"><button class="big" data-new="${n}">New World</button></div></div>`;
+  }
+  list.innerHTML = html;
+  title.classList.add('picking');
+}
+
+document.getElementById('slotList')?.addEventListener('click', async (e) => {
+  const b = (e.target as HTMLElement).closest('button');
+  if (!b) return;
+  const n = Number(b.dataset.play ?? b.dataset.new ?? b.dataset.del);
+  if (b.dataset.del) {
+    if (!confirm(`Delete World ${n}? Everything in it is gone for good.`)) return;
+    audio.play('click');
+    deleteSave(n);
+    if (anySave()) showSlots();
+    else showTitle();
+    return;
+  }
+  await startAudio();
+  audio.play('click');
+  useSlot(n);
+  if (b.dataset.play) startGame(false);
+  else {
+    title.classList.remove('show');
+    intro.classList.add('show');
+  }
+});
+document.getElementById('btnWorlds')?.addEventListener('click', async () => {
+  await startAudio();
+  audio.play('click');
+  showSlots();
+});
+document.getElementById('btnSlotsBack')?.addEventListener('click', () => {
+  audio.play('click');
+  title.classList.remove('picking');
+});
 
 async function startAudio(): Promise<void> {
   // on a phone or tablet, play fills the screen
@@ -148,7 +254,7 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   renderer.resize(g);
   g.onSave = () => {
     if ((window as { __noSave?: boolean }).__noSave || !ui) return;
-    saveGame(g.saveSnapshot(ui.cursorStack()), g.world);
+    saveGame(g.saveSnapshot(ui.cursorStack()), g.world, metaOf(g));
   };
   if (fresh) g.onSave();
   title.classList.remove('show');
@@ -163,7 +269,8 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
 }
 
 document.getElementById('btnNew')?.addEventListener('click', async () => {
-  if (hasSave() && !confirm('Start a new game? Your current save will be replaced.')) return;
+  // only shown before there is any world at all
+  useSlot(1);
   await startAudio();
   audio.play('click');
   title.classList.remove('show');
@@ -172,6 +279,7 @@ document.getElementById('btnNew')?.addEventListener('click', async () => {
 document.getElementById('btnContinue')?.addEventListener('click', async () => {
   await startAudio();
   audio.play('click');
+  useSlot(lastSlot());
   startGame(false);
 });
 /** the difficulty picked on the intro card */

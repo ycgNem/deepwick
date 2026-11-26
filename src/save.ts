@@ -5,6 +5,82 @@ import { generateWorld } from './world/gen';
 import { B, BLOCKS } from './data/blocks';
 import { farFromFlame } from './world/gas';
 import { settleLoose } from './world/cavein';
+import { FLAME, flameLevel } from './data/wick';
+
+/**
+ * Three worlds side by side. World 1 keeps the key the single save always had, so a save from
+ * before slots is simply World 1. Each world has a small card of its own (day, flame, depth, a
+ * strip of its map) so the title can show them without reading whole worlds.
+ */
+export const SLOTS = 3;
+const LAST_KEY = 'deepwick-slot';
+let active = 1;
+export function slotKey(n: number): string {
+  return n <= 1 ? SAVE_KEY : `${SAVE_KEY}-${n}`;
+}
+function metaKey(n: number): string {
+  return `${slotKey(n)}-meta`;
+}
+/** play in this world from now on (and remember it as the last one played) */
+export function useSlot(n: number): void {
+  active = Math.max(1, Math.min(SLOTS, Math.round(n)));
+  try {
+    localStorage.setItem(LAST_KEY, String(active));
+  } catch {
+    // ignore
+  }
+}
+export function currentSlot(): number {
+  return active;
+}
+/** the world played last, or the first one there is */
+export function lastSlot(): number {
+  let n = 1;
+  try {
+    n = Number(localStorage.getItem(LAST_KEY)) || 1;
+  } catch {
+    // ignore
+  }
+  if (n >= 1 && n <= SLOTS && hasSave(n)) return n;
+  for (let k = 1; k <= SLOTS; k++) if (hasSave(k)) return k;
+  return 1;
+}
+export function anySave(): boolean {
+  for (let k = 1; k <= SLOTS; k++) if (hasSave(k)) return true;
+  return false;
+}
+
+/** what a world's card on the title shows */
+export interface SlotMeta {
+  day: number;
+  /** the Wick's flame by name ('Cold' before it is kindled) */
+  flame: string;
+  deepest: number;
+  /** seconds played */
+  time: number;
+  mode: string;
+  stilled: boolean;
+  /** when it was last saved (ms), 0 if not known */
+  at: number;
+  /** a strip of its map as a data URL */
+  map?: string;
+}
+export function slotMeta(n: number): SlotMeta | null {
+  try {
+    const raw = localStorage.getItem(metaKey(n));
+    if (raw) return JSON.parse(raw) as SlotMeta;
+    const save = localStorage.getItem(slotKey(n));
+    if (!save) return null;
+    // a save from before there were slots: read its card out of it once
+    const p = (JSON.parse(save) as SaveFile).p;
+    const lvl = flameLevel(p.wick);
+    const m: SlotMeta = { day: p.stats?.days ?? 1, flame: p.bossDefeated ? 'Dawn' : lvl > 0 ? FLAME[lvl].name : 'Cold', deepest: p.maxDepth ?? 0, time: p.stats?.time ?? 0, mode: p.mode ?? 'delver', stilled: !!p.bossDefeated, at: 0 };
+    localStorage.setItem(metaKey(n), JSON.stringify(m));
+    return m;
+  } catch {
+    return null;
+  }
+}
 
 interface SaveFile {
   p: Progress;
@@ -53,27 +129,36 @@ function unrle(b64: string, target: Uint8Array): void {
   }
 }
 
-export function saveGame(p: Progress, w: World): boolean {
+export function saveGame(p: Progress, w: World, meta?: SlotMeta): boolean {
   const data: SaveFile = { p, fg: rle(w.fg), wall: rle(w.wall), obj: rle(w.obj), decor: rle(w.decor), explored: rle(w.explored), rail: rle(w.rail), placed: rle(w.placed), gas: rle(w.gas), loose: rle(w.loose), water: 1, flood: 1 };
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    localStorage.setItem(slotKey(active), JSON.stringify(data));
+    if (meta) {
+      try {
+        localStorage.setItem(metaKey(active), JSON.stringify(meta));
+      } catch {
+        // the card is a nicety: never let it cost the save
+        delete meta.map;
+        localStorage.setItem(metaKey(active), JSON.stringify(meta));
+      }
+    }
     return true;
   } catch {
     return false;
   }
 }
 
-export function hasSave(): boolean {
+export function hasSave(n = active): boolean {
   try {
-    return !!localStorage.getItem(SAVE_KEY);
+    return !!localStorage.getItem(slotKey(n));
   } catch {
     return false;
   }
 }
 
-export function loadGame(): { p: Progress; world: World } | null {
+export function loadGame(n = active): { p: Progress; world: World } | null {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(slotKey(n));
     if (!raw) return null;
     const data = JSON.parse(raw) as SaveFile;
     if (!data.p || data.p.version !== 2) return null;
@@ -189,9 +274,10 @@ function untouchedRock(w: World, i: number): boolean {
   return def.solid && !def.liquid && !def.unbreakable && !w.placed[i] && !w.obj[i] && !w.rail[i];
 }
 
-export function deleteSave(): void {
+export function deleteSave(n = active): void {
   try {
-    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(slotKey(n));
+    localStorage.removeItem(metaKey(n));
   } catch {
     // ignore
   }
