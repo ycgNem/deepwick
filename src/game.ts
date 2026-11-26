@@ -1,6 +1,6 @@
 import { World, Obj } from './world/world';
 import { generateWorld, worldSpawn, groundAt, BOSS_CENTER } from './world/gen';
-import { LightMap, PointLight } from './world/light';
+import { LightMap, PointLight, sputter } from './world/light';
 import { TILE, WORLD_W, DAY_LENGTH, INV_SIZE } from './constants';
 import { BLOCKS, B, PLACED_WALLS } from './data/blocks';
 import { BIOMES, biomeAt, DECOR_DROPS } from './data/biomes';
@@ -20,6 +20,7 @@ import { BREATH_MAX } from './world/flood';
 import { GUTTER_NEAR, GUTTER_WARN, GUTTER_LEN, GUTTER_DIM, LAMPLESS_CAP, MINERS, gutterGap } from './data/lampless';
 import { NERVE_MAX, NERVE_FRAYED, NERVE_SHAKEN, LIT, STEADY, WHISPERS, MODES, ModeDef } from './data/nerve';
 import { Ending, DAWN_RADIUS, DAWN_FROM, DAWN_TO } from './ending';
+import { Weather } from './weather';
 import {
   Progress,
   Stats,
@@ -369,6 +370,8 @@ export class Game {
   private tideT = 0;
   /** the Wick flaring up a level: a light wave, rays and a title card */
   flare: { t: number; level: number; from: number } | null = null;
+  /** rain, storms and fog over the valley */
+  weather = new Weather();
   /** the Gloamheart stilled: its light climbing home to the Wick (a cutscene; the delver waits) */
   ending: Ending | null = null;
   /** placed lights flaring as the climbing light goes by (tile, 0..1) */
@@ -400,6 +403,7 @@ export class Game {
     pl.oil = this.st.oilMax > 0 ? Math.min(p.oil, this.st.oilMax) : p.oil;
     pl.fallStartY = pl.y;
     this.wasNight = isNight(p.clock);
+    this.weather.load(p.weather);
     if (this.p.bounties.length === 0) this.refillBounties();
     this.reconcileRelics();
     this.migrateWick();
@@ -535,6 +539,7 @@ export class Game {
     if (!menu && this.ending) this.updateEnding(dt);
     else if (!menu) {
       this.updateClock(dt);
+      this.weather.update(this, dt);
       this.updatePlayer(dt);
       this.updateFishing(dt);
       this.flowWater(dt);
@@ -766,9 +771,38 @@ export class Game {
     const b = 0.27 + (0.92 - 0.27) * t;
     // warm sunsets and sunrises
     const warm = c > 0.5 && c < 0.66 ? 1 - Math.abs(c - 0.58) / 0.08 : c < 0.08 ? 1 - c / 0.08 : c > 0.95 ? (c - 0.95) / 0.05 : 0;
-    const k = Math.max(0, warm) * 0.5;
-    if (this.p.tide) return [r + k * 0.25 + 0.05, (g - k * 0.15) * 0.75, b - k * 0.35 + 0.1];
-    return [r + k * 0.25, g - k * 0.15, b - k * 0.35];
+    const k = Math.max(0, warm) * 0.5 * (1 - this.weather.dark * 1.6);
+    let sr = r + k * 0.25;
+    let sg = g - k * 0.15;
+    let sb = b - k * 0.35;
+    if (this.p.tide) {
+      sr += 0.05;
+      sg *= 0.75;
+      sb += 0.1;
+    }
+    // cloud: greyer and darker; fog: a pale flat light
+    const wx = this.weather;
+    const d = wx.dark;
+    if (d > 0) {
+      const grey = (sr + sg + sb) / 3;
+      sr = (sr * (1 - d * 0.6) + grey * d * 0.6) * (1 - d);
+      sg = (sg * (1 - d * 0.6) + grey * d * 0.6) * (1 - d);
+      sb = (sb * (1 - d * 0.6) + grey * d * 0.6) * (1 - d * 0.85);
+    }
+    // lightning throws the whole valley into white for an instant
+    const fl = wx.flash * (prefs.shake ? 1 : 0.45);
+    if (fl > 0) {
+      sr += fl * 0.95;
+      sg += fl * 0.98;
+      sb += fl * 1.05;
+    }
+    return [sr, sg, sb];
+  }
+
+  /** is this tile out under the open sky (nothing solid anywhere above it)? */
+  exposed(tx: number, ty: number): boolean {
+    const w = this.world;
+    return tx >= 0 && tx < w.w && ty < w.skyline[tx];
   }
 
   // ------------------------------------------------------------------ player
@@ -1185,7 +1219,7 @@ export class Game {
           }
         }
         if (f.state === 'float') {
-          f.wait -= dt;
+          f.wait -= dt * (1 + 0.6 * this.weather.rain);
           if (f.wait <= 0) {
             f.state = 'bite';
             f.t = 0;
@@ -3887,6 +3921,7 @@ export class Game {
     pl.vy = 0;
     if (this.boss) this.updateBoss(dt);
     this.flowWater(dt);
+    this.weather.update(this, dt);
     this.updateSouls(dt);
     if (en.update(this, dt)) this.endEnding();
   }
@@ -3895,6 +3930,8 @@ export class Game {
   beginClimb(): void {
     this.boss = null;
     this.p.tide = null;
+    // the sky clears as the light climbs for it
+    this.weather.clear();
     this.p.clock = DAWN_FROM;
     this.dawnMusicT = 118;
     this.shake = Math.max(this.shake, 6);
@@ -3903,6 +3940,7 @@ export class Game {
   /** the light reaches the Wick: it takes it, the sun comes up, and the light carries you home */
   beginDawn(): void {
     const p = this.p;
+    this.weather.clear();
     const cold = !p.wick.kindled;
     p.wick.kindled = true;
     this.flare = { t: 0, level: MAX_FLAME, from: cold ? 0 : FLAME[this.flame].radius };
@@ -3980,12 +4018,13 @@ export class Game {
       const y = pt.y + this.rng.int(-25, 25);
       if (!w.inside(x, y)) continue;
       const o = w.getObj(x, y);
-      if (o === Obj.SAPLING && Math.random() < 0.06) {
+      const drink = 1 + 1.5 * this.weather.rain;
+      if (o === Obj.SAPLING && Math.random() < 0.06 * drink) {
         let room = true;
         for (let yy = y - 4; yy < y; yy++) if (w.rock(x, yy)) room = false;
         if (room && y <= w.skyline[x]) w.setObj(x, y, Obj.TREE);
       } else if (o === Obj.BUSH && Math.random() < 0.025) w.setObj(x, y, Obj.BUSH_BERRY);
-      else if ((o === Obj.CROP0 || o === Obj.CROP1 || o === Obj.CROP2) && Math.random() < 0.08 && y <= w.skyline[x] + 1) w.setObj(x, y, o + 1);
+      else if ((o === Obj.CROP0 || o === Obj.CROP1 || o === Obj.CROP2) && Math.random() < 0.08 * drink && y <= w.skyline[x] + 1) w.setObj(x, y, o + 1);
       else if (w.get(x, y) === B.DIRT && !w.rock(x, y - 1) && !w.getObj(x, y - 1) && y <= w.skyline[x]) {
         // grass creeps back over bare dirt that sees the sky
         if (w.get(x - 1, y) === B.GRASS || w.get(x + 1, y) === B.GRASS || w.get(x - 1, y + 1) === B.GRASS || w.get(x + 1, y - 1) === B.GRASS) w.set(x, y, B.GRASS);
@@ -4989,7 +5028,9 @@ export class Game {
     // a guttering flame shrinks and dims (dimmer than your eyes' own glow at its lowest, or the light would still spread)
     const reach = this.flameReach();
     const bright = Math.min(1, 0.35 + (0.65 * (reach - GUTTER_DIM)) / (1 - GUTTER_DIM));
-    if (hd?.id === 'torch' && !pl.dead) lights.push({ x: lx + pl.facing * 0.4, y: ly, r: 1.1 * bright, g: 0.74 * bright, b: 0.38 * bright, radius: 7 * flick * vault * dim * reach, cast: true });
+    const rain = this.weather.rain;
+    const drench = rain > 0 && this.exposed(Math.floor(lx), Math.floor(ly) - 1) ? sputter(rain * 0.7, this.time, 0) : 1;
+    if (hd?.id === 'torch' && !pl.dead) lights.push({ x: lx + pl.facing * 0.4, y: ly, r: 1.1 * bright * drench, g: 0.74 * bright * drench, b: 0.38 * bright * drench, radius: 7 * flick * vault * dim * reach * (0.55 + 0.45 * drench), cast: true });
     if (this.st.oilMax > 0 && pl.oil > 0 && !pl.dead) {
       let rad = this.st.light * vault * dim * reach;
       if (pl.oil < this.st.oilMax * 0.1) rad *= 0.6 + 0.4 * (pl.oil / (this.st.oilMax * 0.1));
@@ -5054,7 +5095,7 @@ export class Game {
         }
       }
     }
-    this.light.compute(this.world, tx0, ty0, tw, th, lights, this.time, this.skyColor());
+    this.light.compute(this.world, tx0, ty0, tw, th, lights, this.time, this.skyColor(), this.weather.rain);
     this.light.finish(this.world);
   }
 
@@ -5233,6 +5274,7 @@ export class Game {
 
   /** persist positional state into progress before saving */
   syncProgress(): void {
+    this.p.weather = this.weather.save();
     const pl = this.player;
     if (pl.dead) {
       const s = this.p.spawn;

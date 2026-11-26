@@ -24,6 +24,12 @@ const MARGIN = 14;
  * emissive blocks, decor, torches and dynamic point lights; then light is spread with
  * four directional sweeps (twice) so it bends around corners and fades into rock.
  */
+/** how bright a flame out in the rain burns: low, and catching and dropping as drops hit it */
+export function sputter(wet: number, time: number, x: number): number {
+  const catchK = Math.max(0, Math.sin(time * 2.3 + x * 1.7) * Math.sin(time * 5.1 + x * 0.6));
+  return (1 - 0.58 * wet) * (0.82 + 0.18 * Math.sin(time * 23 + x * 5.3)) * (1 - 0.25 * wet * catchK);
+}
+
 export class LightMap {
   x0 = 0;
   y0 = 0;
@@ -55,7 +61,11 @@ export class LightMap {
     this.img = this.ctx.createImageData(w, h);
   }
 
-  compute(world: World, tx0: number, ty0: number, tw: number, th: number, lights: PointLight[], time: number, sky: [number, number, number]): void {
+  /**
+   * `wet` (0..1) is how hard it is raining: a torch or campfire with open sky above it sputters
+   * and burns low; one with a roof over it does not notice.
+   */
+  compute(world: World, tx0: number, ty0: number, tw: number, th: number, lights: PointLight[], time: number, sky: [number, number, number], wet = 0): void {
     const x0 = tx0 - MARGIN;
     const y0 = ty0 - MARGIN;
     const w = tw + MARGIN * 2;
@@ -106,7 +116,8 @@ export class LightMap {
         }
         const o = world.obj[wi];
         if (o) {
-          const fl = 0.92 + 0.08 * Math.sin(time * 11 + x * 3.1) * Math.sin(time * 7.3 + y);
+          let fl = 0.92 + 0.08 * Math.sin(time * 11 + x * 3.1) * Math.sin(time * 7.3 + y);
+          if (wet > 0 && (o === Obj.TORCH || o === Obj.CAMPFIRE) && y < world.skyline[x]) fl *= sputter(wet, time, x);
           if (o === Obj.TORCH) add(R, G, Bc, k, 1.05 * fl, 0.72 * fl, 0.38 * fl);
           else if (o === Obj.LAMP) add(R, G, Bc, k, 1.15 * fl, 0.85 * fl, 0.5 * fl);
           else if (o === Obj.WICKPOST) add(R, G, Bc, k, 1.35 * fl, 1.05 * fl, 0.62 * fl);

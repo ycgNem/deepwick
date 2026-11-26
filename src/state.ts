@@ -93,6 +93,8 @@ export interface Progress {
   lost?: LostSoul[];
   /** a Gloam Tide in progress: the Wick's ward (0..100) and what you have cut down */
   tide?: { day: number; ward: number; kills: number } | null;
+  /** the weather over the valley, and how long it has left */
+  weather?: { kind: 'clear' | 'rain' | 'storm' | 'fog'; left: number };
   /** Gloam Tides the Wick has held through */
   tidesHeld?: number;
   /** time of day 0..1 (0 = dawn) */

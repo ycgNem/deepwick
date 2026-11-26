@@ -1753,6 +1753,24 @@ body.cine #touch {
 .chip.clock.night {
   border-color: #3a3a7a;
 }
+.chip.clock i.wx {
+  border-radius: 3px;
+  background: linear-gradient(#c8d2e2 0 55%, transparent 55%), repeating-linear-gradient(100deg, #7ab0ff 0 1px, transparent 1px 3px);
+  box-shadow: none;
+}
+.chip.clock i.wx.storm {
+  background: linear-gradient(#8a8aa8 0 55%, transparent 55%), linear-gradient(100deg, transparent 0 42%, #fff6a0 42% 58%, transparent 58%);
+  box-shadow: 0 0 6px rgba(200, 200, 255, 0.6);
+}
+.chip.clock i.wx.fog {
+  border-radius: 2px;
+  background: repeating-linear-gradient(#e4e8f0 0 2px, transparent 2px 4px);
+}
+.chip.clock .wxl {
+  font-size: 11px;
+  opacity: 0.75;
+  margin-left: 2px;
+}
 #cursorItem {
   position: fixed;
   z-index: 50;

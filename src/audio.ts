@@ -31,6 +31,9 @@ const SFX = [
   'ignite',
   'lightrise',
   'duskbell',
+  'rain',
+  'thunder',
+  'thunderfar',
   'fireball',
   'roar',
   'teleport',
@@ -177,10 +180,33 @@ class AudioSystem {
     src.start();
   }
 
+  private rainGain: GainNode | null = null;
+  private rainTarget = 0;
+
+  /** the rain on the valley; level 0..1 (0 stops it) */
+  rain(level: number): void {
+    this.rainTarget = level;
+    const ctx = this.ctx;
+    const buf = this.buffers.get('rain');
+    if (!ctx || !buf || !this.sfxGain || this.rainGain || level <= 0) return;
+    this.rainGain = ctx.createGain();
+    this.rainGain.gain.value = 0;
+    this.rainGain.connect(this.sfxGain);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(this.rainGain);
+    src.start();
+  }
+
   update(dt: number): void {
     if (this.ambGain) {
       const g = this.ambGain.gain;
       g.value += (this.ambTarget * 0.45 - g.value) * Math.min(1, dt * 1.5);
+    }
+    if (this.rainGain) {
+      const g = this.rainGain.gain;
+      g.value += (this.rainTarget * 0.55 - g.value) * Math.min(1, dt * 1.2);
     }
     const el = this.musicEls.get(this.current);
     if (el && el.volume < this.musicVolume) el.volume = Math.min(this.musicVolume, el.volume + dt * 0.5);

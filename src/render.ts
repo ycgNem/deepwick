@@ -19,6 +19,7 @@ import { propRoof, PROP_REACH } from './world/cavein';
 import { dampAt, BREATH_MAX } from './world/flood';
 import { Mode as HeartMode } from './boss';
 import { POUR } from './ending';
+import { sputter } from './world/light';
 
 const ROW = { idle: 0, walk: 1, jump: 2, hurt: 3, mine: 4, climb: 5 } as const;
 const CELL = 68;
@@ -348,6 +349,8 @@ export class Renderer {
     this.drawFishing(g, ctx, camX, camY);
     this.updateAmbient(g, dt, camX, camY, vw, vh);
     this.drawGhost(g, ctx, camX, camY);
+    this.drawFog(g, ctx, camX, camY, vw, vh);
+    this.drawRain(g, ctx, camX, camY, vw, vh);
 
     // ---- lighting
     const L = g.light;
@@ -360,6 +363,7 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
 
     this.drawGlows(g, ctx, camX, camY, vw, vh);
+    this.drawBolt(g, ctx, camX, camY);
     this.drawShades(g, ctx, camX, camY);
     this.drawReelMeter(g, ctx, camX, camY);
     this.drawBreath(g, ctx, camX, camY);
@@ -367,6 +371,12 @@ export class Renderer {
     this.drawDread(g, ctx, vw, vh);
     this.drawHover(g, ctx, camX, camY);
 
+    // a near strike whites out the screen for an instant (gently, with screen effects off)
+    const fl = g.weather.flash;
+    if (fl > 0.02 && camY < (SURFACE_Y + 30) * TILE) {
+      ctx.fillStyle = `rgba(235,240,255,${(fl * (prefs.shake ? 0.32 : 0.1)).toFixed(3)})`;
+      ctx.fillRect(0, 0, vw, vh);
+    }
     if (g.flare && g.flare.t < 0.7 && prefs.shake) {
       ctx.fillStyle = `rgba(255,236,190,${(0.5 * (1 - g.flare.t / 0.7) * (g.flare.level === 1 ? 1 : 0.6)).toFixed(3)})`;
       ctx.fillRect(0, 0, vw, vh);
@@ -428,6 +438,144 @@ export class Renderer {
     }
   }
 
+  // ------------------------------------------------------------------ weather
+  /** a fixed field of raindrops, scrolled with time and the camera */
+  private drops: { x: number; y: number; s: number; l: number }[] = Array.from({ length: 360 }, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    s: 0.8 + Math.random() * 0.45,
+    l: 7 + Math.random() * 9,
+  }));
+  private fogPuff: HTMLCanvasElement | null = null;
+
+  /** rain: streaks that stop at the first solid thing above them, and splashes where they land */
+  private drawRain(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const wx = g.weather;
+    const rain = wx.rain;
+    if (rain < 0.02) return;
+    const w = g.world;
+    const sky = w.skyline;
+    const c0 = Math.max(0, Math.floor(camX / TILE));
+    const c1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE));
+    let low = 0;
+    for (let x = c0; x <= c1; x++) if (sky[x] > low) low = sky[x];
+    // deep underground: nothing to draw
+    if (low * TILE < camY) return;
+    const storm = wx.kind === 'storm' ? wx.k : 0;
+    const slant = 0.16 + 0.3 * storm;
+    const W = vw + 80;
+    const H = vh + 80;
+    const n = Math.min(this.drops.length, Math.round(rain * (vw * vh) / 1500));
+    const t = g.time;
+    ctx.save();
+    ctx.strokeStyle = `rgba(185,205,235,${(0.35 + 0.2 * rain).toFixed(2)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const d = this.drops[i];
+      const fall = t * 560 * d.s;
+      const y = mod(d.y * H + fall - camY, H) - 40;
+      const x = mod(d.x * W - camX - fall * slant, W) - 40;
+      const col = Math.floor((x + camX) / TILE);
+      if (col < 0 || col >= w.w) continue;
+      const ground = sky[col] * TILE - camY;
+      if (y - d.l > ground) continue;
+      const y1 = Math.min(y, ground);
+      const len = y1 - (y - d.l);
+      ctx.moveTo(Math.round(x + d.l * slant) + 0.5, Math.round(y - d.l));
+      ctx.lineTo(Math.round(x + (d.l - len) * slant) + 0.5, Math.round(y1));
+    }
+    ctx.stroke();
+    // splashes on whatever the rain lands on (the top of the water, where there is water)
+    ctx.fillStyle = 'rgba(205,220,245,0.7)';
+    const m = Math.round(n * 0.35);
+    for (let k = 0; k < m; k++) {
+      const x = Math.floor(Math.random() * vw);
+      const col = Math.floor((x + camX) / TILE);
+      if (col < 0 || col >= w.w) continue;
+      let top = sky[col];
+      for (let u = 0; u < 12 && top > 0 && w.fg[(top - 1) * w.w + col] === B.WATER; u++) top--;
+      const y = top * TILE - camY;
+      if (y < 0 || y > vh) continue;
+      const h = Math.random() < 0.5 ? 1 : 2;
+      ctx.fillRect(x - 1, y - h - 1, 1, 1);
+      ctx.fillRect(x + 1, y - h, 1, 1);
+      ctx.fillRect(x, y - 1, 1, 1);
+    }
+    ctx.restore();
+  }
+
+  /** morning fog: a pale haze over the valley floor and slow banks drifting through it */
+  private drawFog(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const f = g.weather.fog;
+    if (f < 0.02) return;
+    const groundY = SURFACE_Y * TILE - camY;
+    if (groundY + 260 < 0) return;
+    if (!this.fogPuff) {
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = 96;
+      const x = c.getContext('2d');
+      if (x) {
+        // a soft ellipse: a round gradient, squashed to the canvas height
+        const gr = x.createRadialGradient(128, 128, 4, 128, 128, 128);
+        gr.addColorStop(0, 'rgba(225,230,238,0.85)');
+        gr.addColorStop(0.5, 'rgba(225,230,238,0.4)');
+        gr.addColorStop(1, 'rgba(225,230,238,0)');
+        x.setTransform(1, 0, 0, 0.375, 0, 0);
+        x.fillStyle = gr;
+        x.fillRect(0, 0, 256, 256);
+      }
+      this.fogPuff = c;
+    }
+    const haze = ctx.createLinearGradient(0, groundY - 220, 0, groundY + 160);
+    haze.addColorStop(0, 'rgba(215,220,230,0)');
+    haze.addColorStop(0.55, `rgba(215,220,230,${(0.42 * f).toFixed(3)})`);
+    haze.addColorStop(1, 'rgba(215,220,230,0)');
+    ctx.fillStyle = haze;
+    ctx.fillRect(0, Math.max(0, groundY - 220), vw, Math.min(vh, groundY + 160) - Math.max(0, groundY - 220));
+    const span = vw + 520;
+    const w = g.world;
+    ctx.globalAlpha = 0.55 * f;
+    for (let i = 0; i < 12; i++) {
+      const sx = mod(i * 197 + g.time * (5 + (i % 4) * 3) - camX, span) - 260;
+      const col = Math.max(0, Math.min(w.w - 1, Math.floor((sx + 128 + camX) / TILE)));
+      const sy = w.surface[col] * TILE - camY - 60 - (i % 3) * 26;
+      if (sy > vh || sy + 96 < 0) continue;
+      ctx.drawImage(this.fogPuff, Math.round(sx), Math.round(sy), 256 + (i % 3) * 60, 96);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** a bolt of lightning, white-hot and gone in a blink */
+  private drawBolt(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
+    const b = g.weather.bolt;
+    if (!b) return;
+    // it strikes, dims, and strikes again down the same path
+    const a = b.t < 0.08 ? 1 : b.t < 0.14 ? 0.3 : b.t < 0.22 ? 0.9 : Math.max(0, 1 - (b.t - 0.22) / 0.13);
+    if (a <= 0.02) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineJoin = 'miter';
+    const path = (): void => {
+      ctx.beginPath();
+      b.pts.forEach((p, i) => (i === 0 ? ctx.moveTo(Math.round(p.x - camX), Math.round(p.y - camY)) : ctx.lineTo(Math.round(p.x - camX), Math.round(p.y - camY))));
+    };
+    path();
+    ctx.strokeStyle = `rgba(150,160,255,${(0.35 * a).toFixed(3)})`;
+    ctx.lineWidth = 10;
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(210,220,255,${(0.7 * a).toFixed(3)})`;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const end = b.pts[b.pts.length - 1];
+    this.glowAt(ctx, end.x - camX, end.y - camY, 60, `rgba(200,210,255,${(0.5 * a).toFixed(3)})`);
+    ctx.restore();
+  }
+
   // ------------------------------------------------------------------ sky
   private drawSky(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
     const groundY = SURFACE_Y * TILE - camY;
@@ -472,8 +620,8 @@ export class Renderer {
       ctx.fillRect(0, 0, vw, vh);
     }
     // stars only in the open sky above the painted mountains (the dusk art has its own)
-    if (dl < 0.6 && y0 > 0) {
-      const a = (0.6 - dl) / 0.48;
+    if (dl < 0.6 && y0 > 0 && g.weather.dark < 0.2) {
+      const a = ((0.6 - dl) / 0.48) * (1 - g.weather.dark * 5);
       for (const s of this.stars) {
         const x = mod(s.x - camX * 0.05, vw + 40) - 20;
         const y = mod(s.y - (camY - baseCam) * 0.3, 900) - 600 + y0;
@@ -488,8 +636,33 @@ export class Renderer {
       ctx.fillStyle = `rgba(70,14,90,${0.28 + Math.sin(g.time * 0.8) * 0.06})`;
       ctx.fillRect(0, 0, vw, vh);
     }
-    // the moon (red on a tide night)
-    if (isNight(c)) {
+    // cloud: the sky greys over, the stars and moon go out, and a low wrack rolls over the peaks
+    const wx = g.weather;
+    const od = Math.min(1, wx.dark * 2.2);
+    if (od > 0.01) {
+      ctx.fillStyle = `rgba(46,50,62,${(od * 0.55).toFixed(3)})`;
+      ctx.fillRect(0, 0, vw, vh);
+      const band = Math.max(40, y0 + 40);
+      for (let layer = 0; layer < 2; layer++) {
+        ctx.fillStyle = layer === 0 ? `rgba(70,74,88,${(od * 0.5).toFixed(3)})` : `rgba(34,36,46,${(od * 0.6).toFixed(3)})`;
+        const speed = layer === 0 ? 5 : 9;
+        const step = layer === 0 ? 90 : 70;
+        const off = mod(g.time * speed - camX * (layer === 0 ? 0.08 : 0.12), step);
+        for (let x = -step + off - step; x < vw + step; x += step) {
+          const seed = Math.floor((x - off + camX * (layer === 0 ? 0.08 : 0.12)) / step);
+          const r = 30 + mod(seed * 37, 26) + layer * 8;
+          const cy = band * (layer === 0 ? 0.25 : 0.12) + mod(seed * 53, 22);
+          ctx.beginPath();
+          ctx.arc(Math.round(x), Math.round(cy), r, 0, Math.PI * 2);
+          ctx.arc(Math.round(x + r * 0.9), Math.round(cy + 8), r * 0.75, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillRect(0, 0, vw, Math.round(band * (layer === 0 ? 0.25 : 0.12)));
+      }
+    }
+    // the moon (red on a tide night), hidden behind cloud
+    if (isNight(c) && od < 0.9) {
+      ctx.globalAlpha = 1 - od;
       const t = (c - 0.6) / 0.36;
       const mx = vw * (0.15 + t * 0.7);
       const my = 70 - Math.sin(t * Math.PI) * 40;
@@ -501,6 +674,12 @@ export class Renderer {
       ctx.fillStyle = 'rgba(160,170,210,0.7)';
       ctx.fillRect(Math.round(mx) - 3, Math.round(my) - 2, 3, 3);
       ctx.fillRect(Math.round(mx) + 2, Math.round(my) + 3, 2, 2);
+      ctx.globalAlpha = 1;
+    }
+    // lightning lights the whole sky
+    if (wx.flash > 0.02) {
+      ctx.fillStyle = `rgba(225,230,255,${(wx.flash * (prefs.shake ? 0.7 : 0.3)).toFixed(3)})`;
+      ctx.fillRect(0, 0, vw, vh);
     }
   }
 
@@ -1366,17 +1545,21 @@ export class Renderer {
     const ty0 = Math.max(0, Math.floor(camY / TILE) - 1);
     const tx1 = Math.min(w.w - 1, Math.floor((camX + vw) / TILE) + 1);
     const ty1 = Math.min(w.h - 1, Math.floor((camY + vh) / TILE) + 1);
+    const wet = g.weather.rain;
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = ty * w.w + tx;
         const o = w.obj[i];
         const sx = tx * TILE - camX;
         const sy = ty * TILE - camY;
-        if (o === Obj.TORCH) this.glowAt(ctx, sx + 16, sy + 9, 26 * (0.85 + Math.sin(g.time * 10 + tx) * 0.1), 'rgba(255,170,60,0.55)');
+        const sp = wet > 0 && (o === Obj.TORCH || o === Obj.CAMPFIRE) && ty < w.skyline[tx] ? sputter(wet, g.time, tx) : 1;
+        if (sp < 1 && Math.random() < 0.06 * wet)
+          g.parts.push({ x: sx + camX + 12 + Math.random() * 8, y: sy + camY + (o === Obj.TORCH ? 4 : 14), vx: (Math.random() - 0.5) * 8, vy: -18 - Math.random() * 14, life: 0.9, max: 0.9, color: '#b8bcc8', size: 2, grav: 0, glow: false });
+        if (o === Obj.TORCH) this.glowAt(ctx, sx + 16, sy + 9, 26 * sp * (0.85 + Math.sin(g.time * 10 + tx) * 0.1), 'rgba(255,170,60,0.55)');
         else if (o === Obj.LAMP) this.glowAt(ctx, sx + 16, sy + 17, 30 * (0.9 + Math.sin(g.time * 6 + tx) * 0.05), 'rgba(255,190,90,0.5)');
         else if (o === Obj.CAMPFIRE) {
-          this.glowAt(ctx, sx + 16, sy + 20, 40 + Math.sin(g.time * 9 + tx) * 4, 'rgba(255,140,40,0.55)');
-          if (Math.random() < 0.3) g.parts.push({ x: sx + camX + 10 + Math.random() * 12, y: sy + camY + 14, vx: (Math.random() - 0.5) * 10, vy: -30 - Math.random() * 30, life: 0.8, max: 0.8, color: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', size: 1, grav: 0, glow: true });
+          this.glowAt(ctx, sx + 16, sy + 20, (40 + Math.sin(g.time * 9 + tx) * 4) * sp, 'rgba(255,140,40,0.55)');
+          if (Math.random() < 0.3 * sp) g.parts.push({ x: sx + camX + 10 + Math.random() * 12, y: sy + camY + 14, vx: (Math.random() - 0.5) * 10, vy: -30 - Math.random() * 30, life: 0.8, max: 0.8, color: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', size: 1, grav: 0, glow: true });
         } else if (o === Obj.FURNACE) this.glowAt(ctx, sx + 16, sy + 24, 22 + Math.sin(g.time * 7 + tx) * 2, 'rgba(255,120,30,0.45)');
         else if (o === Obj.WICKPOST) {
           const top = sy + TILE - A.camp.wickpost.height + (A.padBottom.wickpost ?? 0) + 1;

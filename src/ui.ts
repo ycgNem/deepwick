@@ -356,7 +356,8 @@ export class UI implements UIHooks {
     const c = g.p.clock;
     const hours = Math.floor(((c * 24 + 6) % 24) * 1);
     const mins = Math.floor((((c * 24 + 6) % 1) * 60) / 10) * 10;
-    h.clock.innerHTML = `<i class="${isNight(c) ? 'moon' : 'sun'}"></i>Day ${g.p.stats.days} · ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    const wl = g.weather.label;
+    h.clock.innerHTML = `<i class="${wl ? `wx ${wl.toLowerCase()}` : isNight(c) ? 'moon' : 'sun'}"></i>Day ${g.p.stats.days} · ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}${wl ? ` <small class="wxl">${wl}</small>` : ''}`;
     const tideNote = g.p.tide ? 'Gloam Tide' : g.tideTonight() && !isNight(c) ? 'Tide tonight' : '';
     h.tideChip.textContent = tideNote;
     h.tideChip.style.display = tideNote ? '' : 'none';

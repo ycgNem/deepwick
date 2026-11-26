@@ -67,6 +67,7 @@ async function boot(): Promise<void> {
     game = null;
     hud.classList.remove('show');
     audio.music('none');
+    audio.rain(0);
     showTitle();
   };
   window.addEventListener('resize', () => {
