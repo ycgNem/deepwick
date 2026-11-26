@@ -128,21 +128,91 @@ export class UI implements UIHooks {
 
   // ------------------------------------------------------------------ hooks
   toast(msg: string, color = '#ffffff'): void {
-    const el = document.createElement('div');
+    // the same news twice in a row just counts up
+    const last = this.toasts.lastElementChild as (HTMLElement & { _t?: number[]; _n?: number }) | null;
+    if (last && last.dataset.msg === msg && !last.classList.contains('out')) {
+      last._n = (last._n ?? 1) + 1;
+      last.textContent = `${msg}  \u00d7${last._n}`;
+      for (const t of last._t ?? []) clearTimeout(t);
+      last._t = [window.setTimeout(() => last.classList.add('out'), 4200), window.setTimeout(() => last.remove(), 5000)];
+      return;
+    }
+    const el = document.createElement('div') as HTMLElement & { _t?: number[] };
     el.className = 'toast';
     el.style.color = color;
     el.textContent = msg;
+    el.dataset.msg = msg;
     this.toasts.appendChild(el);
-    while (this.toasts.children.length > 4) this.toasts.firstElementChild?.remove();
-    setTimeout(() => el.classList.add('out'), 4800);
-    setTimeout(() => el.remove(), 5600);
+    while (this.toasts.children.length > 3) this.toasts.firstElementChild?.remove();
+    el._t = [window.setTimeout(() => el.classList.add('out'), 4200), window.setTimeout(() => el.remove(), 5000)];
   }
+
+  private hintQ: string[] = [];
+  private hintOn = false;
+  private hintSeq = 0;
+  private hintTimer = 0;
+
+  /** tutorial tips wait their turn in a card of their own, so they never bury the news */
+  hintCard(msg: string): void {
+    if (this.hintQ.includes(msg)) return;
+    this.hintQ.push(msg);
+    if (!this.hintOn) this.nextHint();
+  }
+
+  private nextHint(): void {
+    const el = document.getElementById('hintCard');
+    const msg = this.hintQ.shift();
+    if (!el || !msg) {
+      this.hintOn = false;
+      return;
+    }
+    this.hintOn = true;
+    const p = el.querySelector('p');
+    if (p) p.textContent = msg;
+    const ms = Math.min(13000, Math.max(6500, msg.length * 60));
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+    const bar = el.querySelector('u');
+    if (bar) {
+      bar.style.transition = 'none';
+      bar.style.width = '100%';
+      void bar.offsetWidth;
+      bar.style.transition = `width ${ms}ms linear`;
+      bar.style.width = '0%';
+    }
+    const id = ++this.hintSeq;
+    const done = (): void => {
+      if (id !== this.hintSeq) return;
+      this.hintSeq++;
+      el.classList.remove('show');
+      window.setTimeout(() => this.nextHint(), 450);
+    };
+    window.clearTimeout(this.hintTimer);
+    this.hintTimer = window.setTimeout(done, ms);
+    el.onclick = (): void => {
+      window.clearTimeout(this.hintTimer);
+      done();
+    };
+  }
+
+  private goalQ: { text: string; coins: number }[] = [];
+  private goalFlashUntil = 0;
+  private goalFlash: { text: string; coins: number } | null = null;
+
+  /** a Journal page ticked off: the tracker shows it done for a moment before turning the page */
+  goalDone(text: string, coins: number): void {
+    this.goalQ.push({ text, coins });
+  }
+
+  /** skills that just levelled, and when */
+  private skillUp: Partial<Record<SkillId, number>> = {};
 
   isOpen(): boolean {
     return this.panel !== null;
   }
 
-  private bannerAt = 0;
+  private bannerAt = -1e9;
 
   /** a big title card across the middle of the screen (a second one waits its turn) */
   banner(title: string, sub: string): void {
@@ -170,8 +240,9 @@ export class UI implements UIHooks {
   }
 
   levelUp(skill: SkillId, lvl: number): void {
-    const info = SKILL_INFO[skill];
-    this.toast(`${info.name} reached level ${lvl}! ${info.perk(lvl)}`, info.color);
+    // the skill's row lights up (its perk is in the row's tooltip); the big text is over your head
+    void lvl;
+    this.skillUp[skill] = performance.now();
   }
 
   victory(): void {
@@ -269,6 +340,8 @@ export class UI implements UIHooks {
     h.nerveText.textContent = nv <= 0 ? 'BROKEN' : nv < NERVE_SHAKEN ? 'SHAKEN' : nv < NERVE_FRAYED ? 'FRAYED' : `${Math.ceil(nv)}`;
     this.updateGoal();
     this.updateSeek();
+    // tips step aside while a window is open
+    document.getElementById('hintCard')?.classList.toggle('muted', this.panel !== null);
     h.coins.textContent = fmt(g.p.coins);
     const c = g.p.clock;
     const hours = Math.floor(((c * 24 + 6) % 24) * 1);
@@ -300,7 +373,8 @@ export class UI implements UIHooks {
     for (const id of ['mining', 'combat', 'delving', 'fishing'] as SkillId[]) {
       const s = g.p.skills[id];
       const frac = s.lvl >= MAX_LEVEL ? 1 : s.xp / xpToNext(s.lvl);
-      sk += `<div class="sk"><b style="color:${SKILL_INFO[id].color}">${SKILL_INFO[id].name} ${s.lvl}</b><i><u style="width:${frac * 100}%;background:${SKILL_INFO[id].color}"></u></i></div>`;
+      const up = performance.now() - (this.skillUp[id] ?? -1e9) < 3200;
+      sk += `<div class="sk${up ? ' up' : ''}" title="${SKILL_INFO[id].perk(s.lvl)}"><b style="color:${SKILL_INFO[id].color}">${SKILL_INFO[id].name} ${s.lvl}${up ? ' <em>\u25b2</em>' : ''}</b><i><u style="width:${frac * 100}%;background:${SKILL_INFO[id].color}"></u></i></div>`;
     }
     h.skills.innerHTML = sk;
     const bossOn = !!g.boss && !g.boss.dead;
@@ -840,7 +914,17 @@ export class UI implements UIHooks {
     const h = this.hudEls;
     const cur = GOALS[g.p.journal];
     let html = '';
-    if (cur) {
+    // a page just ticked off stays up, done, for a moment
+    const now = performance.now();
+    if (now >= this.goalFlashUntil) {
+      this.goalFlash = this.goalQ.shift() ?? null;
+      // a run of pages turns faster
+      if (this.goalFlash) this.goalFlashUntil = now + (this.goalQ.length >= 2 ? 1100 : 1900);
+    }
+    const flash = now < this.goalFlashUntil ? this.goalFlash : null;
+    h.goal.classList.toggle('done', !!flash);
+    if (flash) html = `<small>Journal \u00b7 done</small><b>\u2713 ${flash.text}</b><span>+${flash.coins} coins</span>`;
+    else if (cur) {
       const [have, need] = cur.goal.progress(g);
       html = `<small>Journal \u00b7 ${ROMAN[cur.chapter]}</small><b>${cur.goal.text}</b>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><span>${fmt(have)} / ${fmt(need)}</span>` : ''}`;
     }
@@ -849,7 +933,7 @@ export class UI implements UIHooks {
       h.goal.style.display = html ? '' : 'none';
       this.lastGoal = html;
     }
-    if (this.lastGoalIdx !== g.p.journal) {
+    if (!flash && this.lastGoalIdx !== g.p.journal) {
       // a fresh goal catches the eye
       if (this.lastGoalIdx >= 0) {
         h.goal.classList.remove('fresh');

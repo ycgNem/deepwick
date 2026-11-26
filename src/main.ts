@@ -138,9 +138,9 @@ function startGame(fresh: boolean, mode: ModeId = 'delver'): void {
   input.blocked = false;
   if (fresh) {
     setTimeout(() => {
-      g.toast('You wake beside the Wick, the great lantern of Deepwick. It has gone cold.', '#ffe9a8');
-      g.toast('Your Journal (top right, J) always shows what to do next. Esc shows all controls.', '#ffe9a8');
-    }, 600);
+      ui?.banner('Deepwick', 'You wake beside the Wick, the great lantern of the town. It has gone cold.');
+      g.hint('journal_intro', 'Your Journal (top right, J) always shows what to do next. Esc shows every control.');
+    }, 700);
   } else g.toast('Welcome back, delver.', '#ffe9a8');
 }
 

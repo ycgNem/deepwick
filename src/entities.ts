@@ -289,6 +289,9 @@ export interface FloatText {
   color: string;
   life: number;
   big?: boolean;
+  /** pickups of the same thing in quick succession count up in one label */
+  key?: string;
+  n?: number;
 }
 
 export function applyGravity(b: Body, dt: number, scale = 1): void {

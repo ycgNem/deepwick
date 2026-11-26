@@ -1492,7 +1492,7 @@ export class Renderer {
     for (const t of g.texts) {
       const a = Math.min(1, t.life * 2);
       const size = Math.round((t.big ? 11 : 8) * s);
-      out.font = `${size}px "Pixelify Sans", monospace`;
+      out.font = `${size}px "DW Digits", "Pixelify Sans", monospace`;
       out.globalAlpha = a;
       const x = Math.round((t.x - camX) * s);
       const y = Math.round((t.y - camY) * s);
@@ -1506,7 +1506,7 @@ export class Renderer {
     for (const sl of [...g.souls, ...g.homing]) {
       if (sl.sayT <= 0 || !sl.say) continue;
       const size = Math.round(7 * s);
-      out.font = `${size}px "Pixelify Sans", monospace`;
+      out.font = `${size}px "DW Digits", "Pixelify Sans", monospace`;
       const maxW = 150 * s;
       const lines: string[] = [];
       let cur = '';
@@ -1547,7 +1547,7 @@ export class Renderer {
     const pl = g.player;
     if (g.near && !g.ui.isOpen() && !pl.dead && !g.fishing) {
       const size = Math.round(8 * s);
-      out.font = `${size}px "Pixelify Sans", monospace`;
+      out.font = `${size}px "DW Digits", "Pixelify Sans", monospace`;
       const label = `[E] ${g.near.label}`;
       const x = Math.round((pl.cx - camX) * s);
       const y = Math.round((pl.y - camY - 14) * s);

@@ -59,6 +59,10 @@ export interface Interactable {
 
 export interface UIHooks {
   toast(msg: string, color?: string): void;
+  /** a tutorial tip, in its own card */
+  hintCard?(msg: string): void;
+  /** a Journal page ticked off, shown in the goal tracker */
+  goalDone?(text: string, coins: number): void;
   open(panel: string): void;
   isOpen(): boolean;
   close(): void;
@@ -357,7 +361,9 @@ export class Game {
     if (this.p.seen[key]) return;
     // remembered even with hints off: the Journal reads some of them
     this.p.seen[key] = true;
-    if (prefs.hints) this.ui.toast(msg, '#ffe9a8');
+    if (!prefs.hints) return;
+    if (this.ui.hintCard) this.ui.hintCard(msg);
+    else this.ui.toast(msg, '#ffe9a8');
   }
 
   text(x: number, y: number, text: string, color: string, big = false): void {
@@ -2406,14 +2412,13 @@ export class Game {
       if (!reward) continue;
       p.coins += goal.coins;
       this.addXp('delving', goal.coins);
-      this.toast(`Journal: ${goal.text} \u2713  +${goal.coins} coins`, '#ffd75a');
+      if (this.ui.goalDone) this.ui.goalDone(goal.text, goal.coins);
+      else this.toast(`Journal: ${goal.text} \u2713  +${goal.coins} coins`, '#ffd75a');
+      this.text(this.player.cx, this.player.y - 22, `+${goal.coins} coins`, '#ffd75a');
       audio.play('upgrade', { pitch: 1.25, vol: 0.6, vary: 0 });
       const next = GOALS[p.journal];
-      if (!next) this.toast('Every page of the Journal is filled. Deepwick is yours.', '#ffe9a8');
-      else if (next.chapter !== chapter) {
-        this.toast(`Chapter ${ROMAN[next.chapter]}: ${CHAPTERS[next.chapter].title}`, '#e8d8ff');
-        this.text(this.player.cx, this.player.y - 34, `Chapter ${ROMAN[next.chapter]}: ${CHAPTERS[next.chapter].title}`, '#ffd75a', true);
-      }
+      if (!next) this.ui.banner?.('The Journal is full', 'Every page is filled. The Wick burns, and Deepwick is yours.');
+      else if (next.chapter !== chapter) this.ui.banner?.(`Chapter ${ROMAN[next.chapter]}`, CHAPTERS[next.chapter].title);
     }
   }
 
@@ -3599,12 +3604,24 @@ export class Game {
     }
   }
 
+  /** one label that counts up while you scoop up a pile, instead of a stack of +1s */
+  private pickupText(key: string, n: number, label: (n: number) => string, x: number, y: number, color: string): void {
+    const t = this.texts.find((q) => q.key === key && q.life > 0.45);
+    if (t) {
+      t.n = (t.n ?? 0) + n;
+      t.text = label(t.n);
+      t.life = Math.max(t.life, 0.9);
+      return;
+    }
+    this.texts.push({ x, y, text: label(n), color, life: 1.1, key, n });
+  }
+
   private collect(d: Drop): void {
     if (d.item === 'coin') {
       this.p.coins += d.count;
       this.p.stats.earned += d.count;
       audio.play('coins', { vol: 0.5, pitch: 1.3 });
-      this.text(d.x, d.y, `+${d.count}c`, '#ffd75a');
+      this.pickupText('coin', d.count, (n) => `+${n}c`, d.x, d.y, '#ffd75a');
       d.count = 0;
       return;
     }
@@ -3614,7 +3631,7 @@ export class Game {
     if (got <= 0) return;
     const def = ITEMS[d.item];
     audio.play('pickup', { vol: 0.6 });
-    this.text(d.x, d.y, `+${got} ${def ? def.name : d.item}`, def?.kind === 'relic' ? '#ffd75a' : '#e8e0d0');
+    this.pickupText(`item:${d.item}`, got, (n) => `+${n} ${def ? def.name : d.item}`, d.x, d.y, def?.kind === 'relic' ? '#ffd75a' : '#e8e0d0');
     if (def?.kind === 'relic' && !this.p.seen['relic_' + d.item]) {
       this.p.seen['relic_' + d.item] = true;
       this.toast(`Relic found: ${def.name}! Wren can catalogue it once her Archive is built.`, '#ffd75a');
