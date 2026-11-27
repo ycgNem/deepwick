@@ -9,7 +9,7 @@ import { BIOMES } from './data/biomes';
 import { ITEMS, IconRef } from './data/items';
 import { Obj } from './world/world';
 import { BOSS_CENTER } from './world/gen';
-import { Game, BUILDING_INFO, BUILDING_W, treeKind, daylight, isNight } from './game';
+import { Game, BUILDING_INFO, treeKind, daylight, isNight } from './game';
 import { DOG_CELL } from './dog';
 import { seasonOf, autumnTint } from './seasons';
 import { heldDef } from './state';
@@ -1233,19 +1233,33 @@ export class Renderer {
   }
 
   private drawNpcs(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number): void {
-    for (const b of g.p.buildings) {
-      // still walking over from the Wick
-      if (g.homing.some((h) => h.kind === b.kind)) continue;
-      const info = BUILDING_INFO[b.kind];
-      const img = A.camp[info.npc];
-      const pad = A.padBottom[info.npc] ?? 0;
-      const nx = (b.x + BUILDING_W / 2 - 0.9) * TILE;
-      const bob = Math.round(Math.sin(g.time * 2 + b.x) * 0.6);
-      const x = Math.round(nx - img.width / 2 - camX);
-      const y = Math.round(b.y * TILE - (img.height - pad) + bob - camY);
-      const faceRight = g.player.cx > nx;
+    // the townsfolk at their stalls, out for a stroll, or round the Wick (indoors at night)
+    for (const t of g.town.folk) {
+      if (t.plan === 'inside') continue;
+      const lost = t.kind === 'trade' ? null : LOST[t.kind];
+      const key = lost && t.moving ? lost.walk : BUILDING_INFO[t.kind].npc;
+      const img = A.camp[key];
+      if (!img) continue;
+      const pad = A.padBottom[key] ?? 0;
+      if (lost && t.moving) {
+        const frame = Math.floor(t.walkT * 11) % 8;
+        const bob = frame % 4 === 1 || frame % 4 === 2 ? -1 : 0;
+        const x = Math.round(t.x - 24 - camX);
+        const y = Math.round(t.y - (48 - pad) + bob - camY);
+        ctx.save();
+        if (t.facing > 0) {
+          ctx.translate(x + 48, y);
+          ctx.scale(-1, 1);
+          ctx.drawImage(img, frame * 48, 0, 48, 48, 0, 0, 48, 48);
+        } else ctx.drawImage(img, frame * 48, 0, 48, 48, x, y, 48, 48);
+        ctx.restore();
+        continue;
+      }
+      const bob = Math.round(Math.sin(g.time * 2 + t.x * 0.03) * 0.6);
+      const x = Math.round(t.x - img.width / 2 - camX);
+      const y = Math.round(t.y - (img.height - pad) + bob - camY);
       ctx.save();
-      if (faceRight) {
+      if (t.facing > 0) {
         ctx.translate(x + img.width, y);
         ctx.scale(-1, 1);
         ctx.drawImage(img, 0, 0);
@@ -2556,7 +2570,7 @@ export class Renderer {
     }
     out.globalAlpha = 1;
     // what the lost say, in a speech bubble over their heads
-    for (const sl of [...g.souls, ...g.homing]) {
+    for (const sl of [...g.souls, ...g.homing, ...g.town.folk.filter((t) => t.plan !== 'inside')]) {
       if (sl.sayT <= 0 || !sl.say) continue;
       const size = Math.round(7 * s);
       out.font = `${size}px "DW Digits", "Pixelify Sans", monospace`;

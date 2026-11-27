@@ -24,6 +24,7 @@ import { Weather } from './weather';
 import { CAPTIONS } from './captions';
 import { FEATS, FISH } from './data/feats';
 import { Dog } from './dog';
+import { Town } from './town';
 import { seasonOf, seasonDay, SeasonDef, SEASON_DAYS } from './seasons';
 import type { SfxId } from './audio';
 import {
@@ -387,6 +388,8 @@ export class Game {
   weather = new Weather();
   /** Tallow: a stray by the Wick, then your dog */
   dog = new Dog();
+  /** the townsfolk going about their day */
+  town = new Town();
   /** how soaked you are, 0..1: rain on you out in the open, or a swim */
   wet = 0;
   /** beside a fire or in the Wick's light, where the wet does not chill you */
@@ -587,6 +590,7 @@ export class Game {
       this.updateTide(dt);
       this.updateSouls(dt);
       this.dog.update(this, dt);
+      this.town.update(this, dt);
       this.tickBuffs(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
@@ -683,7 +687,7 @@ export class Game {
     this.toast(s.arrive, col);
     this.weather.turn(this);
     if (s.id === 'winter')
-      this.hint('winter', 'Winter: snow lies on the meadow, nothing grows, and the critters keep to their burrows. Out in the open on a winter night the cold gets into you (the frost chip): you burn food faster, heal slower and fray quicker, and once you are freezing it bites. A campfire, a furnace or the Wick keeps you warm, a few tiles underground the cold cannot follow, and a Leather Coat keeps out half of it.');
+      this.hint('winter', 'Winter: snow lies on the meadow, nothing grows, and the critters keep to their burrows. Out in the open on a winter night the cold gets into you (the frost chip): you burn food faster, heal slower and fray quicker, and once you are freezing it bites. A campfire, a furnace or the Wick keeps you warm, four walls and a roof keep the wind off, a few tiles underground the cold cannot follow, and a Leather Coat keeps out half of it.');
   }
 
   /** a minute before dark the old town bell tolls (somebody still rings it) */
@@ -5175,7 +5179,11 @@ export class Game {
       lights.push({ x: bs.x / TILE, y: bs.y / TILE, r: 0.32 + open * 0.95, g: 0.06 + open * 0.66, b: 0.38 - open * 0.12, radius: 3.4 + open * 6 + bs.beat * 0.8, cast: false });
     }
     for (const b of this.bombs) lights.push({ x: b.x / TILE, y: b.y / TILE, r: 0.6, g: 0.45, b: 0.1, radius: 2, cast: false });
-    for (const b of this.p.buildings) lights.push({ x: b.x, y: b.y - 1.5, r: 0.7, g: 0.5, b: 0.25, radius: 5, cast: false });
+    for (const b of this.p.buildings) {
+      // someone in by the fire: the windows glow warm
+      const home = this.town.inside(b.kind);
+      lights.push({ x: b.x, y: b.y - 1.5, r: home ? 1.05 : 0.7, g: home ? 0.68 : 0.5, b: home ? 0.3 : 0.25, radius: home ? 6.5 : 5, cast: false });
+    }
     let wr = this.wickRadius();
     if (this.flare && wr > 0) {
       const k = Math.min(1, this.flare.t / 1.5);
@@ -5338,6 +5346,21 @@ export class Game {
       this.parts.push({ x: pl.x + 4 + Math.random() * (pl.w - 8), y: pl.y + 6 + Math.random() * 14, vx: (Math.random() - 0.5) * 6, vy: -22 - Math.random() * 10, life: 0.9, max: 0.9, color: '#c4c8d2', size: 2, grav: 0, glow: false });
   }
 
+  /** 0: out in the open; 1: under a roof; 2: inside, with a roof and a wall (or a door) either side */
+  shelter(): number {
+    const pl = this.player;
+    const w = this.world;
+    const tx = Math.floor(pl.cx / TILE);
+    const hy = Math.floor((pl.y + 4) / TILE);
+    const fy = Math.floor((pl.y + pl.h - 4) / TILE);
+    if (this.exposed(tx, hy)) return 0;
+    const wall = (dir: number): boolean => {
+      for (let k = 1; k <= 12; k++) if (w.solid(tx + dir * k, hy) || w.solid(tx + dir * k, fy)) return true;
+      return false;
+    };
+    return wall(-1) && wall(1) ? 2 : 1;
+  }
+
   /** winter: out in the open at night (or in falling snow) with no fire, the cold gets into you */
   private updateCold(dt: number): void {
     const pl = this.player;
@@ -5346,12 +5369,16 @@ export class Game {
     const open = this.openAir();
     const night = isNight(this.p.clock);
     const snow = this.weather.snow;
+    // four walls and a roof keep the wind off; a roof alone keeps off half of it
+    const shelter = winter && open > 0.25 ? this.shelter() : 0;
     let bite = 0;
-    if (winter && open > 0.25 && !this.warm && !pl.dead) bite = ((night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1);
+    if (winter && open > 0.25 && !this.warm && !pl.dead && shelter < 2)
+      bite = ((night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1) * (shelter === 1 ? 0.5 : 1);
     if (bite > 0) this.cold = Math.min(1, this.cold + dt * bite);
-    else this.cold = Math.max(0, this.cold - dt / (this.warm ? 5 : open <= 0.25 ? 40 : winter ? 90 : 30));
+    else this.cold = Math.max(0, this.cold - dt / (this.warm ? 5 : open <= 0.25 || shelter === 2 ? 40 : winter ? 90 : 30));
+    if (shelter === 2 && night && !pl.dead) this.hint('shelter', 'Four walls and a roof keep the winter wind off: the cold cannot build in here. Light a fire inside and it is a home.');
     if (this.cold >= 0.4 && before < 0.4)
-      this.hint('cold', 'The winter night is getting into you (the frost chip). Cold, you get hungry faster, heal slower and the dark frays you quicker, and once you are freezing it bites. Get to a campfire, a furnace or the Wick, or go a few tiles underground where the cold cannot follow. A Leather Coat keeps out half of it.');
+      this.hint('cold', 'The winter night is getting into you (the frost chip). Cold, you get hungry faster, heal slower and the dark frays you quicker, and once you are freezing it bites. Get to a campfire, a furnace or the Wick, get inside four walls and a roof, or go a few tiles underground where the cold cannot follow. A Leather Coat keeps out half of it.');
     if (this.cold >= 0.98 && !pl.dead) {
       if (before < 0.98) this.toast('You are freezing. Get to a fire, the Wick, or under the ground.', '#cfe8ff');
       this.frostT += dt;
