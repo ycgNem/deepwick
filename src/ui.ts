@@ -57,7 +57,6 @@ const EQUIP_SLOTS: { key: EquipKey; label: string; slot: string }[] = [
 ];
 
 /** Journal pages for bringing the lost home */
-const LOST_GOALS = { brannoc: 1, wren: 1, hesper: 1 };
 
 type Panel = 'inv' | 'chest' | 'shop' | 'smith' | 'archive' | 'still' | 'wick' | 'map' | 'pause' | 'victory' | 'journal' | null;
 
@@ -1113,8 +1112,8 @@ export class UI implements UIHooks {
       for (const goal of c.goals) {
         const i = k++;
         if (!open) continue;
-        // a page added after you had passed it (someone the Wick called in an older save) stays open until it is done
-        if (i < at && goal.id in LOST_GOALS && !goalDone(g, goal)) html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${this.tell(goal.how)}</p></div><small>still to do</small></div>`;
+        // a page added after you had passed it in an older save stays open until it is done (and pays then)
+        if (i < at && g.owed.includes(goal.id) && !goalDone(g, goal)) html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${this.tell(goal.how)}</p></div><small>still to do</small></div>`;
         else if (i < at) html += `<div class="jg done"><i>\u2713</i><span>${goal.text}</span><small>+${goal.coins}</small></div>`;
         else if (i === at) {
           const [have, need] = goal.progress(g);

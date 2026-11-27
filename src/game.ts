@@ -9,7 +9,7 @@ import { ITEMS, ItemDef, RELICS, SHOP_STOCK, equipSlotOf } from './data/items';
 import { ENEMIES, DAY_SURFACE, NIGHT_SURFACE } from './data/enemies';
 import { RECIPES, Recipe, Station, STATION_OBJS } from './data/recipes';
 import { FLAME, KINDLING, LUMEN, MAX_FLAME, WICK_GLOW, WICK_X, WICK_Y, flameLevel } from './data/wick';
-import { GOALS, CHAPTERS, ROMAN, OLD_GOAL_IDS, goalDone } from './data/journal';
+import { GOALS, CHAPTERS, ROMAN, OLD_GOAL_IDS, goalDone, type Goal } from './data/journal';
 import { LOST, LostKind, LostSoul, isLostKind } from './data/lost';
 import { BREWS, BREW_TIME } from './data/brews';
 import { prefs } from './prefs';
@@ -524,7 +524,12 @@ export class Game {
   }
 
   toast(msg: string, color?: string): void {
-    this.ui.toast(msg, color);
+    this.ui.toast(this.tell(msg), color);
+  }
+
+  /** text that names a key, told for the way you are playing */
+  tell(msg: string): string {
+    return this.input.usingTouch ? forTouch(msg) : forKeys(msg);
   }
 
   hint(key: string, msg: string): void {
@@ -532,7 +537,7 @@ export class Game {
     // remembered even with hints off: the Journal reads some of them
     this.p.seen[key] = true;
     if (!prefs.hints) return;
-    msg = this.input.usingTouch ? forTouch(msg) : forKeys(msg);
+    msg = this.tell(msg);
     if (this.ui.hintCard) this.ui.hintCard(msg);
     else this.ui.toast(msg, '#ffe9a8');
   }
@@ -2833,22 +2838,44 @@ export class Game {
     const i = GOALS.findIndex((x) => x.goal.id === at);
     p.journal = i >= 0 ? i : at === 'done' ? GOALS.length : Math.min(p.journal, GOALS.length);
     p.journalAt = GOALS[p.journal]?.goal.id ?? 'done';
+    // pages written into the Journal after this save had passed them: still to do, and paid when done
+    // (every goal added since the first Journal is judged by something that cannot come undone)
+    this.owed = GOALS.slice(0, p.journal)
+      .map((x) => x.goal)
+      .filter((goal) => !OLD_GOAL_IDS.includes(goal.id) && !goalDone(this, goal))
+      .map((goal) => goal.id);
+  }
+
+  /** goals an older save skipped past, waiting to be done (see migrateJournal) */
+  owed: string[] = [];
+
+  private payGoal(goal: Goal): void {
+    const p = this.p;
+    p.coins += goal.coins;
+    this.addXp('delving', goal.coins);
+    if (this.ui.goalDone) this.ui.goalDone(goal.text, goal.coins);
+    else this.toast(`Journal: ${goal.text} \u2713  +${goal.coins} coins`, '#ffd75a');
+    this.text(this.player.cx, this.player.y - 22, `+${goal.coins} coins`, '#ffd75a');
+    audio.play('upgrade', { pitch: 1.25, vol: 0.6, vary: 0 });
   }
 
   /** tick off every goal that is already met, in order; rewards only when it happens in play */
   advanceJournal(reward: boolean, banners = true): void {
     const p = this.p;
+    if (reward && this.owed.length) {
+      for (const id of [...this.owed]) {
+        const e = GOALS.find((x) => x.goal.id === id);
+        if (e && !goalDone(this, e.goal)) continue;
+        this.owed = this.owed.filter((x) => x !== id);
+        if (e) this.payGoal(e.goal);
+      }
+    }
     while (p.journal < GOALS.length && goalDone(this, GOALS[p.journal].goal)) {
       const { goal, chapter } = GOALS[p.journal];
       p.journal++;
       p.journalAt = GOALS[p.journal]?.goal.id ?? 'done';
       if (!reward) continue;
-      p.coins += goal.coins;
-      this.addXp('delving', goal.coins);
-      if (this.ui.goalDone) this.ui.goalDone(goal.text, goal.coins);
-      else this.toast(`Journal: ${goal.text} \u2713  +${goal.coins} coins`, '#ffd75a');
-      this.text(this.player.cx, this.player.y - 22, `+${goal.coins} coins`, '#ffd75a');
-      audio.play('upgrade', { pitch: 1.25, vol: 0.6, vary: 0 });
+      this.payGoal(goal);
       const next = GOALS[p.journal];
       if (!banners) continue;
       if (!next) this.ui.banner?.('The Journal is full', 'Every page is filled. The Wick burns, and Deepwick is yours.');

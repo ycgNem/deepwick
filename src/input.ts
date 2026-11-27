@@ -59,7 +59,8 @@ export class Input {
       // a real key is read through your bindings; the on-screen controls and the controller already press the game's own keys
       const k = e.isTrusted ? canon(e.code) : e.code;
       const quiet = ['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-      if (quiet.includes(k) || quiet.includes(e.code)) e.preventDefault();
+      // and a key you bound does only what you bound it to (a slash in Firefox would open Quick Find)
+      if (quiet.includes(k) || quiet.includes(e.code) || k !== e.code) e.preventDefault();
       if (e.repeat) return;
       this.down.add(k);
       this.pressed.add(k);

@@ -25,9 +25,13 @@ export const ACTIONS: { id: Action; name: string; code: string }[] = [
   { id: 'oil', name: 'Lamp oil', code: 'KeyF' },
 ];
 
-/** keys that keep their own jobs: pause, the hotbar numbers and the arrows (a second way to move) */
-const FIXED = new Set(['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'MetaLeft', 'MetaRight', 'ContextMenu', 'F5', 'F11', 'F12']);
+/**
+ * keys that keep their own jobs: pause, the hotbar numbers and the arrows (a second way to move); the
+ * browser's own keys; and the lock keys, which some systems only report going down every other press
+ */
+const FIXED = new Set(['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'MetaLeft', 'MetaRight', 'ContextMenu', 'CapsLock', 'NumLock', 'ScrollLock', 'Pause', 'PrintScreen']);
 for (let d = 0; d <= 9; d++) FIXED.add('Digit' + d);
+for (let f = 1; f <= 24; f++) FIXED.add('F' + f);
 
 const STORE = 'deepwick.keys';
 const DEFAULT = Object.fromEntries(ACTIONS.map((a) => [a.id, a.code])) as Record<Action, string>;
@@ -148,17 +152,36 @@ export function keyName(a: Action): string {
   return keyLabel(bound[a]);
 }
 
-/** tutorial text written for the default keys, told with the keys you have chosen */
+/** the ways the game's text names a key, and what each becomes (the one group, if any, is kept) */
+const SAYS: [RegExp, (g?: string) => string][] = [
+  [/\(E([) ])/g, (g) => `(${keyName('interact')}${g ?? ''}`],
+  [/\b(Press|press|pressing) E\b/g, (g) => `${g ?? ''} ${keyName('interact')}`],
+  [/\b(Press|press) G\b/g, (g) => `${g ?? ''} ${keyName('hook')}`],
+  [/\bG lets go\b/g, () => `${keyName('hook')} lets go`],
+  [/\bF tops it up\b/g, () => `${keyName('oil')} tops it up`],
+  [/\bPress Tab\b/g, () => `Press ${keyName('pack')}`],
+  [/\(Tab( to craft)?\)/g, (g) => `(${keyName('pack')}${g ?? ''})`],
+  [/\(top right, J\)/g, () => `(top right, ${keyName('journal')})`],
+  [/\bwith Space\b/g, () => `with ${keyName('jump')}`],
+  [/\bSpace (to jump|jumps)\b/g, (g) => `${keyName('jump')} ${g ?? ''}`],
+  [/\bA \/ D\b/g, () => `${keyName('left')} / ${keyName('right')}`],
+  [/\bW (and|\/) S\b/g, (g) => `${keyName('up')} ${g ?? ''} ${keyName('down')}`],
+];
+
+/**
+ * tutorial text written for the default keys, told with the keys you have chosen. One pass: what
+ * one phrase becomes is set aside, so a later phrase can never rewrite it (E moved to Tab must not
+ * then read as the pack's Tab)
+ */
 export function forKeys(msg: string): string {
   if (!customKeys()) return msg;
-  const e = keyName('interact');
-  return msg
-    .replace(/\(E\)/g, `(${e})`)
-    .replace(/\b(Press|press|pressing) E\b/g, `$1 ${e}`)
-    .replace(/\bPress Tab\b/g, `Press ${keyName('pack')}`)
-    .replace(/\(Tab( to craft)?\)/g, `(${keyName('pack')}$1)`)
-    .replace(/\(top right, J\)/g, `(top right, ${keyName('journal')})`)
-    .replace(/\bwith Space\b/g, `with ${keyName('jump')}`)
-    .replace(/\bSpace to jump\b/g, `${keyName('jump')} to jump`)
-    .replace(/\bA \/ D\b/g, `${keyName('left')} / ${keyName('right')}`);
+  const out: string[] = [];
+  let s = msg;
+  for (const [re, say] of SAYS) {
+    s = s.replace(re, (_m: string, g?: unknown) => {
+      out.push(say(typeof g === 'string' ? g : undefined));
+      return `\u0000${out.length - 1}\u0001`;
+    });
+  }
+  return s.replace(/\u0000(\d+)\u0001/g, (_m: string, i: string) => out[Number(i)] ?? '');
 }

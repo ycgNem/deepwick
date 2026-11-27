@@ -170,7 +170,7 @@ export const CHAPTERS: Chapter[] = [
       {
         id: 'pasty',
         text: "Bake a Miner's Pasty",
-        how: "A hearth or a stove is a kitchen: stand by one and the pack shows what it can cook. A pasty takes raw meat, a mushroom and two wheat (Old Pell sells wheat) and makes two. It fills you up, and while you are Well Fed the dark frays you slower. Every dish feeds you something of its own: try them all.",
+        how: "A hearth or a stove is a kitchen: stand by one and the pack shows what it can cook (a Stone Hearth is 20 Stone, 6 Clay and 2 Coal at a Workbench). A pasty takes raw meat, a Cave Mushroom and two wheat (Old Pell sells wheat) and makes two. It fills you up, and while you are Well Fed the dark frays you slower. Every dish feeds you something of its own: try them all.",
         progress: (g) => flag(!!g.p.seen.made_pasty || (g.p.tally?.meal_pasty ?? 0) > 0),
         coins: 60,
       },
