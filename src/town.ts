@@ -11,6 +11,7 @@ import { TILE } from './constants';
 import { WICK_X } from './data/wick';
 import { groundAt } from './world/gen';
 import { isNight } from './game';
+import { audio } from './audio';
 import type { SeasonId } from './seasons';
 
 export type TownPlan = 'stall' | 'stroll' | 'visit' | 'wick' | 'home' | 'inside';
@@ -33,6 +34,9 @@ export interface Townie {
   say: string;
   sayT: number;
   chatT: number;
+  /** Lantern Night: seconds to the next lantern they let go, and how many they have */
+  lanternT: number;
+  lanternN: number;
 }
 
 interface Lines {
@@ -48,7 +52,7 @@ const LINES: Record<BuildingKind, Lines> = {
     season: {
       spring: ['Seeds! Fresh seeds! Well. Last year\'s seeds.', 'Mud on every boot in the valley. Mind my floor.'],
       summer: ['Storm season. Lightning hit the old mill once, you know.', 'Long days are good for trade. Bad for my feet.'],
-      autumn: ['Stock up for winter, delver. Nothing grows once the snow comes.', 'Berries are thick on the bushes. Pick them while you can.'],
+      autumn: ['Stock up for winter, delver. Nothing grows once the snow comes.', 'Berries are thick on the bushes. Pick them while you can.', 'Lantern Night\'s the last night of autumn. I\'ve Sky Lanterns, if you\'ve someone to send one to.'],
       winter: ['A Leather Coat, that\'s what you want in this cold.', 'Wind\'s cutting right through the stall. Business is slow.'],
     },
     dusk: ['Bell\'s rung. Off to the Wick with you.'],
@@ -89,6 +93,14 @@ const LINES: Record<BuildingKind, Lines> = {
   },
 };
 
+/** Lantern Night: what they say as the lanterns go up */
+const FESTIVAL: Record<BuildingKind, string[]> = {
+  trade: ['That one\'s for Arno. Go on, little light. Find him.', 'My brother used to fold these better than me. Never told him.', 'Sky lanterns, a coin apiece. Tonight they\'re for nothing. Take one.'],
+  forge: ['Fenn would have laughed at me, crying over a paper lamp.', 'Higher. Go on. Higher than the peaks.', 'Every year I think I\'m done with this. Every year I\'m here.'],
+  archive: ['I write every name down, every year. The list gets longer, but so do the lanterns.', 'The ledgers say the whole valley used to glow on this night.', 'Look at them go. Somebody up on the high pastures is sending them too.'],
+  stillroom: ['Let it go. That\'s the whole of it. Let it go.', 'Breathe out as it lifts. It helps. Trust me.', 'Grief is just love with nowhere to go. Tonight it goes up.'],
+};
+
 const TIDE_LINES = ['A tide tonight. Light every torch you have.', 'I\'ll be indoors when the tide comes. You hold the Wick.', 'The birds went quiet this morning. Tide\'s coming.'];
 
 /** where each of them stands at the Wick of an evening (tiles off its centre) */
@@ -111,11 +123,13 @@ export class Town {
     for (const b of p.buildings) {
       if (this.folk.some((t) => t.kind === b.kind) || g.homing.some((h) => h.kind === b.kind)) continue;
       const x = this.stall(b.kind, g);
-      this.folk.push({ kind: b.kind, x, y: b.y * TILE, facing: -1, walkT: 0, moving: false, plan: 'stall', tx: x, waitT: 0, strollT: 20 + Math.random() * 40, say: '', sayT: 0, chatT: 4 + Math.random() * 10 });
+      this.folk.push({ kind: b.kind, x, y: b.y * TILE, facing: -1, walkT: 0, moving: false, plan: 'stall', tx: x, waitT: 0, strollT: 20 + Math.random() * 40, say: '', sayT: 0, chatT: 4 + Math.random() * 10, lanternT: 0, lanternN: 0 });
     }
     const c = p.clock;
     const tide = !!p.tide || (g.tideTonight() && c >= 0.55);
-    const night = isNight(c) || tide;
+    // Lantern Night: they stay out at the Wick past dark to let their lanterns go
+    const festival = g.lanternHour();
+    const night = (isNight(c) || tide) && !festival;
     const dusk = !night && c >= 0.5 && p.wick.kindled;
     this.quietT -= dt;
     const pl = g.player;
@@ -168,6 +182,19 @@ export class Town {
       t.y += (gy - t.y) * Math.min(1, dt * 12);
       // home: in through the door
       if (t.plan === 'home' && Math.abs(t.x - t.tx) < 1) t.plan = 'inside';
+      // after dark on Lantern Night, three lanterns each (Pell lets his go from his stall)
+      if (festival && isNight(c) && t.lanternN < 3 && (t.plan === 'wick' || !walker) && Math.abs(t.x - t.tx) < 2) {
+        t.lanternT -= dt;
+        if (t.lanternT <= 0) {
+          t.lanternT = 14 + Math.random() * 22;
+          t.lanternN++;
+          g.lanterns.release(t.x + t.facing * 6, t.y - 46);
+          if (Math.hypot(pl.cx - t.x, pl.cy - t.y) < 14 * TILE) audio.play('lantern', { vol: 0.35, at: { x: t.x, y: t.y - 30 } });
+        }
+      } else if (!festival) {
+        t.lanternN = 0;
+        t.lanternT = 3 + Math.random() * 12;
+      }
       // a word, when you are close
       if (t.plan !== 'inside' && t.chatT <= 0 && t.sayT <= 0 && this.quietT <= 0 && !pl.dead && Math.hypot(pl.cx - t.x, pl.y + pl.h - t.y) < 6 * TILE) {
         t.say = this.line(t, g, dusk);
@@ -178,14 +205,21 @@ export class Town {
     }
   }
 
-  /** the floor under their feet: up a step or down a drop from where they stand, never up onto a roof you built over them */
+  /**
+   * the floor under their feet: the nearest place to stand (rock underfoot, room for a body above)
+   * from where they are. Up a terrace of the meadow as far as six tiles, down at most two: never
+   * down a shaft, and never up onto a roof you built over them while the ground under it is free.
+   */
   private floor(g: Game, t: Townie): number {
     const w = g.world;
     const tx = Math.floor(t.x / TILE);
-    let ty = Math.round(t.y / TILE);
+    const ty = Math.round(t.y / TILE);
     if (ty <= 0 || ty >= w.h) return groundAt(w, tx) * TILE;
-    if (w.rock(tx, ty - 1) && !w.rock(tx, ty - 2)) ty--;
-    else if (!w.rock(tx, ty) && (w.rock(tx, ty + 1) || w.rock(tx, ty + 2))) ty += w.rock(tx, ty + 1) ? 1 : 2;
+    const stand = (y: number): boolean => w.rock(tx, y) && !w.rock(tx, y - 1) && !w.rock(tx, y - 2);
+    for (let d = 0; d <= 6; d++) {
+      if (stand(ty - d)) return (ty - d) * TILE;
+      if (d > 0 && d <= 2 && stand(ty + d)) return (ty + d) * TILE;
+    }
     return ty * TILE;
   }
 
@@ -208,6 +242,7 @@ export class Town {
     const L = LINES[t.kind];
     const pick = (a: string[]): string => a[Math.floor(Math.random() * a.length)];
     const r = Math.random();
+    if (g.lanternHour() && r < 0.7) return pick(FESTIVAL[t.kind]);
     if (dusk && t.plan === 'wick' && r < 0.6) return pick(L.dusk);
     if (g.tideTonight() && !isNight(g.p.clock) && r < 0.5) return pick(TIDE_LINES);
     const dg = g.dog;

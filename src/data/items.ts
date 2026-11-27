@@ -181,6 +181,7 @@ const LIST: Record<string, Partial2> = {
   fishpie: { name: 'Fish Pie', icon: { sheet: 'f32', idx: 21 }, kind: 'food', food: 55, heal: 16, value: 22, desc: 'Fish and mushrooms under a golden lid. A whole supper.' },
 
   // ---- usable
+  skylantern: { name: 'Sky Lantern', icon: { sheet: 'f32', idx: 22 }, kind: 'use', value: 2, stack: 20, desc: 'Paper on a frame of split wood, with a little flame to lift it. On Lantern Night, the last night of autumn, Deepwick lets them go from the Wick after dark for the miners who never came home, and the Wick takes a little of each one\u2019s light. Hold it and click under open sky.' },
   tonic: { name: 'Red Tonic', icon: i16(25), kind: 'use', value: 12, desc: 'Restores half your health.', stack: 20 },
   steadydraught: { name: 'Steady Draught', icon: { sheet: 'f32', idx: 10 }, kind: 'use', value: 10, desc: 'Hesper\u2019s calming brew. Restores 60 nerve at once.', stack: 10 },
   nightglass: { name: 'Nightglass Tonic', icon: { sheet: 'f32', idx: 11 }, kind: 'use', value: 16, desc: 'For three minutes you see further in the dark, and it frays you half as fast.', stack: 10 },
@@ -313,6 +314,7 @@ export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
   { id: 'oilskin', price: 45, n: 1 },
   { id: 'recall', price: 45, n: 1 },
   { id: 'seeds', price: 4, n: 3 },
+  { id: 'skylantern', price: 5, n: 1 },
   { id: 'wheat', price: 3, n: 3 },
   { id: 'fishingrod', price: 30, n: 1 },
   { id: 'steak', price: 14, n: 1 },

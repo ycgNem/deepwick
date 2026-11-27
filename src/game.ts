@@ -28,6 +28,7 @@ import { Town } from './town';
 import { roomAt, judgeRoom, restFor, COMFORT_MAX, type Home } from './home';
 import { FURN, FURNITURE, FIRES } from './data/furniture';
 import { MEALS, type MealFx } from './data/meals';
+import { Lanterns, isLanternDay, lanternName, LANTERN_FROM, LANTERN_TO, LANTERN_LUMEN, LANTERN_PAID } from './lanterns';
 import { seasonOf, seasonDay, SeasonDef, SEASON_DAYS } from './seasons';
 import type { SfxId } from './audio';
 import {
@@ -397,6 +398,7 @@ export class Game {
   dog = new Dog();
   /** the townsfolk going about their day */
   town = new Town();
+  lanterns = new Lanterns();
   /** how soaked you are, 0..1: rain on you out in the open, or a swim */
   wet = 0;
   /** beside a fire or in the Wick's light, where the wet does not chill you */
@@ -613,6 +615,7 @@ export class Game {
       this.updateSouls(dt);
       this.dog.update(this, dt);
       this.town.update(this, dt);
+      this.lanterns.update(this, dt);
       this.tickBuffs(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
@@ -730,7 +733,24 @@ export class Game {
     this.tideWarning();
     const ssn = seasonOf(p.stats.days);
     if (seasonDay(p.stats.days) === 1) this.seasonTurns(ssn);
-    else if (ssn.id === 'autumn' && seasonDay(p.stats.days) === SEASON_DAYS) this.toast('The air has an edge to it this morning. Winter is coming.', '#cfe8ff');
+    else if (ssn.id === 'autumn' && seasonDay(p.stats.days) === SEASON_DAYS) {
+      this.toast('The air has an edge to it this morning. Winter is coming.', '#cfe8ff');
+      if (this.lanternNight()) {
+        this.toast('Tonight is Lantern Night: after dark the town lets lanterns go from the Wick for the miners who never came home.', '#ffd9a0');
+        this.hint('lanternday', 'Lantern Night: the last night of autumn. When the bell goes, the townsfolk gather at the Wick and stay out after dark to let their lanterns go. Bring Sky Lanterns of your own (Old Pell sells them, or make two at a workbench from wood, hide and a torch), stand in the Wick\'s light and let them go: each carries a name up into the dark, steadies you, and the Wick takes a little of its light.');
+      }
+    }
+  }
+
+  /** the last night of autumn, with the Wick lit to gather round */
+  lanternNight(): boolean {
+    return this.p.wick.kindled && isLanternDay(this.p.stats.days);
+  }
+
+  /** the hours the lanterns go up */
+  lanternHour(): boolean {
+    const c = this.p.clock;
+    return this.lanternNight() && c >= LANTERN_FROM && c < LANTERN_TO && !this.p.tide;
   }
 
   /** the season this day falls in */
@@ -755,6 +775,10 @@ export class Game {
     if (!p.wick.kindled) {
       this.toast('The bell tolls: the sun is going down. Kindle the Wick, or get behind a door before dark.', '#ffb070');
     } else if (this.tideTonight()) this.toast('The bell tolls. The tide comes in at dark: be at the Wick.', '#d0a0ff');
+    else if (this.lanternNight()) {
+      this.ui.banner?.('Lantern Night', 'Bring a Sky Lantern to the Wick after dark, and let it go.');
+      if (this.onSurface()) this.toast('The bell tolls for Lantern Night. The town is gathering at the Wick.', '#ffd9a0');
+    }
   }
 
   // ------------------------------------------------------------------ Gloam Tides
@@ -3447,6 +3471,37 @@ export class Game {
         this.text(pl.cx, pl.y - 6, 'The Gloam shies from you', '#ffd890');
         this.burst(pl.cx, pl.cy, 24, ['#ffd890', '#fff6d0', '#c8a0ff'], 120, true);
         break;
+      case 'skylantern': {
+        const tx = Math.floor(pl.cx / TILE);
+        if (!this.exposed(tx, Math.floor(pl.y / TILE)) || pl.dead) {
+          if (this.hintCooldown <= 0) {
+            this.text(pl.cx, pl.y - 6, 'It needs open sky above it', '#ffd9a0');
+            this.hintCooldown = 1;
+          }
+          return;
+        }
+        this.lanterns.release(pl.cx + pl.facing * 6, pl.y + 2);
+        audio.play('lantern', { vol: 0.7 });
+        if (this.lanternHour() && this.inWickLight(pl.cx, pl.cy)) {
+          const p = this.p;
+          const day = p.stats.days;
+          if (!p.lanterns || p.lanterns.day !== day) p.lanterns = { day, n: 0 };
+          const n = ++p.lanterns.n;
+          this.tally('lanternnight');
+          this.text(pl.cx, pl.y - 20, `For ${lanternName(day, n)}`, '#ffe2b0', true);
+          p.nerve = Math.min(NERVE_MAX, p.nerve + 15);
+          if (n <= LANTERN_PAID) {
+            const before = this.flame;
+            p.wick.lumen += LANTERN_LUMEN;
+            this.text(WICK_GLOW.x * TILE, WICK_GLOW.y * TILE - 30, `+${LANTERN_LUMEN} Lumen`, '#ffe08a', true);
+            if (this.flame > before) this.flameUp(this.flame);
+          }
+          this.hint('lanternnight', 'Each lantern you let go from the Wick carries a name up into the dark and steadies you, and the Wick takes a little of its light (from the first dozen a night). Lantern Night comes round again at the end of every autumn.');
+        } else if (this.lanternNight() && this.p.clock >= LANTERN_FROM && this.p.clock < LANTERN_TO) {
+          this.text(pl.cx, pl.y - 6, 'Let it go from the Wick, with the others', '#ffd9a0');
+        } else this.text(pl.cx, pl.y - 6, 'It drifts up into the sky', '#ffd9a0');
+        break;
+      }
       case 'heartcrystal':
         if (this.p.hearts >= 10) {
           this.toast('Your heart can hold no more crystals.');
@@ -5351,6 +5406,14 @@ export class Game {
       lights.push({ x: bs.x / TILE, y: bs.y / TILE, r: 0.32 + open * 0.95, g: 0.06 + open * 0.66, b: 0.38 - open * 0.12, radius: 3.4 + open * 6 + bs.beat * 0.8, cast: false });
     }
     for (const b of this.bombs) lights.push({ x: b.x / TILE, y: b.y / TILE, r: 0.6, g: 0.45, b: 0.1, radius: 2, cast: false });
+    // sky lanterns warm the night around them as they rise
+    let lit = 0;
+    for (const l of this.lanterns.sky) {
+      if (l.far || lit >= 24 || l.x < this.camX - 64 || l.x > this.camX + this.viewW + 64 || l.y < this.camY - 64 || l.y > this.camY + this.viewH + 64) continue;
+      const k = Math.min(1, l.t * 2) * (1 + Math.sin(this.time * 11 + l.seed) * 0.06);
+      lights.push({ x: l.x / TILE, y: l.y / TILE, r: 1.0 * k, g: 0.62 * k, b: 0.28 * k, radius: 2.9, cast: false });
+      lit++;
+    }
     for (const b of this.p.buildings) {
       // someone in by the fire: the windows glow warm
       const home = this.town.inside(b.kind);

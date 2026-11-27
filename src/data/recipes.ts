@@ -55,6 +55,7 @@ export const RECIPES: Recipe[] = [
   r('door', 1, 'workbench', { wood: 6 }),
   r('chest', 1, 'workbench', { wood: 10 }),
   r('bed', 1, 'workbench', { wood: 14, hide: 3 }),
+  r('skylantern', 2, 'workbench', { wood: 1, hide: 1, torch: 1 }),
   // furniture for a home
   r('hearth', 1, 'workbench', { stone: 20, clay: 6, coal: 2 }),
   r('chair', 1, 'workbench', { wood: 5 }),

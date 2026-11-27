@@ -370,6 +370,7 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
 
     this.drawGlows(g, ctx, camX, camY, vw, vh);
+    this.drawLanterns(g, ctx, camX, camY, vw, vh);
     this.drawBolt(g, ctx, camX, camY);
     this.drawShades(g, ctx, camX, camY);
     this.drawDogMarks(g, ctx, camX, camY);
@@ -1847,6 +1848,37 @@ export class Renderer {
       }
     }
     this.amb = this.amb.filter((a) => a.life > 0 && a.x > camX - 40 && a.x < camX + vw + 40 && a.y > camY - 40 && a.y < camY + vh + 40);
+  }
+
+  // ------------------------------------------------------------------ sky lanterns (after lighting: they are their own light)
+  private drawLanterns(g: Game, ctx: CanvasRenderingContext2D, camX: number, camY: number, vw: number, vh: number): void {
+    const sky = g.lanterns.sky;
+    if (!sky.length) return;
+    const s = iconSrc(ITEMS.skylantern.icon);
+    for (const l of sky) {
+      const x = l.x - camX;
+      const y = l.y - camY;
+      if (x < -30 || y < -30 || x > vw + 30 || y > vh + 30) continue;
+      const fade = Math.min(1, l.t * 2, (l.far ? 110 : 95) - l.t);
+      const flick = 1 + Math.sin(g.time * 11 + l.seed) * 0.08;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = fade;
+      if (l.far) {
+        this.glowAt(ctx, x, y, 7 * flick, 'rgba(255,170,80,0.45)');
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = '#ffd08a';
+        ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 3);
+      } else {
+        this.glowAt(ctx, x, y + 2, 22 * flick, 'rgba(255,150,60,0.42)');
+        ctx.globalCompositeOperation = 'source-over';
+        const sw = Math.sin(l.t * 0.9 + l.seed) * 0.08;
+        ctx.translate(Math.round(x), Math.round(y));
+        ctx.rotate(sw);
+        ctx.drawImage(s.img, s.sx, s.sy, s.size, s.size, -10, -12, 20, 20);
+      }
+      ctx.restore();
+    }
   }
 
   // ------------------------------------------------------------------ glows (after lighting)

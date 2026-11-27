@@ -51,6 +51,7 @@ const SFX = [
   'roofrain',
   'cuckoo',
   'icebreak',
+  'lantern',
   'fireball',
   'roar',
   'teleport',
