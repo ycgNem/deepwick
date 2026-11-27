@@ -1104,10 +1104,10 @@ export class Renderer {
     for (let x = c0; x <= c1; x++) {
       const ty = sky[x];
       if (ty >= w.h) continue;
+      // a pond: nothing settles on open water
+      if (ty > 0 && BLOCKS[w.fg[(ty - 1) * w.w + x]].liquid) continue;
       const sy = Math.round(ty * TILE - camY);
       if (sy < -12 || sy > vh + 12) continue;
-      const b = w.fg[ty * w.w + x];
-      if (b === B.WATER || b === B.LAVA) continue;
       const sx = Math.round(x * TILE - camX);
       for (let k = 0; k < TILE; k += 4) {
         // little drifts: the top edge rises and falls along the ground
@@ -1149,7 +1149,9 @@ export class Renderer {
       const x = mod(d.x * W - camX + Math.sin(t * (0.6 + d.s * 0.5) + i * 1.7) * 12 - fall * 0.25, W) - 40;
       const col = Math.floor((x + camX) / TILE);
       if (col < 0 || col >= w.w) continue;
-      if (y > sky[col] * TILE - camY) continue;
+      let top = sky[col];
+      while (top > 0 && BLOCKS[w.fg[(top - 1) * w.w + col]].liquid) top--;
+      if (y > top * TILE - camY) continue;
       const sz = d.l > 13 ? 2 : 1;
       ctx.fillRect(Math.round(x), Math.round(y), sz, sz);
     }

@@ -655,10 +655,7 @@ export class Game {
       p.clock -= 1;
       p.stats.days++;
       this.toast(`Day ${p.stats.days}`, '#ffe9a8');
-      this.tideWarning();
-      const ssn = seasonOf(p.stats.days);
-      if (seasonDay(p.stats.days) === 1) this.seasonTurns(ssn);
-      else if (ssn.id === 'autumn' && seasonDay(p.stats.days) === SEASON_DAYS) this.toast('The air has an edge to it this morning. Winter is coming.', '#cfe8ff');
+      this.newDay();
     }
     const bell = 0.6 - 60 / DAY_LENGTH;
     if (p.clock >= bell && p.clock - dt / DAY_LENGTH < bell) this.duskBell();
@@ -674,6 +671,15 @@ export class Game {
       else this.toast('Dawn breaks.', '#ffd79a');
     }
     this.wasNight = night;
+  }
+
+  /** a new morning (by the clock or after a night's sleep): a tide coming, a season turning */
+  private newDay(): void {
+    const p = this.p;
+    this.tideWarning();
+    const ssn = seasonOf(p.stats.days);
+    if (seasonDay(p.stats.days) === 1) this.seasonTurns(ssn);
+    else if (ssn.id === 'autumn' && seasonDay(p.stats.days) === SEASON_DAYS) this.toast('The air has an edge to it this morning. Winter is coming.', '#cfe8ff');
   }
 
   /** the season this day falls in */
@@ -3449,7 +3455,7 @@ export class Game {
         this.enemies = this.enemies.filter((e) => !e.def.nocturnal && !e.def.shade);
         this.wasNight = false;
         this.toast(`You sleep soundly. Day ${p.stats.days}.`, '#ffd79a');
-        this.tideWarning();
+        this.newDay();
         this.onSave?.();
       });
     } else if (changed) {
@@ -3596,6 +3602,7 @@ export class Game {
     this.teleportHome();
     pl.hp = this.st.maxHp;
     this.p.food = Math.max(this.p.food, 50);
+    this.cold = 0;
     this.enemies = [];
     this.shots = [];
     if (this.boss?.dead && this.p.bossRewardPending) this.grantBossReward(this.player.cx, this.player.cy);
@@ -5373,7 +5380,7 @@ export class Game {
     const shelter = winter && open > 0.25 ? this.shelter() : 0;
     let bite = 0;
     if (winter && open > 0.25 && !this.warm && !pl.dead && shelter < 2)
-      bite = ((night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1) * (shelter === 1 ? 0.5 : 1);
+      bite = (shelter === 1 ? (night ? 1 / 120 : 0) : (night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1);
     if (bite > 0) this.cold = Math.min(1, this.cold + dt * bite);
     else this.cold = Math.max(0, this.cold - dt / (this.warm ? 5 : open <= 0.25 || shelter === 2 ? 40 : winter ? 90 : 30));
     if (shelter === 2 && night && !pl.dead) this.hint('shelter', 'Four walls and a roof keep the winter wind off: the cold cannot build in here. Light a fire inside and it is a home.');

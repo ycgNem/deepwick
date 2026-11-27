@@ -32,6 +32,8 @@ export interface DogSave {
   y: number;
   /** the day he last dug something up */
   dug: number;
+  /** the finds he has already caught the scent of (tile indices) */
+  sniffed?: number[];
 }
 
 export type DogAnim = 'idle' | 'walk' | 'run' | 'bark' | 'sniff' | 'sit' | 'dig' | 'leap';
@@ -90,6 +92,8 @@ export class Dog {
   private digging: { x: number; t: number; at: boolean; sound: number } | null = null;
   private warned = new WeakSet<Enemy>();
   private sniffed = new Set<number>();
+  /** a bark a moment after another sound (on the game's clock, so it never outlives the world) */
+  private later: { t: number; vol: number; at?: { x: number; y: number } } | null = null;
   /** a scent he has caught: wisps rise from that tile for a while */
   scent: { x: number; y: number; t: number } | null = null;
   /** a pat: a little heart floats up */
@@ -145,7 +149,7 @@ export class Dog {
       this.resetTrail(g);
       this.play('bark', 0.6);
       audio.play('eat', { vol: 0.6, pitch: 1.2 });
-      setTimeout(() => audio.play('dog_bark', { vol: 0.7 }), 450);
+      this.later = { t: 0.45, vol: 0.7 };
       this.heartT = 1.4;
       g.tally('dog');
       g.toast(`He wolfs down the ${ITEMS[id].name} and decides he is yours. You call him ${DOG_NAME}.`, '#ffd9a0');
@@ -160,6 +164,7 @@ export class Dog {
     }
     d.stay = !d.stay;
     if (d.stay) {
+      this.digging = null;
       this.stillT = 2;
       g.text(this.x, this.y - 40, `Stay, ${DOG_NAME}.`, '#f0e0c0');
     } else {
@@ -210,10 +215,10 @@ export class Dog {
   update(g: Game, dt: number): void {
     const p = g.p;
     const pl = g.player;
-    // the stray comes in to the Wick's warmth by day once it burns
-    if (!p.dog && p.wick.kindled && !isNight(p.clock) && !g.ending) {
-      const tx = WICK_X - 6;
-      p.dog = { found: false, stay: true, x: (tx + 0.5) * TILE, y: groundAt(g.world, tx) * TILE, dug: -1 };
+    // the stray comes in to the Wick's warmth of a morning once it burns (while you are out of sight of the spot)
+    if (!p.dog && p.wick.kindled && !isNight(p.clock) && p.clock < 0.45 && !g.ending) {
+      const tx = this.straySpot(g);
+      if (Math.abs(pl.cx - (tx + 0.5) * TILE) > 11 * TILE || !g.onSurface()) p.dog = { found: false, stay: true, x: (tx + 0.5) * TILE, y: g.world.skyline[tx] * TILE, dug: -1 };
     }
     const d = (this.saved = p.dog);
     if (!d) {
@@ -224,7 +229,15 @@ export class Dog {
       this.present = true;
       this.x = d.x;
       this.y = d.y;
-      this.resetTrail(g);
+      this.sniffed.clear();
+      for (const i of d.sniffed ?? []) this.mark(g, i);
+      // (a save made while you lay blacked out has him where you fell)
+      if (d.found && !d.stay && !pl.dead && Math.hypot(pl.cx - d.x, pl.y + pl.h - d.y) > 6 * TILE) this.warp(g);
+      else this.resetTrail(g);
+    }
+    if (this.later && (this.later.t -= dt) <= 0) {
+      audio.play('dog_bark', { vol: this.later.vol, at: this.later.at });
+      this.later = null;
     }
     const fx = pl.cx;
     const fy = pl.y + pl.h;
@@ -254,8 +267,10 @@ export class Dog {
           audio.play('dog_whine', { vol: 0.35, at: { x: this.x, y: this.y } });
         }
       }
-    } else if (this.digging) this.updateDig(g, dt);
-    else if (!pl.dead) this.follow(g, dt);
+    } else if (this.digging) {
+      this.track(g);
+      this.updateDig(g, dt);
+    } else if (!pl.dead) this.follow(g, dt);
 
     // what he did this frame decides how he looks
     const dx = this.x - ox;
@@ -298,8 +313,27 @@ export class Dog {
     }
   }
 
-  /** trot along your trail, a little behind */
-  private follow(g: Game, dt: number): void {
+  /** where the stray turns up: beside Pell's corner of the Wick, on ground that has not been dug out or built over */
+  private straySpot(g: Game): number {
+    const w = g.world;
+    const base = groundAt(w, WICK_X);
+    for (const off of [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5]) {
+      const tx = WICK_X - 6 + off;
+      if (tx > 1 && tx < w.w - 2 && Math.abs(w.skyline[tx] - base) <= 2 && w.rock(tx, w.skyline[tx])) return tx;
+    }
+    return WICK_X - 6;
+  }
+
+  /** a find he has caught the scent of, and the rest of its seam round it */
+  private mark(g: Game, i: number): void {
+    const w = g.world;
+    const bx = i % w.w;
+    const by = Math.floor(i / w.w);
+    for (let y = by - 2; y <= by + 2; y++) for (let x = bx - 2; x <= bx + 2; x++) if (x >= 0 && y >= 0 && x < w.w && y < w.h) this.sniffed.add(y * w.w + x);
+  }
+
+  /** your footsteps, as he will follow them */
+  private track(g: Game): { x: number; y: number; s: number } {
     const pl = g.player;
     const fx = pl.cx;
     const fy = pl.y + pl.h;
@@ -313,6 +347,27 @@ export class Dog {
       last = { x: fx, y: fy, s: last.s + step };
       this.trail.push(last);
     }
+    return last;
+  }
+
+  /** back from a dig: over to where he stepped off your trail, then along it after you */
+  private rejoin(): void {
+    const from = this.trail.length ? this.at(this.s) : { x: this.x, y: this.y };
+    const pts = [{ x: this.x, y: this.y }, from, ...this.trail.filter((t) => t.s > this.s)];
+    let s = 0;
+    this.trail = pts.map((pt, i) => {
+      if (i) s += Math.hypot(pt.x - pts[i - 1].x, pt.y - pts[i - 1].y);
+      return { x: pt.x, y: pt.y, s };
+    });
+    this.s = 0;
+  }
+
+  /** trot along your trail, a little behind */
+  private follow(g: Game, dt: number): void {
+    const pl = g.player;
+    const fx = pl.cx;
+    const fy = pl.y + pl.h;
+    const last = this.track(g);
     const head = last.s + Math.hypot(fx - last.x, fy - last.y);
     // too far behind to catch up on foot (a long drop, a minecart): he turns up beside you
     if (head - this.s > 70 * TILE) {
@@ -381,7 +436,7 @@ export class Dog {
     if (best.def.id === 'lampless') {
       this.play('bark', 0.9);
       audio.play('dog_growl', { vol: 0.55, at });
-      setTimeout(() => audio.play('dog_bark', { vol: 0.7, at }), 500);
+      this.later = { t: 0.5, vol: 0.7, at };
     } else {
       this.play('bark', 0.6);
       audio.play('dog_growl', { vol: 0.6, at });
@@ -418,7 +473,10 @@ export class Dog {
     // a find gives off scent for a while, and nearby ones of the same seam count as found too
     const bx = best % w.w;
     const by = Math.floor(best / w.w);
-    for (let y = by - 2; y <= by + 2; y++) for (let x = bx - 2; x <= bx + 2; x++) if (x >= 0 && y >= 0 && x < w.w && y < w.h) this.sniffed.add(y * w.w + x);
+    this.mark(g, best);
+    const saved = (this.saved!.sniffed ??= []);
+    saved.push(best);
+    if (saved.length > 400) saved.shift();
     this.scentT = 18;
     this.scent = { x: bx, y: by, t: 9 };
     this.facing = bx * TILE + TILE / 2 > this.x ? 1 : -1;
@@ -438,13 +496,18 @@ export class Dog {
     const w = g.world;
     const here = Math.floor(this.x / TILE);
     const gy = groundAt(w, here);
+    if (Math.abs(this.y - gy * TILE) > 6) {
+      this.meadowT = 10;
+      return;
+    }
     const dirs = Math.random() < 0.5 ? [-1, 1] : [1, -1];
     for (const sd of dirs) {
-      for (let k = 2; k <= 4; k++) {
+      for (let k = 1; k <= 4; k++) {
         const tx = here + sd * k;
-        if (tx < 2 || tx >= w.w - 2) continue;
+        if (tx < 2 || tx >= w.w - 2) break;
         const ty = groundAt(w, tx);
         if (Math.abs(ty - gy) > 1) break;
+        if (k < 2) continue;
         const b = w.get(tx, ty);
         if (b !== B.GRASS && b !== B.DIRT) continue;
         if (w.getObj(tx, ty - 1)) continue;
@@ -499,7 +562,7 @@ export class Dog {
     g.drops.push(drop);
     d.dug = g.p.stats.days;
     this.digging = null;
-    this.resetTrail(g);
+    this.rejoin();
     this.play('bark', 0.6);
     audio.play('dog_bark', { vol: 0.6 });
     g.tally('dug');
