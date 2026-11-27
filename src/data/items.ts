@@ -135,7 +135,7 @@ const LIST: Record<string, Partial2> = {
   hide: { name: 'Animal Hide', icon: n32(28), kind: 'material', value: 3, desc: 'From rabbits and boars. Beds, bows and leather.' },
   gloammote: { name: 'Gloam Mote', icon: cv(4), kind: 'material', value: 4, desc: 'A scrap of living dark, still twitching. The Wick burns it clean.', glow: '#b48aff' },
   ash: { name: 'Hollow Ash', icon: n32(44), kind: 'material', value: 6, desc: 'What is left of a Hollow at dawn.' },
-  wheat: { name: 'Wheat', icon: n32(51), kind: 'material', value: 1, desc: 'Bake three into bread.' },
+  wheat: { name: 'Wheat', icon: n32(51), kind: 'material', value: 1, desc: 'Bake three into bread at a fire. At a hearth or stove it goes into pasties, tarts and pies.' },
 
   // ---- tools and weapons
   woodpick: { name: 'Wooden Pickaxe', icon: n32(1), kind: 'pick', tier: 1, power: 0.8, value: 4, desc: 'Breaks stone, coal and copper. Barely.' },
@@ -313,7 +313,7 @@ export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
   { id: 'oilskin', price: 45, n: 1 },
   { id: 'recall', price: 45, n: 1 },
   { id: 'seeds', price: 4, n: 3 },
-  { id: 'wheat', price: 9, n: 3 },
+  { id: 'wheat', price: 3, n: 3 },
   { id: 'fishingrod', price: 30, n: 1 },
   { id: 'steak', price: 14, n: 1 },
   { id: 'copperlantern', price: 220, n: 1 },

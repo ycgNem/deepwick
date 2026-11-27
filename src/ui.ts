@@ -701,7 +701,7 @@ export class UI implements UIHooks {
   private invHtml(): string {
     const g = this.game;
     const stations = g.stationsNear();
-    const names = [...stations].filter((s) => s !== 'hand').map((s) => STATION_NAME[s]);
+    const names = [...stations].filter((s) => s !== 'hand' && !(s === 'fire' && stations.has('kitchen'))).map((s) => STATION_NAME[s]);
     const how = g.input.usingTouch
       ? 'Tap to pick up, tap to place. Hold a stack to split it. Double-tap equips or quick-moves. Tap outside to drop.'
       : 'Click to pick up, click to place. Right-click splits. Shift-click equips or quick-moves. Click outside to drop.';

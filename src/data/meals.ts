@@ -26,7 +26,7 @@ export const MEALS: Record<string, MealDef> = {
   grilledfish: { fx: 'mend', name: 'Mending', secs: 180, does: 'you heal faster' },
   bread: { fx: 'full', name: 'Full', secs: 300, does: 'hunger comes on 40% slower' },
   stew: { fx: 'warm', name: 'Warm Belly', secs: 240, does: 'the cold and the chill of being wet bite half as hard' },
-  pasty: { fx: 'lunch', name: "Delver's Lunch", secs: 420, does: 'the dark frays you 30% slower' },
+  pasty: { fx: 'lunch', name: "Delver's Lunch", secs: 420, does: 'the dark frays you 20% slower' },
   chowder: { fx: 'glow', name: 'Inner Glow', secs: 300, does: 'you shed a soft light of your own to see by' },
   tart: { fx: 'swift', name: 'Sugar Rush', secs: 240, does: 'you move 12% faster' },
   fishpie: { fx: 'hearty', name: 'Well Stuffed', secs: 360, hp: 25, does: '25 more health' },

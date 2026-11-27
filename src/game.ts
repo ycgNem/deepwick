@@ -3319,14 +3319,17 @@ export class Game {
     }
     pl.eatT = this.time + 0.45;
     takeItems(this.p, hd.id, 1);
+    const was = this.p.meal && this.p.meal.t > 0 ? this.p.meal.id : '';
+    if (meal) {
+      this.p.meal = { id: hd.id, t: meal.secs };
+      this.st = computeStats(this.p);
+    }
     this.p.food = Math.min(100, this.p.food + (hd.food ?? 0));
     if (hd.heal) pl.hp = Math.min(this.st.maxHp, pl.hp + hd.heal);
     audio.play('eat');
     this.text(pl.cx, pl.y - 4, `+${hd.food} food`, '#ffc890');
     this.burst(pl.cx + pl.facing * 6, pl.y + 10, 6, ['#c87a4a', '#ffe0b0'], 50);
     if (meal) {
-      const was = this.p.meal && this.p.meal.t > 0 ? this.p.meal.id : '';
-      this.p.meal = { id: hd.id, t: meal.secs };
       this.tally('meal_' + hd.id);
       const mins = meal.secs / 60;
       const does = meal.does[0].toUpperCase() + meal.does.slice(1);
@@ -5199,7 +5202,7 @@ export class Game {
       if (this.souls.some((s) => this.soulFollowing(s.kind))) drain *= 0.5;
       if (this.dog.near(this)) drain *= 0.7;
       if (this.rested > 0) drain *= 0.75;
-      if (this.fed('lunch')) drain *= 0.7;
+      if (this.fed('lunch')) drain *= 0.8;
       if (this.buffs.nightglass > 0) drain *= 0.5;
       // with the heart stilled the dark below is only dark
       if (p.bossDefeated) drain *= 0.5;
@@ -5310,16 +5313,17 @@ export class Game {
     const bonus = this.st.light - (this.st.oilMax > 0 ? (ITEMS[this.p.equip.lantern?.id ?? '']?.radius ?? 0) : 0);
     const ng = this.buffs.nightglass > 0;
     lights.push({ x: lx, y: ly, r: ng ? 0.5 : 0.44, g: ng ? 0.52 : 0.4, b: ng ? 0.64 : 0.46, radius: (4.2 + Math.max(0, bonus) + (ng ? 3.5 : 0)) * vault, cast: true });
-    // glowfin chowder: you shine a little yourself, a soft sea-green. It lets you see, but it is kept
-    // just under the light that steadies you (LIT), or a bowl of soup would switch the dark off
-    if (this.fed('glow') && !pl.dead) {
-      const breathe = 1 + Math.sin(this.time * 1.7) * 0.04;
-      lights.push({ x: lx, y: ly - 0.2, r: 0.25, g: 0.55, b: 0.5, radius: 6.4 * breathe * vault, cast: true });
-    }
     const hd = heldDef(this.p);
     // a guttering flame shrinks and dims (dimmer than your eyes' own glow at its lowest, or the light would still spread)
     const reach = this.flameReach();
     const bright = Math.min(1, 0.35 + (0.65 * (reach - GUTTER_DIM)) / (1 - GUTTER_DIM));
+    // glowfin chowder: you shine a little yourself, a soft sea-green. It lets you see further, but it is
+    // no brighter than your own eyes' glow: under the light that steadies you (LIT) and under what holds
+    // a Lampless (HELD), or a bowl of soup would switch the dark off. It gutters with your flame.
+    if (this.fed('glow') && !pl.dead) {
+      const breathe = 1 + Math.sin(this.time * 1.7) * 0.04;
+      lights.push({ x: lx, y: ly - 0.2, r: 0.2, g: 0.44, b: 0.4, radius: 6.4 * breathe * vault * reach, cast: true });
+    }
     const rain = this.weather.rain;
     const drench = rain > 0 && this.exposed(Math.floor(lx), Math.floor(ly) - 1) ? sputter(rain * 0.7, this.time, 0) : 1;
     if (hd?.id === 'torch' && !pl.dead) lights.push({ x: lx + pl.facing * 0.4, y: ly, r: 1.1 * bright * drench, g: 0.74 * bright * drench, b: 0.38 * bright * drench, radius: 7 * flick * vault * dim * reach * (0.55 + 0.45 * drench), cast: true });
@@ -5675,7 +5679,7 @@ export class Game {
       const s = this.p.inv[i];
       if (!s) continue;
       const def = ITEMS[s.id];
-      if (!def || def.kind !== 'material' || def.value <= 0 || s.id === 'wood') continue;
+      if (!def || def.kind !== 'material' || def.value <= 0 || s.id === 'wood' || s.id === 'wheat' || itemValue(s.id, this.st) <= 0) continue;
       const keep = Math.min(s.n, reserved[s.id] ?? 0);
       reserved[s.id] = (reserved[s.id] ?? 0) - keep;
       const n = s.n - keep;
