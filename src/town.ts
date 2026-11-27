@@ -184,8 +184,8 @@ export class Town {
     const tx = Math.floor(t.x / TILE);
     let ty = Math.round(t.y / TILE);
     if (ty <= 0 || ty >= w.h) return groundAt(w, tx) * TILE;
-    for (let k = 0; k < 3 && w.rock(tx, ty - 1); k++) ty--;
-    for (let k = 0; k < 8 && !w.rock(tx, ty); k++) ty++;
+    if (w.rock(tx, ty - 1) && !w.rock(tx, ty - 2)) ty--;
+    else if (!w.rock(tx, ty) && (w.rock(tx, ty + 1) || w.rock(tx, ty + 2))) ty += w.rock(tx, ty + 1) ? 1 : 2;
     return ty * TILE;
   }
 

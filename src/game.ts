@@ -420,6 +420,7 @@ export class Game {
   rested = 0;
   /** what the bed you are by says about its room (worked out twice a second, not every frame) */
   private bedNote = { key: '', t: -9, note: '' };
+  private shelterNote = { key: -1, t: -9, room: false };
   /** townsfolk just home, walking from the Wick to their door */
   homing: (Soul & { tx: number })[] = [];
   /** where you have walked while someone follows you: they keep to it */
@@ -2221,7 +2222,7 @@ export class Game {
       w.setRail(tx, ty - 1, false);
       this.drops.push(new Drop('rail', 1, cx, cy - TILE));
     }
-    if (w.getObj(tx, ty + 1) === Obj.LAMP) this.breakObj(tx, ty + 1, true);
+    if (w.getObj(tx, ty + 1) === Obj.LAMP || FURN.get(w.getObj(tx, ty + 1))?.mount === 'ceiling') this.breakObj(tx, ty + 1, true);
   }
 
   /** torches with nothing left to hold them drop */
@@ -5042,11 +5043,12 @@ export class Game {
     // healing
     if (pl.regenT > 0) pl.regenT -= dt;
     else if (p.food > 30 && pl.hp < this.st.maxHp) {
-      let rate = (p.food > 75 ? 0.9 : 0.4) * (1 - 0.5 * this.chill) * (this.rested > 0 ? 1.5 : 1);
+      let rate = (p.food > 75 ? 0.9 : 0.4) * (1 - 0.5 * this.chill);
       if (this.nearFire(3)) rate += 1.6;
       if (this.inWickLight(pl.cx, pl.cy)) rate += 0.8 + this.flame * 0.25;
-      pl.hp = Math.min(this.st.maxHp, pl.hp + rate * dt);
+      // healing costs food; rested, the same food goes half as far again
       p.food = Math.max(0, p.food - rate * dt * 0.08);
+      pl.hp = Math.min(this.st.maxHp, pl.hp + rate * dt * (this.rested > 0 ? 1.5 : 1));
     }
 
     // lantern oil burns underground
@@ -5303,7 +5305,7 @@ export class Game {
         if (k <= 0.05) continue;
         for (let x = tx0; x < tx0 + tw; x++) {
           const o = this.world.getObj(x, y);
-          if (o !== Obj.TORCH && o !== Obj.LAMP && o !== Obj.WICKPOST && o !== Obj.CAMPFIRE) continue;
+          if (o !== Obj.TORCH && o !== Obj.LAMP && o !== Obj.WICKPOST && !FIRES.has(o)) continue;
           this.flaring.push({ x, y, k });
           lights.push({ x: x + 0.5, y: y + 0.4, r: 1.2, g: 0.86, b: 0.5, radius: 3 + 6 * k, cast: false });
         }
@@ -5432,19 +5434,17 @@ export class Game {
       this.parts.push({ x: pl.x + 4 + Math.random() * (pl.w - 8), y: pl.y + 6 + Math.random() * 14, vx: (Math.random() - 0.5) * 6, vy: -22 - Math.random() * 10, life: 0.9, max: 0.9, color: '#c4c8d2', size: 2, grav: 0, glow: false });
   }
 
-  /** 0: out in the open; 1: under a roof; 2: inside, with a roof and a wall (or a door) either side */
+  /** 0: out in the open; 1: under a roof; 2: inside a closed room (walls, a roof, the door shut) */
   shelter(): number {
     const pl = this.player;
-    const w = this.world;
     const tx = Math.floor(pl.cx / TILE);
     const hy = Math.floor((pl.y + 4) / TILE);
     const fy = Math.floor((pl.y + pl.h - 4) / TILE);
     if (this.exposed(tx, hy)) return 0;
-    const wall = (dir: number): boolean => {
-      for (let k = 1; k <= 12; k++) if (w.solid(tx + dir * k, hy) || w.solid(tx + dir * k, fy)) return true;
-      return false;
-    };
-    return wall(-1) && wall(1) ? 2 : 1;
+    // the room check is a flood fill: twice a second is plenty
+    const key = tx * 10000 + fy;
+    if (key !== this.shelterNote.key || this.time - this.shelterNote.t > 0.5) this.shelterNote = { key, t: this.time, room: !!roomAt(this.world, tx, fy) };
+    return this.shelterNote.room ? 2 : 1;
   }
 
   /** winter: out in the open at night (or in falling snow) with no fire, the cold gets into you */

@@ -367,7 +367,7 @@ export class Boss {
     for (let ty = cy - 10; ty <= cy + 6; ty++) {
       for (let tx = cx - 25; tx <= cx + 25; tx++) {
         const o = w.getObj(tx, ty);
-        const item = o === Obj.TORCH ? 'torch' : o === Obj.LAMP ? 'lamp' : o === Obj.CAMPFIRE ? 'campfire' : null;
+        const item = o === Obj.TORCH ? 'torch' : o === Obj.LAMP ? 'lamp' : o === Obj.CAMPFIRE ? 'campfire' : o === Obj.HEARTH ? 'hearth' : o === Obj.STOVE ? 'stove' : null;
         if (!item) continue;
         w.setObj(tx, ty, 0);
         g.drops.push(new Drop(item, 1, tx * TILE + 16, ty * TILE + 16));

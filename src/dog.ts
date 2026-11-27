@@ -94,8 +94,9 @@ export class Dog {
   private sniffed = new Set<number>();
   /** a bark a moment after another sound (on the game's clock, so it never outlives the world) */
   private later: { t: number; vol: number; at?: { x: number; y: number } } | null = null;
-  /** curled up in his bed at home after a night there, till you go off */
+  /** curled up in his bed at home after a night there, till you go off (and where you woke) */
   private nap = 0;
+  private napFrom = { x: 0, y: 0 };
   /** a scent he has caught: wisps rise from that tile for a while */
   scent: { x: number; y: number; t: number } | null = null;
   /** a pat: a little heart floats up */
@@ -186,6 +187,7 @@ export class Dog {
     this.digging = null;
     this.stillT = 3;
     this.nap = 40;
+    this.napFrom = { x: g.player.cx, y: g.player.y + g.player.h };
     this.anim = 'sit';
     this.animT = 9;
     this.heartT = 1.4;
@@ -214,6 +216,7 @@ export class Dog {
     this.stillT = 2;
     this.resetTrail(g);
     this.digging = null;
+    this.nap = 0;
   }
 
   private resetTrail(g: Game): void {
@@ -286,9 +289,10 @@ export class Dog {
         }
       }
     } else if (this.nap > 0) {
+      // your steps from the bed: when he gets up he follows them, not a straight line through the rock
+      this.track(g);
       this.nap -= dt;
-      if (Math.hypot(fx - this.x, fy - this.y) > 5 * TILE || pl.dead) this.nap = 0;
-      if (this.nap <= 0) this.resetTrail(g);
+      if (Math.hypot(fx - this.napFrom.x, fy - this.napFrom.y) > 4 * TILE || pl.dead) this.nap = 0;
     } else if (this.digging) {
       this.track(g);
       this.updateDig(g, dt);
