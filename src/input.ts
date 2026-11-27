@@ -1,3 +1,5 @@
+import { canon } from './keys';
+
 /** standard-mapping gamepad buttons */
 const PAD = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, BACK: 8, START: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 
@@ -54,14 +56,16 @@ export class Input {
         this.usingPad = false;
         this.usingTouch = false;
       }
+      // a real key is read through your bindings; the on-screen controls and the controller already press the game's own keys
+      const k = e.isTrusted ? canon(e.code) : e.code;
+      const quiet = ['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+      if (quiet.includes(k) || quiet.includes(e.code)) e.preventDefault();
       if (e.repeat) return;
-      const k = e.code;
-      if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
       this.down.add(k);
       this.pressed.add(k);
     });
     window.addEventListener('keyup', (e) => {
-      this.down.delete(e.code);
+      this.down.delete(e.isTrusted ? canon(e.code) : e.code);
     });
     window.addEventListener('blur', () => {
       this.down.clear();
@@ -168,6 +172,11 @@ export class Input {
   }
   wasPressed(...codes: string[]): boolean {
     return codes.some((c) => this.pressed.has(c));
+  }
+  /** let go of every key (the bindings just changed under them) */
+  clearKeys(): void {
+    this.down.clear();
+    this.pressed.clear();
   }
   /** forget a key press so the game does not also act on it (the UI already did) */
   consume(code: string): void {

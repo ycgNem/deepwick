@@ -14,6 +14,7 @@ import { LOST, LostKind, LostSoul, isLostKind } from './data/lost';
 import { BREWS, BREW_TIME } from './data/brews';
 import { prefs } from './prefs';
 import { forTouch } from './touch';
+import { forKeys } from './keys';
 import { stepGas, sniff, gasOpen, isFlameObj, GAS_IGNITE, GAS_BURN, GAS_DENSE } from './world/gas';
 import { supported, propRoof, PROP_MAX, rockDamage } from './world/cavein';
 import { BREATH_MAX } from './world/flood';
@@ -531,7 +532,7 @@ export class Game {
     // remembered even with hints off: the Journal reads some of them
     this.p.seen[key] = true;
     if (!prefs.hints) return;
-    if (this.input.usingTouch) msg = forTouch(msg);
+    msg = this.input.usingTouch ? forTouch(msg) : forKeys(msg);
     if (this.ui.hintCard) this.ui.hintCard(msg);
     else this.ui.toast(msg, '#ffe9a8');
   }

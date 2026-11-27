@@ -2656,3 +2656,66 @@ body.touch #hintCard {
     width: 150px;
   }
 }
+
+/* ---- the Keys list in the pause menu */
+.keys {
+  margin: 2px 0 10px;
+}
+.keys .kh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.keys .kh > span {
+  font-family: 'Silkscreen', monospace;
+  font-size: 12px;
+  color: var(--dim);
+}
+.keys .kh small {
+  flex: 1;
+  min-width: 200px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.keys .kh button {
+  font-size: 13px;
+  padding: 2px 10px;
+}
+.keys .kgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 8px;
+}
+.keys .kgrid button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: transparent;
+  color: #d8cbb8;
+  border-color: var(--edge);
+  box-shadow: none;
+  padding: 3px 4px 3px 9px;
+  font-size: 13px;
+  text-align: left;
+  min-width: 0;
+}
+.keys .kgrid button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.keys .kgrid button.on {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.keys .kgrid button.on kbd {
+  animation: keywait 0.9s steps(2) infinite;
+}
+@keyframes keywait {
+  50% {
+    background: var(--gold);
+    color: #1a1206;
+  }
+}

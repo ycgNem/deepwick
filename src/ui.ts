@@ -20,6 +20,8 @@ import { FEATS } from './data/feats';
 import { seasonOf } from './seasons';
 import { BREWS } from './data/brews';
 import { MEALS } from './data/meals';
+import { ACTIONS, bind, canon, customKeys, forKeys, keyLabel, keyName, resetKeys, type Action } from './keys';
+import { forTouch } from './touch';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -123,6 +125,8 @@ export class UI implements UIHooks {
       this.tipEl.style.top = `${e.clientY + 14}px`;
     });
     window.addEventListener('keydown', (e) => this.onKey(e));
+    // waiting for a new key: it is caught here before the game or the menus can act on it
+    window.addEventListener('keydown', (e) => this.onBindKey(e), true);
   }
 
   attach(game: Game): void {
@@ -282,6 +286,7 @@ export class UI implements UIHooks {
   }
 
   close(): void {
+    this.binding = null;
     this.returnCursor();
     this.panel = null;
     this.game.input.blocked = false;
@@ -304,29 +309,63 @@ export class UI implements UIHooks {
     this.updateCursor();
   }
 
+  /** the action waiting for its new key, in the pause menu */
+  private binding: Action | null = null;
+
+  private onBindKey(e: KeyboardEvent): void {
+    if (!this.binding) return;
+    // the controller or the screen pressed something: stop waiting, and let it through
+    if (!e.isTrusted || this.panel !== 'pause') {
+      this.binding = null;
+      if (this.panel === 'pause') this.render();
+      return;
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.repeat) return;
+    const a = this.binding;
+    this.binding = null;
+    if (e.code !== 'Escape') {
+      const was = keyName(a);
+      if (bind(a, e.code)) {
+        this.game.input.clearKeys();
+        audio.play('click', { vol: 0.6, pitch: 1.2 });
+        const name = ACTIONS.find((x) => x.id === a)?.name ?? '';
+        if (was !== keyName(a)) this.toast(`${name}: ${keyName(a)}`, '#e8d8ff');
+      } else this.toast(`${keyLabel(e.code)} keeps its own job (pause, the hotbar or the arrows)`, '#ffb0a0');
+    }
+    this.render();
+  }
+
+  /** tutorial text, told for the way you are playing */
+  private tell(msg: string): string {
+    return this.game?.input.usingTouch ? forTouch(msg) : forKeys(msg);
+  }
+
   private onKey(e: KeyboardEvent): void {
     if (!this.game || document.getElementById('title')?.classList.contains('show')) return;
-    if (e.code === 'Escape') {
+    const code = e.isTrusted ? canon(e.code) : e.code;
+    if (code === 'Escape') {
       if (this.panel && this.panel !== 'victory') this.close();
       else if (!this.panel) this.open('pause');
       e.preventDefault();
-    } else if (e.code === 'Tab' || e.code === 'KeyI' || e.code === 'KeyC') {
+    } else if (code === 'Tab' || code === 'KeyI' || code === 'KeyC') {
       e.preventDefault();
       if (this.panel === 'inv' || this.panel === 'chest') this.close();
       else if (!this.panel) this.open('inv');
-    } else if (e.code === 'KeyM') {
+    } else if (code === 'KeyM') {
       if (this.panel === 'map') this.close();
       else if (!this.panel) this.open('map');
-    } else if (e.code === 'KeyJ') {
+    } else if (code === 'KeyJ') {
       if (this.panel === 'journal') this.close();
       else if (!this.panel) this.open('journal');
-    } else if (e.code === 'KeyE' && this.panel && this.panel !== 'pause' && this.panel !== 'victory') {
+    } else if (code === 'KeyE' && this.panel && this.panel !== 'pause' && this.panel !== 'victory') {
       this.close();
       // otherwise the same press reopens whatever you are standing next to
       this.game.input.consume('KeyE');
     } else if (this.panel === 'inv' || this.panel === 'chest') {
       // number keys still pick the hotbar slot while the inventory is open
-      const m = /^Digit(\d)$/.exec(e.code);
+      const m = /^Digit(\d)$/.exec(code);
       if (m) {
         this.game.p.sel = (Number(m[1]) + 9) % 10;
         this.render();
@@ -771,7 +810,7 @@ export class UI implements UIHooks {
       html += '<div class="list">';
       g.shopStock().forEach((it, k) => {
         const def = ITEMS[it.id];
-        html += `<div class="li">${img(def.icon)}<div class="nm"><b>${esc(def.name)}${it.n > 1 ? ` ×${it.n}` : ''}</b> <span class="dim">have ${count(p, it.id)}</span><small>${esc(def.desc)}</small></div><div class="pr">${it.price * it.n}c</div><button data-a="buy" data-k="${k}" ${p.coins >= it.price * it.n ? '' : 'disabled'}>Buy</button></div>`;
+        html += `<div class="li">${img(def.icon)}<div class="nm"><b>${esc(def.name)}${it.n > 1 ? ` ×${it.n}` : ''}</b> <span class="dim">have ${count(p, it.id)}</span><small>${esc(this.tell(def.desc))}</small></div><div class="pr">${it.price * it.n}c</div><button data-a="buy" data-k="${k}" ${p.coins >= it.price * it.n ? '' : 'disabled'}>Buy</button></div>`;
       });
       html += '</div>';
     }
@@ -1051,7 +1090,7 @@ export class UI implements UIHooks {
       }
       this.lastGoalIdx = g.p.journal;
     }
-    const help = g.input.usingPad ? 'Y pack \u00b7 D-pad \u2192 journal \u00b7 Back map \u00b7 Start menu' : 'Tab pack & craft \u00b7 J journal \u00b7 M map \u00b7 Esc menu';
+    const help = g.input.usingPad ? 'Y pack \u00b7 D-pad \u2192 journal \u00b7 Back map \u00b7 Start menu' : `${keyName('pack')} pack & craft \u00b7 ${keyName('journal')} journal \u00b7 ${keyName('map')} map \u00b7 Esc menu`;
     if (help !== this.lastHelp) {
       h.hudHelp.textContent = help;
       this.lastHelp = help;
@@ -1075,11 +1114,11 @@ export class UI implements UIHooks {
         const i = k++;
         if (!open) continue;
         // a page added after you had passed it (someone the Wick called in an older save) stays open until it is done
-        if (i < at && goal.id in LOST_GOALS && !goalDone(g, goal)) html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${goal.how}</p></div><small>still to do</small></div>`;
+        if (i < at && goal.id in LOST_GOALS && !goalDone(g, goal)) html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${this.tell(goal.how)}</p></div><small>still to do</small></div>`;
         else if (i < at) html += `<div class="jg done"><i>\u2713</i><span>${goal.text}</span><small>+${goal.coins}</small></div>`;
         else if (i === at) {
           const [have, need] = goal.progress(g);
-          html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${goal.how}</p>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><small>${fmt(have)} / ${fmt(need)}</small>` : ''}</div><small>+${goal.coins}</small></div>`;
+          html += `<div class="jg now"><i>\u25b8</i><div class="jt"><b>${goal.text}</b><p>${this.tell(goal.how)}</p>${need > 1 ? `<div class="gbar"><em style="width:${Math.round((have / need) * 100)}%"></em></div><small>${fmt(have)} / ${fmt(need)}</small>` : ''}</div><small>+${goal.coins}</small></div>`;
         } else html += `<div class="jg later"><i>\u00b7</i><span>${goal.text}</span></div>`;
       }
       html += '</div>';
@@ -1107,19 +1146,33 @@ export class UI implements UIHooks {
       <div class="settings"><label>Music <input type="range" min="0" max="100" value="${m}" data-set="music"></label><label>Sound <input type="range" min="0" max="100" value="${s}" data-set="sfx"></label></div>
       <div class="settings diff"><span>Options</span><button class="${prefs.shake ? 'on' : ''}" data-a="pref" data-id="shake">Screen shake &amp; flashes: ${prefs.shake ? 'On' : 'Off'}</button><button class="${prefs.hints ? 'on' : ''}" data-a="pref" data-id="hints">Tutorial hints: ${prefs.hints ? 'On' : 'Off'}</button><button class="${prefs.captions ? 'on' : ''}" data-a="pref" data-id="captions">Sound captions: ${prefs.captions ? 'On' : 'Off'}</button><button data-a="hudsize">HUD size: ${Math.round(prefs.hud * 100)}%</button><button data-a="fullscreen">${document.fullscreenElement ? 'Leave fullscreen' : 'Fullscreen'}</button></div>
       <div class="settings diff"><span>Difficulty</span>${MODE_IDS.map((id) => `<button class="${this.game.p.mode === id ? 'on' : ''}" data-a="mode" data-id="${id}">${MODES[id].name}</button>`).join('')}<small>${MODES[this.game.mode.id].blurb}</small></div>
+      ${this.game.input.usingTouch ? '' : this.keysHtml()}
       <div class="controls">${this.controlsHtml()}</div>
       <div class="row-actions"><button class="big" data-a="close">Resume</button><button data-a="journal">Journal</button><button data-a="save">Save now</button><button class="ghost" data-a="quit">Save &amp; quit to title</button></div>`;
   }
 
+  /** every keyboard action and the key it is on: click one, then press its new key */
+  private keysHtml(): string {
+    const rows = ACTIONS.map((a) => {
+      const on = this.binding === a.id;
+      return `<button class="${on ? 'on' : ''}" data-a="bind" data-id="${a.id}"><span>${a.name}</span><kbd>${on ? '\u2026' : esc(keyName(a.id))}</kbd></button>`;
+    }).join('');
+    const say = this.binding
+      ? 'Press the new key. Esc keeps the old one.'
+      : 'Click one, then press its new key. A key already in use swaps over. Esc, the numbers and the arrows keep their jobs.';
+    return `<div class="keys"><div class="kh"><span>Keys</span><small>${say}</small>${customKeys() ? '<button class="ghost" data-a="resetkeys">Reset keys</button>' : ''}</div><div class="kgrid">${rows}</div></div>`;
+  }
+
   /** every control, the way you are playing first */
   private controlsHtml(): string {
-    const kb = `<h3 class="sub">Keyboard &amp; mouse</h3>      <div><kbd>A</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump · <kbd>W</kbd><kbd>S</kbd> climb ladders, <kbd>S</kbd> drops through ladder tops</div>
+    const k = (a: Action): string => `<kbd>${esc(keyName(a))}</kbd>`;
+    const kb = `<h3 class="sub">Keyboard &amp; mouse</h3>      <div>${k('left')}${k('right')} move · ${k('jump')} jump · ${k('up')}${k('down')} climb ladders, ${k('down')} drops through ladder tops</div>
       <div><kbd>Left mouse</kbd> use the held item: dig, chop, attack, place, eat. Clicking rock with anything in hand digs with your best pickaxe</div>
       <div><kbd>Right mouse</kbd> open chests and doors, use beds and stations, pick berries, climb into carts; otherwise place or eat what you hold</div>
-      <div><kbd>Left mouse</kbd> with a fishing rod: cast at water, click when the bobber dips, then click while the needle is in the green · <kbd>Space</kbd> swims up</div>
-      <div><kbd>1</kbd>–<kbd>0</kbd> or wheel: hotbar · <kbd>Q</kbd> drop held stack</div>
-      <div><kbd>E</kbd> talk / interact / ride a cart · <kbd>F</kbd> lamp oil · <kbd>H</kbd> tonic · <kbd>R</kbd> recall to bed · <kbd>G</kbd> grappling hook</div>
-      <div><kbd>Tab</kbd> pack &amp; crafting · <kbd>J</kbd> journal · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</div>`;
+      <div><kbd>Left mouse</kbd> with a fishing rod: cast at water, click when the bobber dips, then click while the needle is in the green · ${k('jump')} swims up</div>
+      <div><kbd>1</kbd>–<kbd>0</kbd> or wheel: hotbar · ${k('drop')} drop held stack</div>
+      <div>${k('interact')} talk / interact / ride a cart · ${k('oil')} lamp oil · ${k('tonic')} tonic · ${k('recall')} recall to bed · ${k('hook')} grappling hook</div>
+      <div>${k('pack')} pack &amp; crafting · ${k('journal')} journal · ${k('map')} map · <kbd>Esc</kbd> pause</div>`;
     const touch = `<h3 class="sub">Touch</h3>      
       <div><kbd>Left thumb</kbd> anywhere on the left: walk, push up to climb, down to drop · <kbd>Jump</kbd> jump and swim · <kbd>Use</kbd> talk, travel, ride (it lights up when there is something to do)</div>
       <div><kbd>Finger on the world</kbd> dig, chop, fight, place what you hold, eat; hold to keep digging · <kbd>Tap</kbd> a door, bed, chest or station to open it · tap the hotbar to choose</div>
@@ -1417,7 +1470,7 @@ export class UI implements UIHooks {
     if (LUMEN[def.id]) stats.push(`Feeds the Wick: ${LUMEN[def.id]} Lumen`);
     if (def.value > 0 && sellable(def) && itemValue(def.id, this.game.st) > 0) stats.push(`Sells for ${itemValue(def.id, this.game.st)}c`);
     const slotName = equipSlotOf(def);
-    this.tipEl.innerHTML = `<b>${esc(def.name)}${n > 1 ? ` ×${n}` : ''}</b>${stats.length ? `<em>${stats.join(' · ')}</em>` : ''}<small>${esc(def.desc)}</small>${slotName ? '<small class="dim">Shift-click to equip</small>' : ''}`;
+    this.tipEl.innerHTML = `<b>${esc(def.name)}${n > 1 ? ` ×${n}` : ''}</b>${stats.length ? `<em>${stats.join(' · ')}</em>` : ''}<small>${esc(this.tell(def.desc))}</small>${slotName ? '<small class="dim">Shift-click to equip</small>' : ''}`;
     this.tipEl.classList.add('show');
   }
 
@@ -1525,6 +1578,17 @@ export class UI implements UIHooks {
         g.travelTo(x === undefined ? null : { x: Number(x), y: Number(t.dataset.y) });
         return;
       }
+      case 'bind': {
+        const id = t.dataset.id as Action;
+        this.binding = this.binding === id ? null : id;
+        break;
+      }
+      case 'resetkeys':
+        resetKeys();
+        this.binding = null;
+        g.input.clearKeys();
+        this.toast('Keys back to how they started.', '#e8d8ff');
+        break;
       case 'pref': {
         const id = t.dataset.id;
         if (id === 'shake') prefs.shake = !prefs.shake;

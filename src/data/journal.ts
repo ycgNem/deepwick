@@ -114,6 +114,13 @@ export const CHAPTERS: Chapter[] = [
         coins: 40,
       },
       {
+        id: 'home',
+        text: 'Sleep a night at home',
+        how: 'A home is a closed room: walls all round, a roof over it and the door shut, built on the meadow or dug into the hill. Put a bed and a fire in it (a campfire will do; a Stone Hearth is better). Sleep there and you wake Rested: the dark frays you slower, you heal faster, and hunger and the cold bite less. Tables, seats, rugs and the like make it comfier, and the comfier it is, the longer Rested lasts.',
+        progress: (g) => flag((g.p.tally?.rested ?? 0) >= 1),
+        coins: 60,
+      },
+      {
         id: 'glowing',
         text: 'Raise the Wick to Glowing',
         how: `Offer ${FLAME[2].need} Lumen in all. Its light will be seen from deep below, and the Wick lets you build Wickposts.`,
@@ -158,6 +165,13 @@ export const CHAPTERS: Chapter[] = [
         text: 'Plant a Wickpost',
         how: 'Wickposts (Workbench, once the Wick is Glowing) are lit waypoints: nothing spawns in their glow, and from any of them you can travel to the Wick and back.',
         progress: (g) => flag(!!g.p.seen.wickpost),
+        coins: 60,
+      },
+      {
+        id: 'pasty',
+        text: "Bake a Miner's Pasty",
+        how: "A hearth or a stove is a kitchen: stand by one and the pack shows what it can cook. A pasty takes raw meat, a mushroom and two wheat (Old Pell sells wheat) and makes two. It fills you up, and while you are Well Fed the dark frays you slower. Every dish feeds you something of its own: try them all.",
+        progress: (g) => flag(!!g.p.seen.made_pasty || (g.p.tally?.meal_pasty ?? 0) > 0),
         coins: 60,
       },
       {

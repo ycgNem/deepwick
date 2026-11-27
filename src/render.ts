@@ -1,4 +1,5 @@
-﻿import { A, makeCanvas, iconSrc, decorIcon, drawRailAt, drawLampAt } from './assets';
+﻿import { keyName } from './keys';
+import { A, makeCanvas, iconSrc, decorIcon, drawRailAt, drawLampAt } from './assets';
 import { Terrain, MAT, terrainTexture } from './terrain';
 import { buildBackdrops, Backdrop, BW, BH } from './backdrop';
 import { propOf } from './data/props';
@@ -2672,7 +2673,7 @@ export class Renderer {
       const size = Math.round(8 * s);
       out.font = `${size}px "DW Digits", "Pixelify Sans", monospace`;
       // on a touchscreen the Use button carries the same words
-      const label = g.input.usingTouch ? g.near.label : `[E] ${g.near.label}`;
+      const label = g.input.usingTouch ? g.near.label : `[${keyName('interact')}] ${g.near.label}`;
       const x = Math.round((pl.cx - camX) * s);
       const y = Math.round((pl.y - camY - 14) * s);
       const tw = out.measureText(label).width + 12 * s;
