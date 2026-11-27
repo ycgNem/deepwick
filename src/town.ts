@@ -6,7 +6,7 @@
  * On a tide night they go in early and bar the door.
  */
 import type { Game } from './game';
-import type { BuildingKind } from './state';
+import { give, type BuildingKind } from './state';
 import { TILE } from './constants';
 import { WICK_X } from './data/wick';
 import { groundAt } from './world/gen';
@@ -95,7 +95,7 @@ const LINES: Record<BuildingKind, Lines> = {
 
 /** Lantern Night: what they say as the lanterns go up */
 const FESTIVAL: Record<BuildingKind, string[]> = {
-  trade: ['That one\'s for Arno. Go on, little light. Find him.', 'My brother used to fold these better than me. Never told him.', 'Sky lanterns, a coin apiece. Tonight they\'re for nothing. Take one.'],
+  trade: ['That one\'s for Arno. Go on, little light. Find him.', 'My brother used to fold these better than me. Never told him.', 'Five coins a lantern, any other night. Tonight they\'re for nothing.'],
   forge: ['Fenn would have laughed at me, crying over a paper lamp.', 'Higher. Go on. Higher than the peaks.', 'Every year I think I\'m done with this. Every year I\'m here.'],
   archive: ['I write every name down, every year. The list gets longer, but so do the lanterns.', 'The ledgers say the whole valley used to glow on this night.', 'Look at them go. Somebody up on the high pastures is sending them too.'],
   stillroom: ['Let it go. That\'s the whole of it. Let it go.', 'Breathe out as it lifts. It helps. Trust me.', 'Grief is just love with nowhere to go. Tonight it goes up.'],
@@ -182,6 +182,17 @@ export class Town {
       t.y += (gy - t.y) * Math.min(1, dt * 12);
       // home: in through the door
       if (t.plan === 'home' && Math.abs(t.x - t.tx) < 1) t.plan = 'inside';
+      // Lantern Night: Pell will not see you go without; come by his stall and he gives you two
+      if (festival && t.kind === 'trade' && !pl.dead && p.lanternGift !== p.stats.days && Math.hypot(pl.cx - t.x, pl.y + pl.h - t.y) < 3 * TILE) {
+        p.lanternGift = p.stats.days;
+        const left = give(p.inv, 'skylantern', 2);
+        if (left < 2) {
+          g.toast('Old Pell presses ' + (left ? 'a Sky Lantern' : 'two Sky Lanterns') + ' into your hands. "Tonight they\'re for nothing."', '#ffd9a0');
+          t.say = 'Go on. Let them go from the Wick, with the rest of us.';
+          t.sayT = 4.5;
+          this.quietT = 6;
+        }
+      }
       // after dark on Lantern Night, three lanterns each (Pell lets his go from his stall)
       if (festival && isNight(c) && t.lanternN < 3 && (t.plan === 'wick' || !walker) && Math.abs(t.x - t.tx) < 2) {
         t.lanternT -= dt;
@@ -207,8 +218,9 @@ export class Town {
 
   /**
    * the floor under their feet: the nearest place to stand (rock underfoot, room for a body above)
-   * from where they are. Up a terrace of the meadow as far as six tiles, down at most two: never
-   * down a shaft, and never up onto a roof you built over them while the ground under it is free.
+   * from where they are, up or down a terrace of the meadow as far as six tiles. Never up onto a roof
+   * you built over them while the ground under it is free, never more than a step up anything you
+   * built (they do not scale your walls), and never down a shaft (a hole one tile wide: they step over).
    */
   private floor(g: Game, t: Townie): number {
     const w = g.world;
@@ -216,9 +228,11 @@ export class Town {
     const ty = Math.round(t.y / TILE);
     if (ty <= 0 || ty >= w.h) return groundAt(w, tx) * TILE;
     const stand = (y: number): boolean => w.rock(tx, y) && !w.rock(tx, y - 1) && !w.rock(tx, y - 2);
+    const shaft = w.rock(tx - 1, ty) && w.rock(tx + 1, ty);
     for (let d = 0; d <= 6; d++) {
-      if (stand(ty - d)) return (ty - d) * TILE;
-      if (d > 0 && d <= 2 && stand(ty + d)) return (ty + d) * TILE;
+      const up = ty - d;
+      if (stand(up) && (d <= 1 || !w.placed[w.idx(tx, up)])) return up * TILE;
+      if (d > 0 && stand(ty + d) && (d <= 2 || !shaft)) return (ty + d) * TILE;
     }
     return ty * TILE;
   }

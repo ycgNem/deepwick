@@ -112,6 +112,8 @@ export interface Progress {
   meal?: { id: string; t: number };
   /** lanterns let go on the latest Lantern Night (the Wick takes from the first dozen) */
   lanterns?: { day: number; n: number };
+  /** the Lantern Night Old Pell last gave you lanterns on */
+  lanternGift?: number;
   /** Tallow, the stray who comes to the Wick (missing until he first turns up) */
   dog?: DogSave;
   /** the weather over the valley, and how long it has left */
