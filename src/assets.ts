@@ -22,8 +22,10 @@ export interface Assets {
   bg: Record<string, HTMLImageElement>;
   /** framed picture of every block, for icons */
   blockIcon: HTMLCanvasElement[];
-  /** icons drawn at load: 0 rail, 1 minecart, 2 mine lamp */
+  /** icons drawn at load: 0 rail, 1 minecart, 2 mine lamp, 3 wickpost, 4 gloam mote, 5.. furniture */
   cvIcons: HTMLCanvasElement[];
+  /** the empty rows above and below each furniture cell's picture */
+  furnPad: { top: number; bottom: number }[];
   grassTop: HTMLCanvasElement[];
   mossTop: HTMLCanvasElement[];
   /** transparent rows under each camp sprite's feet */
@@ -34,7 +36,7 @@ export interface Assets {
 export const A = {} as Assets;
 
 const ENEMY_FILES = ['bat', 'slime', 'beetle', 'toad', 'spider', 'wisp', 'imp', 'slug', 'wraith', 'sentinel', 'gloamheart', 'rabbit', 'boar', 'hollow', 'lampless'];
-const CAMP_FILES = ['npc_merchant', 'npc_smith', 'npc_archivist', 'shop', 'forge', 'archive', 'pine1', 'pine2', 'oak', 'birch', 'bed', 'rocks', 'minecart', 'wick', 'wick_lit', 'wickpost', 'walk_smith', 'walk_archivist', 'stillroom', 'npc_herbalist', 'walk_herbalist', 'sconce', 'dog'];
+const CAMP_FILES = ['npc_merchant', 'npc_smith', 'npc_archivist', 'shop', 'forge', 'archive', 'pine1', 'pine2', 'oak', 'birch', 'bed', 'rocks', 'minecart', 'wick', 'wick_lit', 'wickpost', 'walk_smith', 'walk_archivist', 'stillroom', 'npc_herbalist', 'walk_herbalist', 'sconce', 'dog', 'furniture'];
 const BG_FILES = ['surface', 'day'];
 
 function loadImg(src: string): Promise<HTMLImageElement> {
@@ -227,6 +229,24 @@ function buildCvIcons(): void {
   gc.fillRect(12, 15, 2, 2);
   gc.fillRect(18, 15, 2, 2);
   A.cvIcons.push(gm);
+  // the furniture, a 32x32 cell each: the icon is the piece itself
+  const fs = A.camp.furniture;
+  A.furnPad = [];
+  for (let c = 0; c * 32 < fs.width; c++) {
+    const [f, fc] = makeCanvas(32, 32);
+    fc.drawImage(fs, c * 32, 0, 32, 32, 0, 0, 32, 32);
+    A.cvIcons.push(f);
+    const data = fc.getImageData(0, 0, 32, 32).data;
+    const row = (y: number): boolean => {
+      for (let x = 0; x < 32; x++) if (data[(y * 32 + x) * 4 + 3] > 40) return true;
+      return false;
+    };
+    let top = 0;
+    while (top < 31 && !row(top)) top++;
+    let bottom = 0;
+    while (bottom < 31 && !row(31 - bottom)) bottom++;
+    A.furnPad.push({ top, bottom });
+  }
 }
 
 function measurePads(): void {

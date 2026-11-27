@@ -44,7 +44,7 @@ interface Lines {
 
 const LINES: Record<BuildingKind, Lines> = {
   trade: {
-    any: ['Buying, selling, gossiping. Mostly gossiping.', 'Sell me your ore, delver. I know a man two valleys over.', 'Somebody has to ring that bell. Might as well be me.'],
+    any: ['Buying, selling, gossiping. Mostly gossiping.', 'Sell me your ore, delver. I know a man two valleys over.', 'Somebody has to ring that bell. Might as well be me.', 'A home is four walls, a fire and a chair. The rest is cushions, and I can get you cushions.'],
     season: {
       spring: ['Seeds! Fresh seeds! Well. Last year\'s seeds.', 'Mud on every boot in the valley. Mind my floor.'],
       summer: ['Storm season. Lightning hit the old mill once, you know.', 'Long days are good for trade. Bad for my feet.'],
@@ -55,7 +55,7 @@ const LINES: Record<BuildingKind, Lines> = {
     dog: ['Who\'s a good dog? Not you. You stole my sausage.', 'That dog of yours sold me a stick this morning. Paid too much.'],
   },
   forge: {
-    any: ['Good iron sings when you strike it. Bad iron sulks.', 'Bring me bars, not excuses.', 'I can hear the mountain settling at night. Don\'t like it.'],
+    any: ['Good iron sings when you strike it. Bad iron sulks.', 'Bring me bars, not excuses.', 'I can hear the mountain settling at night. Don\'t like it.', 'Sleep in your own bed by your own fire, delver. You swing a pick better for it.'],
     season: {
       spring: ['Thaw\'s loosening the rock up top. Prop your tunnels.', 'Spring. Everything\'s dripping, my forge included.'],
       summer: ['Hot as my forge out here. I\'ll take it.', 'Storms make good light for working. Lightning\'s just a big spark.'],
@@ -66,7 +66,7 @@ const LINES: Record<BuildingKind, Lines> = {
     dog: ['That dog\'s been sniffing round my coal sack again.', 'Good nose on that mutt. Better than mine.'],
   },
   archive: {
-    any: ['Every relic you bring me is a page of Deepwick we thought was lost.', 'The old miners wrote in the margins. Mostly complaints.', 'There are more lamps down there. More names.'],
+    any: ['Every relic you bring me is a page of Deepwick we thought was lost.', 'The old miners wrote in the margins. Mostly complaints.', 'There are more lamps down there. More names.', 'The old miners lived in rooms cut from the rock, with a hearth in the wall. Warm as a bread oven, the ledgers say.'],
     season: {
       spring: ['The swallows are back. The records say they always come back.', 'Spring rains. The ledgers say the mine floods worse in spring.'],
       summer: ['Long days. More hours to read by.', 'The almanac says the summer storms come off the east peak. It\'s usually wrong.'],
@@ -77,7 +77,7 @@ const LINES: Record<BuildingKind, Lines> = {
     dog: ['Tallow sat with me all morning. Excellent listener.', 'I\'ve started a file on your dog. It\'s mostly about sausages.'],
   },
   stillroom: {
-    any: ['Glowcaps, jade, a little patience. That\'s all a good draught is.', 'You look pale. Paler. Sit by the Wick a while.', 'The dark gets into people. Light gets it out.'],
+    any: ['Glowcaps, jade, a little patience. That\'s all a good draught is.', 'You look pale. Paler. Sit by the Wick a while.', 'The dark gets into people. Light gets it out.', 'A good night in a warm room does more for you than any draught of mine.'],
     season: {
       spring: ['Everything\'s sprouting. My shelves will be full by summer.', 'Plant your seeds now. They grow fastest in spring.'],
       summer: ['Drink water, delver. You look like dried moss.', 'Summer storms. Stay out from under the tall trees.'],

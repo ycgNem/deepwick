@@ -37,6 +37,26 @@ export enum Obj {
   LAMP,
   /** a lantern post lit from the Wick: a light and a travel point */
   WICKPOST,
+  // furniture for a home (see data/furniture.ts)
+  TABLE,
+  CHAIR,
+  ROCKER,
+  GERANIUM,
+  FERN,
+  DOGBED,
+  PAINTING,
+  BANNER,
+  ANTLERS,
+  CUPBOARD,
+  STOOL,
+  HEARTH,
+  CLOCK,
+  SHELF,
+  RUG,
+  STOVE,
+  HERBS,
+  DESK,
+  DRESSER,
 }
 
 /** objects that block movement */

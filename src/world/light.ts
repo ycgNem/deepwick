@@ -122,6 +122,7 @@ export class LightMap {
           else if (o === Obj.LAMP) add(R, G, Bc, k, 1.15 * fl, 0.85 * fl, 0.5 * fl);
           else if (o === Obj.WICKPOST) add(R, G, Bc, k, 1.35 * fl, 1.05 * fl, 0.62 * fl);
           else if (o === Obj.CAMPFIRE) add(R, G, Bc, k, 1.25 * fl, 0.75 * fl, 0.32 * fl);
+          else if (o === Obj.HEARTH || o === Obj.STOVE) add(R, G, Bc, k, 1.2 * fl, 0.72 * fl, 0.3 * fl);
           else if (o === Obj.FURNACE) add(R, G, Bc, k, 0.8 * fl, 0.42 * fl, 0.15 * fl);
           else if (o === Obj.HEART_CRYSTAL) add(R, G, Bc, k, 0.55, 0.15, 0.32);
           else if (o === Obj.CHEST) add(R, G, Bc, k, 0.18, 0.14, 0.04);

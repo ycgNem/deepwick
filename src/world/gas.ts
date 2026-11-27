@@ -26,7 +26,7 @@ export const GAS_DENSE = 110;
 
 /** objects that are an open flame */
 export function isFlameObj(o: number): boolean {
-  return o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.LAMP || o === Obj.WICKPOST || o === Obj.FURNACE;
+  return o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.LAMP || o === Obj.WICKPOST || o === Obj.FURNACE || o === Obj.HEARTH || o === Obj.STOVE;
 }
 
 /** gas can be in this tile (open air: not rock, not water or lava) */

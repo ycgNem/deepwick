@@ -8,7 +8,7 @@ export const STATION_NAME: Record<Station, string> = {
   furnace: 'Furnace',
   anvil: 'Anvil',
   alchemy: 'Alchemy Table',
-  fire: 'Campfire or Furnace',
+  fire: 'A fire',
 };
 
 /** which placed objects count as which station */
@@ -18,7 +18,7 @@ export const STATION_OBJS: Record<Station, Obj[]> = {
   furnace: [Obj.FURNACE],
   anvil: [Obj.ANVIL],
   alchemy: [Obj.ALCHEMY],
-  fire: [Obj.CAMPFIRE, Obj.FURNACE],
+  fire: [Obj.CAMPFIRE, Obj.FURNACE, Obj.HEARTH, Obj.STOVE],
 };
 
 export interface Recipe {
@@ -53,6 +53,25 @@ export const RECIPES: Recipe[] = [
   r('door', 1, 'workbench', { wood: 6 }),
   r('chest', 1, 'workbench', { wood: 10 }),
   r('bed', 1, 'workbench', { wood: 14, hide: 3 }),
+  // furniture for a home
+  r('hearth', 1, 'workbench', { stone: 20, clay: 6, coal: 2 }),
+  r('chair', 1, 'workbench', { wood: 5 }),
+  r('stool', 1, 'workbench', { wood: 3 }),
+  r('rocker', 1, 'workbench', { wood: 8, hide: 2 }),
+  r('table', 1, 'workbench', { wood: 8 }),
+  r('desk', 1, 'workbench', { wood: 10, hide: 1 }),
+  r('bookshelf', 1, 'workbench', { wood: 12, hide: 2 }),
+  r('cupboard', 1, 'workbench', { wood: 10, clay: 2 }),
+  r('dresser', 1, 'workbench', { wood: 12 }),
+  r('geranium', 1, 'workbench', { clay: 4, seeds: 1 }),
+  r('fern', 1, 'workbench', { clay: 4, mossstone: 2 }),
+  r('herbs', 1, 'workbench', { wood: 1, berries: 3 }),
+  r('rug', 1, 'workbench', { hide: 4 }),
+  r('dogbed', 1, 'workbench', { wood: 4, hide: 2 }),
+  r('painting', 1, 'workbench', { wood: 4, hide: 1, berries: 2 }),
+  r('banner', 1, 'workbench', { hide: 3, copperbar: 1 }),
+  r('antlers', 1, 'workbench', { wood: 3, hide: 2 }),
+  r('clock', 1, 'workbench', { wood: 6, copperbar: 2 }),
   r('furnace', 1, 'workbench', { stone: 16, wood: 4, torch: 3 }),
   r('anvil', 1, 'workbench', { copperbar: 8, stone: 10 }),
   r('alchemy', 1, 'workbench', { wood: 12, sporecap: 3, gel: 4 }),
@@ -82,6 +101,7 @@ export const RECIPES: Recipe[] = [
 
   // anvil
   r('copperpick', 1, 'anvil', { copperbar: 10, wood: 4 }),
+  r('stove', 1, 'anvil', { ironbar: 6, coal: 2 }),
   r('coppersword', 1, 'anvil', { copperbar: 8, wood: 2 }),
   r('copperlantern', 1, 'anvil', { copperbar: 4, torch: 2 }),
   r('rail', 12, 'anvil', { copperbar: 1, wood: 1 }),

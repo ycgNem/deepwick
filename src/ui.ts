@@ -424,6 +424,7 @@ export class UI implements UIHooks {
     const bf: string[] = [];
     if (g.buffs.nightglass > 0) bf.push(`<i class="bn"></i>Nightglass ${mmss(g.buffs.nightglass)}`);
     if (g.buffs.ward > 0) bf.push(`<i class="bw"></i>Gloamward ${mmss(g.buffs.ward)}`);
+    if (g.rested > 0) bf.push(`<i class="brest"></i>Rested ${mmss(g.rested)}`);
     if (g.wet > 0.15) bf.push(`<i class="bwet${g.chill > 0.3 ? ' cold' : ''}"></i>${g.wet > 0.6 ? 'Soaked' : 'Damp'}${g.chill > 0.3 && g.cold < 0.15 ? ' · cold' : ''}`);
     if (g.cold > 0.15) bf.push(`<i class="bcold${g.cold > 0.95 ? ' freeze' : ''}"></i>${g.cold > 0.95 ? 'Freezing' : g.cold > 0.5 ? 'Cold' : 'Chilly'}`);
     const bfHtml = bf.join('<b class="sep"></b>');
@@ -515,7 +516,7 @@ export class UI implements UIHooks {
       return BLOCKS[fg].ore ? [c[0], c[1], c[2], 255] : [c[0] * 0.75, c[1] * 0.75, c[2] * 0.75, 255];
     }
     const o = w.obj[i];
-    if (o === Obj.TORCH || o === Obj.CAMPFIRE) return [255, 200, 90, 255];
+    if (o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.HEARTH || o === Obj.STOVE) return [255, 200, 90, 255];
     if (o === Obj.LADDER) return [150, 100, 60, 255];
     if (o === Obj.HEART_CRYSTAL) return [255, 110, 170, 255];
     if (o && o !== Obj.TREE) return [190, 150, 100, 255];

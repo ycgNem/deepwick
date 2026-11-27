@@ -745,6 +745,13 @@ button.ghost {
   background: #ffd070;
   box-shadow: 0 0 6px #ffd070;
 }
+/* a little house with a lit window: rested from a night at home */
+.chip.buff i.brest {
+  border-radius: 0;
+  background: radial-gradient(circle at 50% 70%, #fff0b0 0 18%, transparent 20%), #ffb060;
+  clip-path: polygon(50% 0, 100% 48%, 86% 48%, 86% 100%, 14% 100%, 14% 48%, 0 48%);
+  box-shadow: none;
+}
 /* a water drop */
 .chip.buff i.bwet {
   background: #7ab8f0;

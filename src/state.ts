@@ -105,6 +105,8 @@ export interface Progress {
   wet?: number;
   /** how cold you were (winter nights) */
   cold?: number;
+  /** seconds left of Rested, from a night at home */
+  rested?: number;
   /** Tallow, the stray who comes to the Wick (missing until he first turns up) */
   dog?: DogSave;
   /** the weather over the valley, and how long it has left */

@@ -25,6 +25,8 @@ import { CAPTIONS } from './captions';
 import { FEATS, FISH } from './data/feats';
 import { Dog } from './dog';
 import { Town } from './town';
+import { roomAt, judgeRoom, restFor, COMFORT_MAX, type Home } from './home';
+import { FURN, FURNITURE, FIRES } from './data/furniture';
 import { seasonOf, seasonDay, SeasonDef, SEASON_DAYS } from './seasons';
 import type { SfxId } from './audio';
 import {
@@ -147,6 +149,8 @@ const TAP_USES = new Set<number>([
   Obj.ANVIL,
   Obj.ALCHEMY,
   Obj.CAMPFIRE,
+  Obj.HEARTH,
+  Obj.STOVE,
 ]);
 
 const OBJ_ITEM: Partial<Record<Obj, string>> = {
@@ -170,10 +174,11 @@ const OBJ_ITEM: Partial<Record<Obj, string>> = {
   [Obj.LAMP]: 'lamp',
   [Obj.WICKPOST]: 'wickpost',
   [Obj.BEAM]: 'prop',
+  ...Object.fromEntries(FURNITURE.map((f) => [f.obj, f.item])),
 };
 
 /** small things a rockfall knocks flat and buries */
-const CRUSHABLE = new Set<number>([Obj.TORCH, Obj.LADDER, Obj.BEAM, Obj.SAPLING, Obj.BUSH, Obj.BUSH_BERRY, Obj.CROP0, Obj.CROP1, Obj.CROP2, Obj.CROP3]);
+const CRUSHABLE = new Set<number>([Obj.TORCH, Obj.LADDER, Obj.BEAM, Obj.SAPLING, Obj.BUSH, Obj.BUSH_BERRY, Obj.CROP0, Obj.CROP1, Obj.CROP2, Obj.CROP3, Obj.GERANIUM, Obj.FERN, Obj.RUG, Obj.STOOL]);
 
 /** objects that fall off when the block under them goes */
 const NEEDS_FLOOR = new Set<number>([
@@ -201,6 +206,7 @@ const NEEDS_FLOOR = new Set<number>([
   Obj.CHEST_OPEN,
   Obj.MINECART,
   Obj.WICKPOST,
+  ...FURNITURE.filter((f) => f.mount === 'floor').map((f) => f.obj),
 ]);
 
 /** a cart you are riding: centre x in px, the rail row it runs on, speed */
@@ -410,6 +416,10 @@ export class Game {
   souls: Soul[] = [];
   /** seconds left on Hesper's brews */
   buffs = { nightglass: 0, ward: 0 };
+  /** seconds left of Rested, from a night at home */
+  rested = 0;
+  /** what the bed you are by says about its room (worked out twice a second, not every frame) */
+  private bedNote = { key: '', t: -9, note: '' };
   /** townsfolk just home, walking from the Wick to their door */
   homing: (Soul & { tx: number })[] = [];
   /** where you have walked while someone follows you: they keep to it */
@@ -435,6 +445,7 @@ export class Game {
     p.deepRow ??= p.maxDepth + 26;
     this.wet = Math.max(0, Math.min(1, p.wet ?? 0));
     this.cold = Math.max(0, Math.min(1, p.cold ?? 0));
+    this.rested = Math.max(0, p.rested ?? 0);
     if (this.p.bounties.length === 0) this.refillBounties();
     this.reconcileRelics();
     this.migrateWick();
@@ -671,6 +682,28 @@ export class Game {
       else this.toast('Dawn breaks.', '#ffd79a');
     }
     this.wasNight = night;
+  }
+
+  /** the closed room a bed is in, judged for comfort (null if it is not in one) */
+  roomOf(tx: number, ty: number): Home | null {
+    const room = roomAt(this.world, tx, ty);
+    return room ? judgeRoom(this.world, room) : null;
+  }
+
+  /** a home's comfort, with Tallow asleep in his bed if it has one and he is with you */
+  comfortOf(h: Home): number {
+    const d = this.p.dog;
+    return Math.min(COMFORT_MAX, h.comfort + (h.dogBed && d?.found && !d.stay ? 1 : 0));
+  }
+
+  private bedLabel(tx: number, ty: number): string {
+    const base = objLabel(Obj.BED, this.p.clock) ?? 'Sleep';
+    const key = `${tx},${ty}`;
+    if (this.bedNote.key !== key || this.time - this.bedNote.t > 0.5) {
+      const r = this.roomOf(tx, ty);
+      this.bedNote = { key, t: this.time, note: !r ? '' : r.fire ? ` · home, comfort ${this.comfortOf(r)}/${COMFORT_MAX}` : ' · no fire, not a home' };
+    }
+    return base + this.bedNote.note;
   }
 
   /** a new morning (by the clock or after a night's sleep): a tide coming, a season turning */
@@ -2274,7 +2307,7 @@ export class Game {
       return;
     }
     // sturdier things take a few hits
-    const sturdy = o === Obj.WORKBENCH || o === Obj.FURNACE || o === Obj.ANVIL || o === Obj.ALCHEMY || o === Obj.STORAGE || o === Obj.HEART_CRYSTAL || o === Obj.BED || o === Obj.BED_R || o === Obj.DOOR || o === Obj.DOOR_TOP || o === Obj.DOOR_OPEN || o === Obj.DOOR_OPEN_TOP;
+    const sturdy = o === Obj.HEARTH || o === Obj.STOVE || o === Obj.SHELF || o === Obj.CUPBOARD || o === Obj.DRESSER || o === Obj.WORKBENCH || o === Obj.FURNACE || o === Obj.ANVIL || o === Obj.ALCHEMY || o === Obj.STORAGE || o === Obj.HEART_CRYSTAL || o === Obj.BED || o === Obj.BED_R || o === Obj.DOOR || o === Obj.DOOR_TOP || o === Obj.DOOR_OPEN || o === Obj.DOOR_OPEN_TOP;
     if (sturdy) {
       const i = w.idx(tx, ty);
       let d = w.damage.get(i);
@@ -2359,6 +2392,7 @@ export class Game {
     if (d.hp > 0) return;
     w.setWall(tx, ty, 0);
     w.damage.delete(i);
+    if (FURN.get(w.getObj(tx, ty))?.mount === 'wall') this.breakObj(tx, ty, true);
     const item = PLACED_WALLS[wall];
     if (item) this.drops.push(new Drop(item, 1, tx * TILE + 16, ty * TILE + 16));
     this.checkTorches(tx, ty);
@@ -2477,6 +2511,16 @@ export class Game {
     const w = this.world;
     if (!this.emptyAt(x, y)) return false;
     const floor = w.rock(x, y + 1);
+    const fd = FURN.get(o);
+    if (fd && fd.mount !== 'floor') {
+      if (fd.mount === 'wall' ? !w.getWall(x, y) : !w.rock(x, y - 1)) {
+        this.text(x * TILE + 16, y * TILE, fd.mount === 'wall' ? 'Hang it on a back wall' : 'Hang it from a ceiling', '#ff9a6a');
+        return false;
+      }
+      w.setObj(x, y, o);
+      this.hint('furnish', 'Furniture makes a house a home. Every kind of comfort in a home (a seat, a table, shelves, something green, pictures, a rug, a bed for the dog, walls behind you, and a hearth above all) keeps you Rested longer after a night there. Look at your bed to see how comfortable the room is.');
+      return true;
+    }
     switch (o) {
       case Obj.TORCH: {
         const anchored = w.getWall(x, y) || w.rock(x - 1, y) || w.rock(x + 1, y) || w.rock(x, y + 1) || w.rock(x, y - 1);
@@ -2586,6 +2630,8 @@ export class Game {
         w.decor[w.idx(x, y)] = 0;
         if (o === Obj.WORKBENCH) this.hint('bench', 'Workbench placed! Open your inventory (Tab) next to it to see what you can craft.');
         if (o === Obj.CAMPFIRE) this.hint('fire', 'Resting by a campfire heals you. Cook raw meat on it from the crafting list.');
+        if (o === Obj.HEARTH || o === Obj.STOVE) this.hint('hearthfire', 'A hearth cooks, warms and steadies you like a campfire. Put one in a closed room with your bed and the room is a home: sleep there and you wake Rested.');
+        else if (fd) this.hint('furnish', 'Furniture makes a house a home. Every kind of comfort in a home (a seat, a table, shelves, something green, pictures, a rug, a bed for the dog, walls behind you, and a hearth above all) keeps you Rested longer after a night there. Look at your bed to see how comfortable the room is.');
         return true;
       }
     }
@@ -3104,6 +3150,10 @@ export class Game {
   }
 
   private tickBuffs(dt: number): void {
+    if (this.rested > 0) {
+      this.rested = Math.max(0, this.rested - dt);
+      if (this.rested === 0) this.toast('You are no longer rested.', '#e8d8c0');
+    }
     for (const k of ['nightglass', 'ward'] as const) {
       if (this.buffs[k] <= 0) continue;
       this.buffs[k] = Math.max(0, this.buffs[k] - dt);
@@ -3411,6 +3461,8 @@ export class Game {
       case Obj.ANVIL:
       case Obj.ALCHEMY:
       case Obj.CAMPFIRE:
+      case Obj.HEARTH:
+      case Obj.STOVE:
         audio.play('click');
         this.ui.open('inv');
         return true;
@@ -3440,6 +3492,8 @@ export class Game {
       this.toast('No one sleeps through a Gloam Tide. The Wick needs you.', '#c8a0ff');
       return;
     }
+    const room = this.roomOf(tx, ty);
+    const home = room && room.fire > 0 ? room : null;
     if (isNight(p.clock) || p.clock > 0.56) {
       const danger = this.enemies.some((e) => !e.def.passive && Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) < 10 * TILE);
       if (danger) {
@@ -3454,12 +3508,28 @@ export class Game {
         p.nerve = NERVE_MAX;
         this.enemies = this.enemies.filter((e) => !e.def.nocturnal && !e.def.shade);
         this.wasNight = false;
-        this.toast(`You sleep soundly. Day ${p.stats.days}.`, '#ffd79a');
+        if (home) {
+          // Tallow curls up in his bed, if the room has one
+          const dogIn = this.dog.bedDown(this, home.dogBed);
+          const comfort = Math.min(COMFORT_MAX, home.comfort + (dogIn ? 1 : 0));
+          this.rested = restFor(comfort);
+          this.tally('rested');
+          const tl = (p.tally ??= {});
+          tl.comfort = Math.max(tl.comfort ?? 0, comfort);
+          const mm = Math.floor(this.rested / 60);
+          this.toast(`You wake at home, rested. Day ${p.stats.days}.`, '#ffd79a');
+          this.toast(`Comfort ${comfort} of ${COMFORT_MAX}: Rested for ${mm}:${String(Math.round(this.rested % 60)).padStart(2, '0')}.`, '#ffc890');
+          this.hint('rested', `You slept at home and woke Rested (the chip by the clock): for a while the dark frays you slower, you heal faster, and hunger and the cold bite less. The comfier the home, the longer it lasts.${home.missing.length ? ` This one could use ${home.missing.slice(0, 3).join(', ')}.` : ''}`);
+        } else {
+          this.toast(`You sleep soundly. Day ${p.stats.days}.`, '#ffd79a');
+          this.hint('home', room ? 'This room has no fire in it. Light one (a campfire, or better a hearth from the workbench) and it is a home: sleep in a home and you wake Rested.' : 'Sleep in a home and you wake Rested: the dark frays you slower, you heal faster, and hunger and the cold bite less. A home is a closed room (walls, a roof, the door shut; on the meadow or dug into the rock) with your bed and a fire in it. Furnish it from the workbench (a hearth, a seat, a table, shelves, something green, pictures, a rug, a bed for the dog) and the rest lasts longer.');
+        }
         this.newDay();
         this.onSave?.();
       });
     } else if (changed) {
       this.toast('Spawn point set. You can sleep here once it gets dark.', '#9af0a0');
+      if (home) this.toast(`This room is a home: comfort ${this.comfortOf(home)} of ${COMFORT_MAX}.${home.missing.length ? ` It could use ${home.missing[0]}.` : ''}`, '#ffc890');
       audio.play('click');
     } else this.toast('You can only sleep at night.', '#e8e0d0');
   }
@@ -3966,7 +4036,7 @@ export class Game {
     for (let dy = -5; dy <= 5; dy++) {
       for (let dx = -6; dx <= 6; dx++) {
         const o = w.getObj(tx + dx, ty + dy);
-        if (o === Obj.TORCH || o === Obj.CAMPFIRE || o === Obj.FURNACE || o === Obj.LAMP || o === Obj.WICKPOST) return true;
+        if (o === Obj.TORCH || FIRES.has(o) || o === Obj.FURNACE || o === Obj.LAMP || o === Obj.WICKPOST) return true;
       }
     }
     return false;
@@ -4135,7 +4205,8 @@ export class Game {
       else if (ssn.growth > 0 && w.get(x, y) === B.DIRT && !w.rock(x, y - 1) && !w.getObj(x, y - 1) && y <= w.skyline[x]) {
         // grass creeps back over bare dirt that sees the sky
         if (w.get(x - 1, y) === B.GRASS || w.get(x + 1, y) === B.GRASS || w.get(x - 1, y + 1) === B.GRASS || w.get(x + 1, y - 1) === B.GRASS) w.set(x, y, B.GRASS);
-      } else if (w.get(x, y) === B.GRASS && w.rock(x, y - 1)) w.set(x, y, B.DIRT);
+      } else if (w.get(x, y) === B.GRASS && (w.rock(x, y - 1) || (y > w.skyline[x] && Math.random() < 0.35))) w.set(x, y, B.DIRT);
+      // (grass under a roof, out of the sky, dies back to dirt)
     }
   }
 
@@ -4919,7 +4990,7 @@ export class Game {
             const tx = pt.x + dx;
             const ty = pt.y + dy;
             const o = w.getObj(tx, ty);
-            const label = objLabel(o, this.p.clock);
+            const label = o === Obj.BED || o === Obj.BED_R ? this.bedLabel(o === Obj.BED ? tx : tx - 1, ty) : objLabel(o, this.p.clock);
             if (!label) continue;
             const dist = Math.abs(dx) + Math.abs(dy);
             if (dist < bd) {
@@ -4954,7 +5025,7 @@ export class Game {
     this.updateCold(dt);
     // hunger (wet and cold, your body burns food to keep warm)
     const p = this.p;
-    p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger * (1 + 0.6 * this.chill));
+    p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger * (1 + 0.6 * this.chill) * (this.rested > 0 ? 0.8 : 1));
     if (p.food <= 0) {
       pl.starveT += dt;
       if (pl.starveT > 3) {
@@ -4971,8 +5042,8 @@ export class Game {
     // healing
     if (pl.regenT > 0) pl.regenT -= dt;
     else if (p.food > 30 && pl.hp < this.st.maxHp) {
-      let rate = (p.food > 75 ? 0.9 : 0.4) * (1 - 0.5 * this.chill);
-      if (this.nearObj(Obj.CAMPFIRE, 3)) rate += 1.6;
+      let rate = (p.food > 75 ? 0.9 : 0.4) * (1 - 0.5 * this.chill) * (this.rested > 0 ? 1.5 : 1);
+      if (this.nearFire(3)) rate += 1.6;
       if (this.inWickLight(pl.cx, pl.cy)) rate += 0.8 + this.flame * 0.25;
       pl.hp = Math.min(this.st.maxHp, pl.hp + rate * dt);
       p.food = Math.max(0, p.food - rate * dt * 0.08);
@@ -5039,7 +5110,7 @@ export class Game {
     const before = p.nerve;
     let rate: number;
     if (this.inWickLight(pl.cx, pl.cy)) rate = 12 + this.flame * 3;
-    else if (this.nearObj(Obj.CAMPFIRE, 3)) rate = 9;
+    else if (this.nearFire(3)) rate = 9;
     else if (!underground && !isNight(p.clock)) rate = 5;
     else if (lit >= STEADY) rate = 2.5;
     else if (lit >= LIT) rate = 0;
@@ -5052,6 +5123,7 @@ export class Game {
       // company in the dark steadies you, and so does a Nightglass Tonic
       if (this.souls.some((s) => this.soulFollowing(s.kind))) drain *= 0.5;
       if (this.dog.near(this)) drain *= 0.7;
+      if (this.rested > 0) drain *= 0.75;
       if (this.buffs.nightglass > 0) drain *= 0.5;
       // with the heart stilled the dark below is only dark
       if (p.bossDefeated) drain *= 0.5;
@@ -5097,6 +5169,13 @@ export class Game {
       this.hint('broken', 'Your nerve is gone and the dark is biting. Light a torch or get back to the light, now.');
     } else pl.darkT = 0;
     if (underground && this.biome >= 4 && !this.st.lens) this.hint('dark', 'The Sunless Vault drinks light and frays nerve twice as fast. Keep torches lit, or forge a Sunglass Lens.');
+  }
+
+  /** a campfire, a hearth or a stove within r tiles */
+  nearFire(r: number): boolean {
+    const pt = this.playerTile();
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (FIRES.has(this.world.getObj(pt.x + dx, pt.y + dy))) return true;
+    return false;
   }
 
   nearObj(o: Obj, r: number): boolean {
@@ -5339,7 +5418,7 @@ export class Game {
     const tx = Math.floor(pl.cx / TILE);
     const head = Math.floor((pl.y + 4) / TILE);
     // the Ember Depths are hot enough to dry you on their own
-    this.warm = this.biome === 3 || this.inWickLight(pl.cx, pl.cy) || this.nearObj(Obj.CAMPFIRE, 3) || this.nearObj(Obj.FURNACE, 2);
+    this.warm = this.biome === 3 || this.inWickLight(pl.cx, pl.cy) || this.nearFire(3) || this.nearObj(Obj.FURNACE, 2);
     const day = daylight(this.p.clock) > 0.7;
     if (touches(this.world, pl, B.WATER)) this.wet = Math.min(1, this.wet + dt * 1.5);
     else if (rain > 0.05 && this.exposed(tx, head)) this.wet = Math.min(1, this.wet + (dt * rain) / (dry ? 110 : 28));
@@ -5380,7 +5459,7 @@ export class Game {
     const shelter = winter && open > 0.25 ? this.shelter() : 0;
     let bite = 0;
     if (winter && open > 0.25 && !this.warm && !pl.dead && shelter < 2)
-      bite = (shelter === 1 ? (night ? 1 / 120 : 0) : (night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1);
+      bite = (shelter === 1 ? (night ? 1 / 120 : 0) : (night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1) * (this.rested > 0 ? 0.75 : 1);
     if (bite > 0) this.cold = Math.min(1, this.cold + dt * bite);
     else this.cold = Math.max(0, this.cold - dt / (this.warm ? 5 : open <= 0.25 || shelter === 2 ? 40 : winter ? 90 : 30));
     if (shelter === 2 && night && !pl.dead) this.hint('shelter', 'Four walls and a roof keep the winter wind off: the cold cannot build in here. Light a fire inside and it is a home.');
@@ -5572,6 +5651,7 @@ export class Game {
     this.p.weather = this.weather.save();
     this.p.wet = Math.round(this.wet * 100) / 100;
     this.p.cold = Math.round(this.cold * 100) / 100;
+    this.p.rested = Math.round(this.rested);
     const pl = this.player;
     if (pl.dead) {
       const s = this.p.spawn;
@@ -5638,6 +5718,8 @@ function objLabel(o: number, clock: number): string | null {
     case Obj.ALCHEMY:
       return 'Craft (alchemy)';
     case Obj.CAMPFIRE:
+    case Obj.HEARTH:
+    case Obj.STOVE:
       return 'Cook';
     case Obj.DOOR:
     case Obj.DOOR_TOP:

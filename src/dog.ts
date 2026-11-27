@@ -94,6 +94,8 @@ export class Dog {
   private sniffed = new Set<number>();
   /** a bark a moment after another sound (on the game's clock, so it never outlives the world) */
   private later: { t: number; vol: number; at?: { x: number; y: number } } | null = null;
+  /** curled up in his bed at home after a night there, till you go off */
+  private nap = 0;
   /** a scent he has caught: wisps rise from that tile for a while */
   scent: { x: number; y: number; t: number } | null = null;
   /** a pat: a little heart floats up */
@@ -173,6 +175,22 @@ export class Dog {
       audio.play('dog_bark', { vol: 0.55 });
       g.text(this.x, this.y - 40, `Come on, ${DOG_NAME}!`, '#f0e0c0');
     }
+  }
+
+  /** you slept at home: he spent the night in his own bed (if the room has one and he is with you) */
+  bedDown(g: Game, bed: { x: number; y: number } | null): boolean {
+    const d = this.saved ?? g.p.dog;
+    if (!bed || !d?.found || d.stay) return false;
+    this.x = (bed.x + 0.5) * TILE;
+    this.y = (bed.y + 1) * TILE;
+    this.digging = null;
+    this.stillT = 3;
+    this.nap = 40;
+    this.anim = 'sit';
+    this.animT = 9;
+    this.heartT = 1.4;
+    this.resetTrail(g);
+    return true;
   }
 
   /** drop back in beside you (after a Wickpost, a recall, waking up...) */
@@ -267,6 +285,10 @@ export class Dog {
           audio.play('dog_whine', { vol: 0.35, at: { x: this.x, y: this.y } });
         }
       }
+    } else if (this.nap > 0) {
+      this.nap -= dt;
+      if (Math.hypot(fx - this.x, fy - this.y) > 5 * TILE || pl.dead) this.nap = 0;
+      if (this.nap <= 0) this.resetTrail(g);
     } else if (this.digging) {
       this.track(g);
       this.updateDig(g, dt);
@@ -489,7 +511,7 @@ export class Dog {
   /** up in the meadow by day, once a day, he finds a spot and digs */
   private meadow(g: Game, dt: number): void {
     const d = this.saved;
-    if (!d || this.digging || isNight(g.p.clock) || g.p.tide || !g.onSurface()) return;
+    if (!d || this.digging || this.nap > 0 || isNight(g.p.clock) || g.p.tide || !g.onSurface()) return;
     if (d.dug === g.p.stats.days) return;
     this.meadowT += dt;
     if (this.meadowT < 22 || this.stillT < 0.8) return;

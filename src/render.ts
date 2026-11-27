@@ -5,6 +5,7 @@ import { propOf } from './data/props';
 import type { World } from './world/world';
 import { TILE, TARGET_VIEW_H, SURFACE_Y } from './constants';
 import { BLOCKS, B } from './data/blocks';
+import { FURN } from './data/furniture';
 import { BIOMES } from './data/biomes';
 import { ITEMS, IconRef } from './data/items';
 import { Obj } from './world/world';
@@ -1429,6 +1430,23 @@ export class Renderer {
 
   private drawObj(g: Game, ctx: CanvasRenderingContext2D, o: number, sx: number, sy: number, tx: number, alpha: number, ty = -1): void {
     ctx.globalAlpha = alpha;
+    const fd = FURN.get(o);
+    if (fd) {
+      // furniture: stood on the floor, hung on the wall, or hung from the ceiling
+      const pad = A.furnPad[fd.cell];
+      const dy = fd.mount === 'floor' ? sy + pad.bottom + 1 : fd.mount === 'ceiling' ? sy - pad.top : sy;
+      ctx.drawImage(A.camp.furniture, fd.cell * 32, 0, 32, 32, Math.round(sx), Math.round(dy), 32, 32);
+      // the fire in the hearth and the stove
+      if ((o === Obj.HEARTH || o === Obj.STOVE) && alpha >= 1) {
+        const f = Math.floor(g.time * 10 + tx * 3) % 3;
+        ctx.fillStyle = ['#ffd75a', '#ffb02a', '#fff0a0'][f];
+        const fx = Math.round(sx) + (o === Obj.HEARTH ? 15 : 15);
+        const fy = Math.round(dy) + (o === Obj.HEARTH ? 20 : 22);
+        ctx.fillRect(fx + (f === 1 ? -1 : 0), fy, 2, 2);
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
     const icon = OBJ_ICON[o as Obj];
     if (icon) {
       const s = iconSrc(icon);
@@ -1875,6 +1893,9 @@ export class Renderer {
         else if (o === Obj.CAMPFIRE) {
           this.glowAt(ctx, sx + 16, sy + 20, (40 + Math.sin(g.time * 9 + tx) * 4) * sp, 'rgba(255,140,40,0.55)');
           if (Math.random() < 0.3 * sp) g.parts.push({ x: sx + camX + 10 + Math.random() * 12, y: sy + camY + 14, vx: (Math.random() - 0.5) * 10, vy: -30 - Math.random() * 30, life: 0.8, max: 0.8, color: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', size: 1, grav: 0, glow: true });
+        } else if (o === Obj.HEARTH || o === Obj.STOVE) {
+          this.glowAt(ctx, sx + 16, sy + 22, 34 + Math.sin(g.time * 9 + tx) * 3, 'rgba(255,140,40,0.5)');
+          if (Math.random() < 0.08) g.parts.push({ x: sx + camX + 13 + Math.random() * 6, y: sy + camY + 20, vx: (Math.random() - 0.5) * 8, vy: -24 - Math.random() * 20, life: 0.5, max: 0.5, color: Math.random() < 0.5 ? '#ffb040' : '#ff6a20', size: 1, grav: 0, glow: true });
         } else if (o === Obj.FURNACE) this.glowAt(ctx, sx + 16, sy + 24, 22 + Math.sin(g.time * 7 + tx) * 2, 'rgba(255,120,30,0.45)');
         else if (o === Obj.WICKPOST) {
           const top = sy + TILE - A.camp.wickpost.height + (A.padBottom.wickpost ?? 0) + 1;
