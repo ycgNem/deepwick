@@ -19,6 +19,7 @@ import { MINERS } from './data/lampless';
 import { FEATS } from './data/feats';
 import { seasonOf } from './seasons';
 import { BREWS } from './data/brews';
+import { MEALS } from './data/meals';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document): T => {
   const el = root.querySelector(sel);
@@ -425,6 +426,8 @@ export class UI implements UIHooks {
     if (g.buffs.nightglass > 0) bf.push(`<i class="bn"></i>Nightglass ${mmss(g.buffs.nightglass)}`);
     if (g.buffs.ward > 0) bf.push(`<i class="bw"></i>Gloamward ${mmss(g.buffs.ward)}`);
     if (g.rested > 0) bf.push(`<i class="brest"></i>Rested ${mmss(g.rested)}`);
+    const meal = g.p.meal;
+    if (meal && meal.t > 0 && MEALS[meal.id]) bf.push(`${img(ITEMS[meal.id].icon, 'bmeal')}${MEALS[meal.id].name} ${mmss(meal.t)}`);
     if (g.wet > 0.15) bf.push(`<i class="bwet${g.chill > 0.3 ? ' cold' : ''}"></i>${g.wet > 0.6 ? 'Soaked' : 'Damp'}${g.chill > 0.3 && g.cold < 0.15 ? ' · cold' : ''}`);
     if (g.cold > 0.15) bf.push(`<i class="bcold${g.cold > 0.95 ? ' freeze' : ''}"></i>${g.cold > 0.95 ? 'Freezing' : g.cold > 0.5 ? 'Cold' : 'Chilly'}`);
     const bfHtml = bf.join('<b class="sep"></b>');

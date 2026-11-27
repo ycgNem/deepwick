@@ -1,5 +1,6 @@
 import { B } from './blocks';
 import { Obj } from '../world/world';
+import { mealNote } from './meals';
 
 /** i16/i32 = original icon sheets, n32 = survival icon sheet, blk = a block's own texture, cv = drawn at load */
 export type IconRef = { sheet: 'i16' | 'i32' | 'n32' | 'f32' | 'blk' | 'cv'; idx: number };
@@ -174,6 +175,10 @@ const LIST: Record<string, Partial2> = {
   oldboot: { name: 'Old Boot', icon: f32(7), kind: 'material', value: 1, desc: "Somebody's lost boot. Still soggy." },
   grilledfish: { name: 'Grilled Fish', icon: f32(8), kind: 'food', food: 30, heal: 12, value: 10, desc: 'Flaky, smoky and filling.' },
   bread: { name: 'Bread', icon: n32(50), kind: 'food', food: 30, heal: 6, value: 5, desc: 'Baked from wheat.' },
+  pasty: { name: "Miner's Pasty", icon: { sheet: 'f32', idx: 18 }, kind: 'food', food: 40, heal: 8, value: 14, desc: 'Meat, mushroom and a thick crimped crust you hold it by. The old Deepwick miners took one down in each pocket.' },
+  chowder: { name: 'Glowfin Chowder', icon: { sheet: 'f32', idx: 19 }, kind: 'food', food: 40, heal: 12, value: 30, desc: 'A creamy bowl with the glowfin still faintly shining in it. Eat it and so do you.', glow: '#4af0d0' },
+  tart: { name: 'Berry Tart', icon: { sheet: 'f32', idx: 20 }, kind: 'food', food: 26, heal: 6, value: 9, desc: 'Wild berries baked into a crisp little case. Hard to eat just one.' },
+  fishpie: { name: 'Fish Pie', icon: { sheet: 'f32', idx: 21 }, kind: 'food', food: 55, heal: 16, value: 22, desc: 'Fish and mushrooms under a golden lid. A whole supper.' },
 
   // ---- usable
   tonic: { name: 'Red Tonic', icon: i16(25), kind: 'use', value: 12, desc: 'Restores half your health.', stack: 20 },
@@ -284,6 +289,8 @@ for (const [id, d] of Object.entries(LIST)) {
   ITEMS[id] = { ...d, id, stack: d.stack ?? (ONE.includes(d.kind) ? 1 : d.kind === 'block' || d.kind === 'wall' ? 250 : 99) };
 }
 for (const r of RELICS) ITEMS[r.id] = r;
+// a cooked dish says what eating it does for you
+for (const d of Object.values(ITEMS)) d.desc += mealNote(d.id);
 
 export function equipSlotOf(def: ItemDef): EquipSlot | null {
   if (def.kind === 'armor' || def.kind === 'lantern' || def.kind === 'boots' || def.kind === 'charm') return def.kind;
@@ -306,6 +313,7 @@ export const SHOP_STOCK: { id: string; price: number; n: number }[] = [
   { id: 'oilskin', price: 45, n: 1 },
   { id: 'recall', price: 45, n: 1 },
   { id: 'seeds', price: 4, n: 3 },
+  { id: 'wheat', price: 9, n: 3 },
   { id: 'fishingrod', price: 30, n: 1 },
   { id: 'steak', price: 14, n: 1 },
   { id: 'copperlantern', price: 220, n: 1 },

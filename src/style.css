@@ -745,6 +745,14 @@ button.ghost {
   background: #ffd070;
   box-shadow: 0 0 6px #ffd070;
 }
+/* the dish you are living on */
+.chip.buff img.bmeal {
+  width: 14px;
+  height: 14px;
+  margin: -3px 3px -3px 0;
+  vertical-align: middle;
+  image-rendering: pixelated;
+}
 /* a little house with a lit window: rested from a night at home */
 .chip.buff i.brest {
   border-radius: 0;

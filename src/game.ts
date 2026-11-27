@@ -27,6 +27,7 @@ import { Dog } from './dog';
 import { Town } from './town';
 import { roomAt, judgeRoom, restFor, COMFORT_MAX, type Home } from './home';
 import { FURN, FURNITURE, FIRES } from './data/furniture';
+import { MEALS, type MealFx } from './data/meals';
 import { seasonOf, seasonDay, SeasonDef, SEASON_DAYS } from './seasons';
 import type { SfxId } from './audio';
 import {
@@ -3190,7 +3191,27 @@ export class Game {
     for (const k of home) this.bringHome(k);
   }
 
+  /** the meal you ate last is still with you, and it is this kind */
+  fed(fx: MealFx): boolean {
+    const m = this.p.meal;
+    return !!m && m.t > 0 && MEALS[m.id]?.fx === fx;
+  }
+
   private tickBuffs(dt: number): void {
+    const meal = this.p.meal;
+    // glowfin chowder: motes of sea-green light drift up off you
+    const pl = this.player;
+    if (this.fed('glow') && !pl.dead && Math.random() < dt * 5) {
+      const life = 1 + Math.random() * 0.8;
+      this.parts.push({ x: pl.x + Math.random() * pl.w, y: pl.y + 6 + Math.random() * (pl.h - 10), vx: (Math.random() - 0.5) * 10, vy: -10 - Math.random() * 12, life, max: life, color: Math.random() < 0.5 ? '#6af0d8' : '#c8fff0', size: 2, grav: -4, glow: true });
+    }
+    if (meal) {
+      meal.t = Math.max(0, meal.t - dt);
+      if (meal.t === 0) {
+        this.p.meal = undefined;
+        if (MEALS[meal.id]) this.toast(`${MEALS[meal.id].name} has worn off. Time for another meal.`, '#e8d8c0');
+      }
+    }
     if (this.rested > 0) {
       this.rested = Math.max(0, this.rested - dt);
       if (this.rested === 0) this.toast('You are no longer rested.', '#e8d8c0');
@@ -3290,7 +3311,9 @@ export class Game {
   private eat(hd: ItemDef): void {
     const pl = this.player;
     if (pl.eatT > this.time) return;
-    if (this.p.food >= 99 && pl.hp >= this.st.maxHp) {
+    const meal = MEALS[hd.id];
+    // a cooked meal is worth eating for what it does, even on a full stomach (but not the same one twice)
+    if ((!meal || this.p.meal?.id === hd.id) && this.p.food >= 99 && pl.hp >= this.st.maxHp) {
       this.text(pl.cx, pl.y - 6, 'Full', '#e8e0d0');
       return;
     }
@@ -3301,6 +3324,15 @@ export class Game {
     audio.play('eat');
     this.text(pl.cx, pl.y - 4, `+${hd.food} food`, '#ffc890');
     this.burst(pl.cx + pl.facing * 6, pl.y + 10, 6, ['#c87a4a', '#ffe0b0'], 50);
+    if (meal) {
+      const was = this.p.meal && this.p.meal.t > 0 ? this.p.meal.id : '';
+      this.p.meal = { id: hd.id, t: meal.secs };
+      this.tally('meal_' + hd.id);
+      const mins = meal.secs / 60;
+      const does = meal.does[0].toUpperCase() + meal.does.slice(1);
+      this.toast(`Well Fed: ${meal.name}. ${does} for ${Number.isInteger(mins) ? mins : mins.toFixed(1)} minutes.${was && was !== hd.id ? ` (Your ${MEALS[was]?.name ?? 'last meal'} is gone.)` : ''}`, '#ffc890');
+      this.hint('meal', "A cooked meal leaves you Well Fed (the chip by the clock), and every dish does something of its own: meat fills you out, stew keeps the winter out, bread keeps hunger off, and a Miner's Pasty keeps the dark off your back. Only the last one you ate counts, so pick it for the trip. The best dishes need a kitchen: a Stone Hearth or an Iron Stove.");
+    }
   }
 
   private fireBow(hd: ItemDef): void {
@@ -5066,7 +5098,7 @@ export class Game {
     this.updateCold(dt);
     // hunger (wet and cold, your body burns food to keep warm)
     const p = this.p;
-    p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger * (1 + 0.6 * this.chill) * (this.rested > 0 ? 0.8 : 1));
+    p.food = Math.max(0, p.food - dt * 0.075 * this.mode.hunger * (1 + 0.6 * this.chill) * (this.rested > 0 ? 0.8 : 1) * (this.fed('full') ? 0.6 : 1));
     if (p.food <= 0) {
       pl.starveT += dt;
       if (pl.starveT > 3) {
@@ -5086,6 +5118,7 @@ export class Game {
       let rate = (p.food > 75 ? 0.9 : 0.4) * (1 - 0.5 * this.chill);
       if (this.nearFire(3)) rate += 1.6;
       if (this.inWickLight(pl.cx, pl.cy)) rate += 0.8 + this.flame * 0.25;
+      if (this.fed('mend')) rate += 0.9;
       // healing costs food; rested, the same food goes half as far again
       p.food = Math.max(0, p.food - rate * dt * 0.08);
       pl.hp = Math.min(this.st.maxHp, pl.hp + rate * dt * (this.rested > 0 ? 1.5 : 1));
@@ -5166,6 +5199,7 @@ export class Game {
       if (this.souls.some((s) => this.soulFollowing(s.kind))) drain *= 0.5;
       if (this.dog.near(this)) drain *= 0.7;
       if (this.rested > 0) drain *= 0.75;
+      if (this.fed('lunch')) drain *= 0.7;
       if (this.buffs.nightglass > 0) drain *= 0.5;
       // with the heart stilled the dark below is only dark
       if (p.bossDefeated) drain *= 0.5;
@@ -5276,6 +5310,12 @@ export class Game {
     const bonus = this.st.light - (this.st.oilMax > 0 ? (ITEMS[this.p.equip.lantern?.id ?? '']?.radius ?? 0) : 0);
     const ng = this.buffs.nightglass > 0;
     lights.push({ x: lx, y: ly, r: ng ? 0.5 : 0.44, g: ng ? 0.52 : 0.4, b: ng ? 0.64 : 0.46, radius: (4.2 + Math.max(0, bonus) + (ng ? 3.5 : 0)) * vault, cast: true });
+    // glowfin chowder: you shine a little yourself, a soft sea-green. It lets you see, but it is kept
+    // just under the light that steadies you (LIT), or a bowl of soup would switch the dark off
+    if (this.fed('glow') && !pl.dead) {
+      const breathe = 1 + Math.sin(this.time * 1.7) * 0.04;
+      lights.push({ x: lx, y: ly - 0.2, r: 0.25, g: 0.55, b: 0.5, radius: 6.4 * breathe * vault, cast: true });
+    }
     const hd = heldDef(this.p);
     // a guttering flame shrinks and dims (dimmer than your eyes' own glow at its lowest, or the light would still spread)
     const reach = this.flameReach();
@@ -5452,7 +5492,7 @@ export class Game {
 
   /** how much the wet is chilling you: soaked, and nowhere warm */
   get chill(): number {
-    return this.warm ? 0 : Math.max(this.wet, this.cold);
+    return this.warm ? 0 : Math.max(this.wet, this.cold) * (this.fed('warm') ? 0.5 : 1);
   }
 
   /** rain soaks you out in the open and a swim soaks you through; a fire, a furnace or the Wick dries you */
@@ -5583,7 +5623,7 @@ export class Game {
     const shelter = winter && open > 0.25 ? this.shelter() : 0;
     let bite = 0;
     if (winter && open > 0.25 && !this.warm && !pl.dead && shelter < 2)
-      bite = (shelter === 1 ? (night ? 1 / 120 : 0) : (night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1) * (this.rested > 0 ? 0.75 : 1);
+      bite = (shelter === 1 ? (night ? 1 / 120 : 0) : (night ? 1 / 60 : 0) + snow / 160) * (1 + this.wet) * (this.st.warm ? 0.5 : 1) * (this.rested > 0 ? 0.75 : 1) * (this.fed('warm') ? 0.5 : 1);
     if (bite > 0) this.cold = Math.min(1, this.cold + dt * bite);
     else this.cold = Math.max(0, this.cold - dt / (this.warm ? 5 : open <= 0.25 || shelter === 2 ? 40 : winter ? 90 : 30));
     if (shelter === 2 && night && !pl.dead) this.hint('shelter', 'Four walls and a roof keep the winter wind off: the cold cannot build in here. Light a fire inside and it is a home.');

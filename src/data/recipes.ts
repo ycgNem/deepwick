@@ -1,6 +1,6 @@
 import { Obj } from '../world/world';
 
-export type Station = 'hand' | 'workbench' | 'furnace' | 'anvil' | 'alchemy' | 'fire';
+export type Station = 'hand' | 'workbench' | 'furnace' | 'anvil' | 'alchemy' | 'fire' | 'kitchen';
 
 export const STATION_NAME: Record<Station, string> = {
   hand: 'By hand',
@@ -9,6 +9,7 @@ export const STATION_NAME: Record<Station, string> = {
   anvil: 'Anvil',
   alchemy: 'Alchemy Table',
   fire: 'A fire',
+  kitchen: 'Hearth or Stove',
 };
 
 /** which placed objects count as which station */
@@ -19,6 +20,7 @@ export const STATION_OBJS: Record<Station, Obj[]> = {
   anvil: [Obj.ANVIL],
   alchemy: [Obj.ALCHEMY],
   fire: [Obj.CAMPFIRE, Obj.FURNACE, Obj.HEARTH, Obj.STOVE],
+  kitchen: [Obj.HEARTH, Obj.STOVE],
 };
 
 export interface Recipe {
@@ -98,6 +100,12 @@ export const RECIPES: Recipe[] = [
   r('grilledfish', 1, 'fire', { trout: 1 }),
   r('grilledfish', 1, 'fire', { minnow: 2 }),
   r('grilledfish', 1, 'fire', { glowfin: 1 }),
+  // the kitchen (a Stone Hearth or Iron Stove): the dishes worth packing for a trip down
+  r('pasty', 2, 'kitchen', { rawmeat: 1, wheat: 2, mushroom: 1 }),
+  r('tart', 2, 'kitchen', { berries: 5, wheat: 2 }),
+  r('fishpie', 1, 'kitchen', { trout: 1, wheat: 2, mushroom: 1 }),
+  r('fishpie', 1, 'kitchen', { perch: 2, wheat: 2, mushroom: 1 }),
+  r('chowder', 1, 'kitchen', { glowfin: 1, mushroom: 1, wheat: 1 }),
 
   // anvil
   r('copperpick', 1, 'anvil', { copperbar: 10, wood: 4 }),

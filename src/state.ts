@@ -5,6 +5,7 @@ import type { ModeId } from './data/nerve';
 import { ITEMS, RELICS, ItemDef, SHOP_STOCK } from './data/items';
 import { TILE, INV_SIZE, DAY_LENGTH } from './constants';
 import { WickState, flameLevel } from './data/wick';
+import { MEALS } from './data/meals';
 
 export type SkillId = 'mining' | 'combat' | 'delving' | 'fishing';
 export interface Skill {
@@ -107,6 +108,8 @@ export interface Progress {
   cold?: number;
   /** seconds left of Rested, from a night at home */
   rested?: number;
+  /** the last cooked meal you ate, and how long it keeps you Well Fed */
+  meal?: { id: string; t: number };
   /** Tallow, the stray who comes to the Wick (missing until he first turns up) */
   dog?: DogSave;
   /** the weather over the valley, and how long it has left */
@@ -304,6 +307,7 @@ export function computeStats(p: Progress): Stats {
   const d = p.skills.delving.lvl;
   const all = has(p, 'r_heart') ? 0.25 : 0;
   const hd = heldDef(p);
+  const meal = p.meal && p.meal.t > 0 ? MEALS[p.meal.id] : undefined;
   // holding a pick uses it; holding anything that is not a weapon or hammer borrows the
   // best pickaxe on the hotbar, so torches and blocks in hand never stop you digging
   const pick = hd?.kind === 'pick' ? hd : hd?.kind === 'sword' || hd?.kind === 'hammer' || hd?.kind === 'bow' ? null : bestHotbarPick(p);
@@ -313,15 +317,15 @@ export function computeStats(p: Progress): Stats {
   else if (pick) attack = pickPower * 2.2;
   attack *= (1 + (c - 1) * 0.03) * (has(p, 'r_skull') ? 1.1 : 1);
   return {
-    maxHp: 50 + p.hearts * 10 + (arm?.hp ?? 0) + (c - 1) * 2 + (has(p, 'r_rootheart') ? 15 : 0) + fx('hp') + (flameLevel(p.wick) >= 4 ? 20 : 0),
+    maxHp: 50 + p.hearts * 10 + (arm?.hp ?? 0) + (c - 1) * 2 + (has(p, 'r_rootheart') ? 15 : 0) + fx('hp') + (flameLevel(p.wick) >= 4 ? 20 : 0) + (meal?.hp ?? 0),
     reduce: Math.min(0.7, (arm?.reduce ?? 0) + fx('reduce')),
     pickTier: pick?.tier ?? 0,
     pickPower,
-    mineSpeed: (1 + (m - 1) * 0.02 + fx('mine')) * (has(p, 'r_prism') ? 1.08 : 1),
+    mineSpeed: (1 + (m - 1) * 0.02 + fx('mine')) * (has(p, 'r_prism') ? 1.08 : 1) * (meal?.fx === 'dig' ? 1.15 : 1),
     attack,
     light: (lan?.radius ?? 0) + (has(p, 'r_glowcap') ? 1 : 0) + fx('light'),
     oilMax: (lan?.oil ?? 0) * (has(p, 'r_geode') ? 1.25 : 1),
-    speed: (boot?.speed ?? 1) * (1 + fx('speed')),
+    speed: (boot?.speed ?? 1) * (1 + fx('speed')) * (meal?.fx === 'swift' ? 1.12 : 1),
     jumps: boot?.jumps ?? 1,
     fallSafe: boot?.fallSafe ?? 7,
     reach: 4.2 + (has(p, 'r_mirror') ? 1 : 0),

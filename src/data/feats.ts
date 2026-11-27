@@ -8,6 +8,7 @@ import { MAX_FLAME } from './wick';
 import { RELICS } from './items';
 import { MINERS } from './lampless';
 import { DOG_NAME } from '../dog';
+import { MEAL_IDS } from './meals';
 
 export interface Feat {
   id: string;
@@ -50,6 +51,7 @@ export const FEATS: Feat[] = [
   { id: 'firstsnow', name: 'First Snow', desc: 'See the first winter come to the valley.', coins: 30, progress: (g) => yes(g.p.stats.days >= 13) },
   { id: 'fortnight', name: 'A Fortnight Down', desc: 'Survive 14 days.', coins: 100, progress: (g) => [Math.min(14, g.p.stats.days - 1), 14] },
   { id: 'homefires', name: 'Home Fires', desc: 'Sleep in a home of your own (a closed room with your bed and a fire) and wake Rested.', coins: 25, progress: (g) => yes(t(g, 'rested') >= 1) },
+  { id: 'cook', name: 'Home Cooking', desc: 'Eat every cooked dish there is, from Cooked Meat to Glowfin Chowder.', coins: 80, progress: (g) => [MEAL_IDS.filter((m) => t(g, 'meal_' + m) > 0).length, MEAL_IDS.length] },
   { id: 'cosy', name: 'A Proper Home', desc: 'Sleep in a home with a comfort of 9 or more.', coins: 60, progress: (g) => [Math.min(9, t(g, 'comfort')), 9] },
   { id: 'thaw', name: 'Through the Winter', desc: 'Live to see spring come again.', coins: 150, progress: (g) => yes(g.p.stats.days >= 17) },
   { id: 'sunless', name: 'Sunless', desc: 'Reach the Sunless Vault.', coins: 120, progress: (g) => yes(g.maxBiome() >= 4) },
