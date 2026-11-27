@@ -132,7 +132,9 @@ export class Weather {
     const tx = Math.max(0, Math.min(g.world.w - 1, Math.floor(pl.cx / TILE)));
     const under = Math.floor(pl.cy / TILE) - g.world.surface[tx];
     const hear = under <= 2 ? 1 : under < 14 ? 0.3 * (1 - under / 14) : 0;
-    audio.rain(this.rain * hear);
+    audio.rain(this.rain * hear * (1 - 0.75 * g.indoor));
+    // under a roof you hear it on the roof instead
+    audio.bed('roofrain', this.rain * hear * g.roofed, 0.5);
   }
 
   /** what comes after: weather comes and goes, the sky clears between */

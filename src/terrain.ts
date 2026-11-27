@@ -85,6 +85,11 @@ export function buildTerrainArt(): void {
     ART.tex.push(c);
     ART.wallTex.push(wallVersion(c));
   }
+  // pond ice: not on the sheet, drawn here
+  const ice = iceTexture();
+  BLOCK_MAT[B.ICE] = ART.tex.length;
+  ART.tex.push(ice);
+  ART.wallTex.push(wallVersion(ice));
   ART.cut = [];
   ART.shade = [];
   ART.wallCut = [];
@@ -99,6 +104,83 @@ export function buildTerrainArt(): void {
       ART.wallShade.push(s2);
     }
   }
+}
+
+/** pale blue ice with long sheen bands, a few cracks and a frost sparkle (tiles seamlessly) */
+function iceTexture(): HTMLCanvasElement {
+  const [c, ctx] = makeCanvas(TEX, TEX);
+  const img = ctx.createImageData(TEX, TEX);
+  const d = img.data;
+  const q = (v: number): number => Math.max(0, Math.min(255, Math.round(v / 8) * 8));
+  // value noise that wraps at the texture's edge, so the ice tiles without a seam
+  const pnoise = (x: number, y: number, s: number, seed: number): number => {
+    const P = TEX / s;
+    const fx = x / s;
+    const fy = y / s;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const u = (fx - x0) * (fx - x0) * (3 - 2 * (fx - x0));
+    const v = (fy - y0) * (fy - y0) * (3 - 2 * (fy - y0));
+    const h = (a: number, b: number): number => hash((a % P) + seed, b % P);
+    const a = h(x0, y0);
+    const b = h(x0 + 1, y0);
+    const c = h(x0, y0 + 1);
+    const d2 = h(x0 + 1, y0 + 1);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d2) * u * v;
+  };
+  for (let y = 0; y < TEX; y++) {
+    for (let x = 0; x < TEX; x++) {
+      // noise that wraps at the texture's edge
+      const n = 0.6 * pnoise(x, y, 32, 911) + 0.4 * pnoise(x, y, 16, 377);
+      const band = Math.sin(((x + y) / TEX) * Math.PI * 6 + n * 2.2);
+      let r = 160 + n * 44;
+      let g = 206 + n * 30;
+      let b = 232 + n * 18;
+      if (band > 0.86) {
+        r += 36;
+        g += 26;
+        b += 14;
+      } else if (band < -0.9) {
+        r -= 14;
+        g -= 10;
+      }
+      const p = (y * TEX + x) * 4;
+      d[p] = q(r);
+      d[p + 1] = q(g);
+      d[p + 2] = q(b);
+      d[p + 3] = 236;
+    }
+  }
+  // cracks: thin dark lines wandering across, lit along one side
+  for (let k = 0; k < 6; k++) {
+    let x = Math.floor(hash(k, 17) * TEX);
+    let y = Math.floor(hash(k, 31) * TEX);
+    const dx = hash(k, 5) < 0.5 ? 1 : -1;
+    const len = 14 + Math.floor(hash(k, 9) * 22);
+    for (let s = 0; s < len; s++) {
+      const px = ((x % TEX) + TEX) % TEX;
+      const py = ((y % TEX) + TEX) % TEX;
+      const p = (py * TEX + px) * 4;
+      d[p] = 104;
+      d[p + 1] = 150;
+      d[p + 2] = 192;
+      const lp = (((py + TEX - 1) % TEX) * TEX + px) * 4;
+      d[lp] = 232;
+      d[lp + 1] = 246;
+      d[lp + 2] = 255;
+      x += hash(k * 97 + s, 3) < 0.7 ? dx : 0;
+      y += hash(k * 61 + s, 7) < 0.55 ? 1 : 0;
+    }
+  }
+  // frost sparkles
+  for (let k = 0; k < 18; k++) {
+    const p = (Math.floor(hash(k, 44) * TEX) * TEX + Math.floor(hash(k, 45) * TEX)) * 4;
+    d[p] = 255;
+    d[p + 1] = 255;
+    d[p + 2] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
 }
 
 /** back walls: same rock, flattened, cooler and much darker so they read as "behind" */

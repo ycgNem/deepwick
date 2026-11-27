@@ -421,6 +421,15 @@ export class Game {
   /** what the bed you are by says about its room (worked out twice a second, not every frame) */
   private bedNote = { key: '', t: -9, note: '' };
   private shelterNote = { key: -1, t: -9, room: false };
+  /** how far indoors you are, for the sound (1 in a closed room, about half under a roof) and whether a roof is over you */
+  indoor = 0;
+  roofed = 0;
+  /** how near a fire is (its crackle) */
+  private fireHear = 0;
+  private hearNote = { t: 0, room: false, roof: false, fire: 0 };
+  /** the hour on the clock, for the cuckoo */
+  private lastHour = -1;
+  private iceT = 0;
   /** townsfolk just home, walking from the Wick to their door */
   homing: (Soul & { tx: number })[] = [];
   /** where you have walked while someone follows you: they keep to it */
@@ -606,6 +615,8 @@ export class Game {
       this.tickBuffs(dt);
       if (this.boss) this.updateBoss(dt);
       this.randomTicks(dt);
+      this.updateIce(dt);
+      this.updateHearing(dt);
     }
     this.updateDrops(dt);
     this.weather.fade(dt);
@@ -668,6 +679,11 @@ export class Game {
       p.stats.days++;
       this.toast(`Day ${p.stats.days}`, '#ffe9a8');
       this.newDay();
+    }
+    const hr = Math.floor((p.clock * 24 + 6) % 24);
+    if (hr !== this.lastHour) {
+      if (this.lastHour >= 0 && hr % 3 === 0) this.cuckoo();
+      this.lastHour = hr;
     }
     const bell = 0.6 - 60 / DAY_LENGTH;
     if (p.clock >= bell && p.clock - dt / DAY_LENGTH < bell) this.duskBell();
@@ -975,14 +991,17 @@ export class Game {
     } else {
       const slow = this.p.food <= 0 ? 0.75 : 1;
       const maxV = 165 * st.speed * slow * (liquid ? 0.45 : 1);
-      const accel = pl.onGround ? 1600 : 1000;
+      // ice underfoot: slow to get going and slow to stop
+      const ice = pl.onGround && this.world.get(Math.floor(pl.cx / TILE), Math.floor((pl.y + pl.h + 2) / TILE)) === B.ICE;
+      if (ice) this.hint('ice', 'The pond has frozen over. The ice will hold you, but it is slippery underfoot. Break a hole in it (with any tool, or your hands) and you can fish through it, though a hole freezes over again by night. Spring thaws it.');
+      const accel = ice ? 560 : pl.onGround ? 1600 : 1000;
       const target = dir * maxV;
       if (pl.swinging && pl.onGround && !pl.attack) {
-        pl.vx += (0 - pl.vx) * Math.min(1, dt * 14);
+        pl.vx += (0 - pl.vx) * Math.min(1, dt * (ice ? 1.6 : 14));
       } else if (dir !== 0) {
         pl.vx += Math.sign(target - pl.vx) * Math.min(Math.abs(target - pl.vx), accel * dt);
       } else {
-        pl.vx += (0 - pl.vx) * Math.min(1, dt * (pl.onGround ? 14 : 3));
+        pl.vx += (0 - pl.vx) * Math.min(1, dt * (ice ? 1.6 : pl.onGround ? 14 : 3));
       }
       if (dir !== 0 && !pl.swinging) pl.facing = dir;
 
@@ -1290,9 +1309,22 @@ export class Game {
           f.vy += 900 * sdt;
           f.x += f.vx * sdt;
           f.y += f.vy * sdt;
-          const tx = Math.floor(f.x / TILE);
+          let tx = Math.floor(f.x / TILE);
           const ty = Math.floor(f.y / TILE);
-          const b = w.get(tx, ty);
+          let b = w.get(tx, ty);
+          // on the ice: into a hole beside where it lands, if there is one
+          if (b === B.ICE) {
+            const hole = [0, -1, 1, -2, 2].map((d) => tx + d).find((x) => w.get(x, ty) === B.WATER && w.get(x, ty - 1) === B.AIR);
+            if (hole === undefined) {
+              this.text(f.x, f.y - 16, 'Frozen over: break a hole in the ice', '#cfe8ff');
+              this.hint('ice', 'The pond has frozen over. The ice will hold you, but it is slippery underfoot. Break a hole in it (with any tool, or your hands) and you can fish through it, though a hole freezes over again by night. Spring thaws it.');
+              f.state = 'back';
+              return;
+            }
+            tx = hole;
+            f.x = tx * TILE + TILE / 2;
+            b = B.WATER;
+          }
           if (b === B.WATER) {
             let top = ty;
             while (w.get(tx, top - 1) === B.WATER) top--;
@@ -2154,11 +2186,15 @@ export class Game {
     const placedByYou = w.placed[i] === 1;
     w.placed[i] = 0;
     w.loose[i] = 0;
-    w.set(tx, ty, B.AIR);
+    // ice breaks into the water under it
+    w.set(tx, ty, b === B.ICE ? B.WATER : B.AIR);
     w.damage.delete(i);
     this.wakeWater(tx, ty);
-    this.checkBreach(tx, ty);
-    this.checkFlood(tx, ty);
+    // a hole in the ice lets the pond breathe: it is not a breach in a cave wall
+    if (b !== B.ICE) {
+      this.checkBreach(tx, ty);
+      this.checkFlood(tx, ty);
+    }
     this.loosenAround(tx, ty);
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
@@ -2190,7 +2226,11 @@ export class Game {
         if (def.ore) this.p.stats.ores++;
       }
     }
-    if (def.ore || def.light) audio.play('ore_break', { vol: 0.8 });
+    if (b === B.ICE) {
+      audio.play('icebreak', { vol: 0.8 });
+      this.splash(cx, ty * TILE + 4, 8);
+      this.hint('icehole', 'A hole in the ice. Cast your line into it to fish (it freezes over again by night).');
+    } else if (def.ore || def.light) audio.play('ore_break', { vol: 0.8 });
     else audio.play('block_break', { vol: 0.65 });
   }
 
@@ -5333,10 +5373,14 @@ export class Game {
     const day = Math.max(0, Math.min(1, (daylight(this.p.clock) - 0.45) / 0.35));
     const wx = this.weather;
     const ssn = this.season;
-    audio.bed('meadow_day', out * day * ssn.birds * (1 - 0.9 * wx.rain) * (1 - 0.5 * wx.fog), 0.34);
-    audio.bed('meadow_night', out * (1 - day) * ssn.crickets * (1 - 0.8 * wx.rain) * (this.p.tide ? 0.15 : 1), 0.32);
+    // indoors it is all muffled
+    const hush = 1 - 0.75 * this.indoor;
+    audio.bed('meadow_day', out * hush * day * ssn.birds * (1 - 0.9 * wx.rain) * (1 - 0.5 * wx.fog), 0.34);
+    audio.bed('meadow_night', out * hush * (1 - day) * ssn.crickets * (1 - 0.8 * wx.rain) * (this.p.tide ? 0.15 : 1), 0.32);
     // winter wind over the snow, louder while it snows
-    audio.bed('wind', out * (ssn.id === 'winter' ? 0.45 + 0.55 * wx.snow : 0.6 * wx.snow), 0.42);
+    audio.bed('wind', out * hush * (ssn.id === 'winter' ? 0.45 + 0.55 * wx.snow : 0.6 * wx.snow), 0.42);
+    // a fire crackles near it (louder with the door shut and the weather outside)
+    audio.bed('hearth', this.boss || this.ending ? 0 : this.fireHear * (0.75 + 0.25 * this.indoor), 0.5);
   }
 
   /** a running count toward a Feat */
@@ -5441,10 +5485,81 @@ export class Game {
     const hy = Math.floor((pl.y + 4) / TILE);
     const fy = Math.floor((pl.y + pl.h - 4) / TILE);
     if (this.exposed(tx, hy)) return 0;
-    // the room check is a flood fill: twice a second is plenty
+    return this.inRoom(tx, fy) ? 2 : 1;
+  }
+
+  /** are you in a closed room? (a flood fill: twice a second is plenty) */
+  inRoom(tx: number, fy: number): boolean {
     const key = tx * 10000 + fy;
     if (key !== this.shelterNote.key || this.time - this.shelterNote.t > 0.5) this.shelterNote = { key, t: this.time, room: !!roomAt(this.world, tx, fy) };
-    return this.shelterNote.room ? 2 : 1;
+    return this.shelterNote.room;
+  }
+
+  /** what you can hear from where you stand: indoors the weather is muffled, a fire crackles near it */
+  private updateHearing(dt: number): void {
+    const h = this.hearNote;
+    if ((h.t -= dt) <= 0) {
+      h.t = 0.3;
+      const pl = this.player;
+      const w = this.world;
+      const tx = Math.floor(pl.cx / TILE);
+      const hy = Math.floor((pl.y + 4) / TILE);
+      const fy = Math.floor((pl.y + pl.h - 4) / TILE);
+      h.roof = !this.exposed(tx, hy) && this.onSurface();
+      h.room = h.roof && this.inRoom(tx, fy);
+      let best = 99;
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -8; dx <= 8; dx++) if (FIRES.has(w.getObj(tx + dx, fy + dy))) best = Math.min(best, Math.hypot(dx, dy));
+      h.fire = Math.max(0, Math.min(1, 1 - (best - 1.5) / 6));
+    }
+    const k = Math.min(1, dt * 2);
+    this.indoor += ((h.room ? 1 : h.roof ? 0.45 : 0) - this.indoor) * k;
+    this.roofed += ((h.roof ? 1 : 0) - this.roofed) * k;
+    this.fireHear += (h.fire - this.fireHear) * k;
+  }
+
+  /** every third hour a cuckoo clock nearby calls it */
+  private cuckoo(): void {
+    const pt = this.playerTile();
+    const w = this.world;
+    for (let dy = -7; dy <= 7; dy++)
+      for (let dx = -14; dx <= 14; dx++)
+        if (w.getObj(pt.x + dx, pt.y + dy) === Obj.CLOCK) {
+          audio.play('cuckoo', { vol: 0.6, vary: 0, at: { x: (pt.x + dx) * TILE + 16, y: (pt.y + dy) * TILE + 16 } });
+          return;
+        }
+  }
+
+  /** winter freezes the meadow ponds over (a hole you cut freezes again by night); out of winter the ice thaws */
+  private updateIce(dt: number): void {
+    if ((this.iceT -= dt) > 0) return;
+    this.iceT = 0.5;
+    const w = this.world;
+    const winter = this.season.id === 'winter';
+    const night = isNight(this.p.clock);
+    const pl = this.player;
+    const ptx = Math.floor(pl.cx / TILE);
+    const pty = Math.floor((pl.y + pl.h) / TILE);
+    const f = this.fishing;
+    for (let k = 0; k < 4; k++) {
+      const x = 1 + Math.floor(Math.random() * (w.w - 2));
+      const sky = w.skyline[x];
+      if (winter) {
+        // the top of a meadow pond's open water
+        if (w.get(x, sky - 1) !== B.WATER) continue;
+        let t = sky - 1;
+        while (t > 0 && w.get(x, t - 1) === B.WATER) t--;
+        if (w.get(x, t - 1) !== B.AIR || t > w.surface[x] + 4) continue;
+        // not under your feet, nor where your bobber floats
+        if (Math.abs(x - ptx) <= 1 && Math.abs(t - pty) <= 2) continue;
+        if (f && f.state !== 'fly' && Math.floor(f.x / TILE) === x) continue;
+        if (!night && Math.random() > 0.35) continue;
+        w.set(x, t, B.ICE);
+        this.waterQ.delete(w.idx(x, t));
+      } else if (w.get(x, sky) === B.ICE) {
+        w.set(x, sky, B.WATER);
+        this.wakeWater(x, sky);
+      }
+    }
   }
 
   /** winter: out in the open at night (or in falling snow) with no fire, the cold gets into you */
