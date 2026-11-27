@@ -4765,7 +4765,7 @@ export class Game {
           if (b === B.WATER) {
             seen.add(j);
             q.push(j);
-          } else if (!BLOCKS[b].solid) sealed = false;
+          } else if (!BLOCKS[b].solid || b === B.ICE) sealed = false;
         }
       }
       if (seen.size >= 160) sealed = false;
@@ -5490,6 +5490,8 @@ export class Game {
 
   /** are you in a closed room? (a flood fill: twice a second is plenty) */
   inRoom(tx: number, fy: number): boolean {
+    // under the water (under a frozen pond, say) is not a room, whatever closes it over
+    if (BLOCKS[this.world.get(tx, Math.floor((this.player.y + 4) / TILE))].liquid) return false;
     const key = tx * 10000 + fy;
     if (key !== this.shelterNote.key || this.time - this.shelterNote.t > 0.5) this.shelterNote = { key, t: this.time, room: !!roomAt(this.world, tx, fy) };
     return this.shelterNote.room;
@@ -5548,16 +5550,23 @@ export class Game {
         if (w.get(x, sky - 1) !== B.WATER) continue;
         let t = sky - 1;
         while (t > 0 && w.get(x, t - 1) === B.WATER) t--;
-        if (w.get(x, t - 1) !== B.AIR || t > w.surface[x] + 4) continue;
+        if (w.get(x, t - 1) !== B.AIR || Math.abs(t - w.surface[x]) > 4) continue;
         // not under your feet, nor where your bobber floats
-        if (Math.abs(x - ptx) <= 1 && Math.abs(t - pty) <= 2) continue;
+        if (Math.abs(x - ptx) <= 1 && pty >= t - 2 && Math.floor(pl.y / TILE) <= t + 4) continue;
         if (f && f.state !== 'fly' && Math.floor(f.x / TILE) === x) continue;
         if (!night && Math.random() > 0.35) continue;
         w.set(x, t, B.ICE);
         this.waterQ.delete(w.idx(x, t));
-      } else if (w.get(x, sky) === B.ICE) {
-        w.set(x, sky, B.WATER);
-        this.wakeWater(x, sky);
+      } else {
+        // ice only ever forms near the meadow's ground line, so look there, not just at the skyline:
+        // something built over the pond would hide it from the sky
+        const s0 = w.surface[x];
+        for (let y = Math.max(1, s0 - 4); y <= s0 + 4; y++) {
+          if (w.get(x, y) !== B.ICE) continue;
+          w.set(x, y, B.WATER);
+          this.wakeWater(x, y);
+          this.loosenAround(x, y);
+        }
       }
     }
   }
